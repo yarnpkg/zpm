@@ -20,6 +20,31 @@ async function readLockfile(path: PortablePath) {
   return await xfs.readJsonPromise(ppath.join(path, Filename.lockfile));
 }
 
+function isWorkspaceEntry(entry: any) {
+  return /^(?:@[^/]+\/)?[^@]+@workspace:/.test(entry.resolution.resolution);
+}
+
+function getWorkspaceEntries(lockfile: any) {
+  return Object.fromEntries(Object.entries<any>(lockfile.entries).filter(([, entry]) => isWorkspaceEntry(entry)));
+}
+
+// Lockfiles generated before the workspaces got stored like the other
+// packages only had a hash of the dependencies of each workspace
+function toLegacyLockfile(lockfile: any) {
+  const workspaces = Object.values<any>(getWorkspaceEntries(lockfile))
+    .map(entry => entry.resolution.resolution.replace(/@workspace:.*/, ``))
+    .sort();
+
+  return {
+    ...lockfile,
+    project: {
+      ...lockfile.project,
+      workspaces: Object.fromEntries(workspaces.map(name => [name, `786a02f742015903c6c6fd852552d272912f4740e15847618a86e217f71f5419d25e1031afee585313896444934eb04b903a685b1448b755d56f701afe9be2ce`])),
+    },
+    entries: Object.fromEntries(Object.entries<any>(lockfile.entries).filter(([, entry]) => !isWorkspaceEntry(entry))),
+  };
+}
+
 async function commit(path: PortablePath, message: string) {
   await exec.execFile(`git`, [`add`, `-A`], {cwd: path});
   await exec.execFile(`git`, [`commit`, `-m`, message], {cwd: path});
@@ -62,9 +87,13 @@ describe(`Features`, () => {
   describe(`Workspace change detection`, () => {
     describe(`Lockfile`, () => {
       test(
-        `it should store the workspace hashes within the project section`,
+        `it should store the workspaces like any other package`,
         makeMonorepoEnv(async ({path, run}) => {
-          await writeWorkspace(path, `workspace-a`, {dependencies: {[`no-deps`]: `1.0.0`}});
+          await writeWorkspace(path, `workspace-a`, {
+            dependencies: {[`no-deps`]: `1.0.0`},
+            devDependencies: {[`workspace-b`]: `workspace:^`},
+          });
+
           await writeWorkspace(path, `workspace-b`);
 
           await run(`install`);
@@ -74,22 +103,106 @@ describe(`Features`, () => {
           expect(lockfile).not.toHaveProperty(`workspaces`);
 
           // The catalogs, overrides, and extensions are only there when the project has some
-          expect(Object.keys(lockfile.project)).toEqual([`workspaces`]);
+          expect(lockfile).not.toHaveProperty(`project`);
 
-          expect(Object.keys(lockfile.project.workspaces)).toEqual([
-            `root-workspace`,
-            `workspace-a`,
-            `workspace-b`,
+          expect(Object.keys(lockfile.entries)).toEqual([
+            `no-deps@npm:1.0.0`,
+            `root-workspace@workspace:^`,
+            `workspace-a@workspace:^`,
+            `workspace-b@workspace:^`,
           ]);
 
-          // Neither of those workspaces has any dependency
-          expect(lockfile.project.workspaces[`workspace-b`]).toEqual(lockfile.project.workspaces[`root-workspace`]);
-          expect(lockfile.project.workspaces[`workspace-a`]).not.toEqual(lockfile.project.workspaces[`workspace-b`]);
+          // The dependencies are stored as declared in the manifest
+          expect(lockfile.entries[`workspace-a@workspace:^`]).toEqual({
+            checksum: null,
+            resolution: {
+              resolution: `workspace-a@workspace:workspace-a`,
+              version: `1.0.0`,
+              dependencies: {
+                [`no-deps`]: `1.0.0`,
+                [`workspace-b`]: `workspace:^`,
+              },
+            },
+          });
+
+          await xfs.removePromise(ppath.join(path, `.yarn/ignore` as PortablePath));
+          await run(`install`, `--immutable`);
         }),
       );
 
       test(
-        `it shouldn't update the workspace hashes when only transitive dependencies change`,
+        `it should store the workspaces regardless of the range that led to them`,
+        makeMonorepoEnv(async ({path, run}) => {
+          await writeWorkspace(path, `workspace-a`, {dependencies: {[`workspace-b`]: `^1.0.0`}});
+          await writeWorkspace(path, `workspace-b`);
+
+          await yarn.writeConfiguration(path, {enableTransparentWorkspaces: true});
+
+          await run(`install`);
+
+          const lockfile = await readLockfile(path);
+
+          expect(Object.keys(lockfile.entries)).toEqual([
+            `root-workspace@workspace:^`,
+            `workspace-a@workspace:^`,
+            `workspace-b@npm:^1.0.0, workspace-b@workspace:^`,
+          ]);
+
+          // Workspaces are always resolved from the project; installs must
+          // never reuse the lockfile entry once the workspace changed
+          await writeWorkspace(path, `workspace-b`, {version: `1.1.0`, dependencies: {[`no-deps`]: `1.0.0`}});
+          await run(`install`);
+
+          const updated = await readLockfile(path);
+
+          expect(updated.entries[`workspace-b@npm:^1.0.0, workspace-b@workspace:^`].resolution).toEqual({
+            resolution: `workspace-b@workspace:workspace-b`,
+            version: `1.1.0`,
+            dependencies: {[`no-deps`]: `1.0.0`},
+          });
+        }),
+      );
+
+      test(
+        `it shouldn't conflict when two branches change the dependencies of different workspaces`,
+        makeMonorepoEnv(async ({path, run}) => {
+          await writeWorkspace(path, `workspace-a`);
+          await writeWorkspace(path, `workspace-b`);
+
+          // Gives some room between the entries that each branch adds
+          await writeWorkspace(path, `workspace-c`, {dependencies: {[`left-pad`]: `1.0.0`}});
+
+          await run(`install`);
+          await initRepository(path);
+
+          const {stdout: base} = await exec.execFile(`git`, [`rev-parse`, `--abbrev-ref`, `HEAD`], {cwd: path});
+
+          await exec.execFile(`git`, [`checkout`, `-b`, `branch-a`], {cwd: path});
+          await writeWorkspace(path, `workspace-a`, {dependencies: {[`no-deps`]: `1.0.0`}});
+          await run(`install`);
+          await commit(path, `Add no-deps to workspace-a`);
+
+          await exec.execFile(`git`, [`checkout`, base.trim()], {cwd: path});
+          await exec.execFile(`git`, [`checkout`, `-b`, `branch-b`], {cwd: path});
+          await writeWorkspace(path, `workspace-b`, {dependencies: {[`is-number`]: `1.0.0`}});
+          await run(`install`);
+          await commit(path, `Add is-number to workspace-b`);
+
+          await exec.execFile(`git`, [`merge`, `branch-a`, `-m`, `Merge branch-a`], {cwd: path});
+
+          const lockfile = await readLockfile(path);
+
+          expect(lockfile.entries[`workspace-a@workspace:^`].resolution.dependencies).toEqual({[`no-deps`]: `1.0.0`});
+          expect(lockfile.entries[`workspace-b@workspace:^`].resolution.dependencies).toEqual({[`is-number`]: `1.0.0`});
+
+          // The merged lockfile is exactly what an install would generate
+          await xfs.removePromise(ppath.join(path, `.yarn/ignore` as PortablePath));
+          await run(`install`, `--immutable`);
+        }),
+      );
+
+      test(
+        `it shouldn't update the workspace entries when only transitive dependencies change`,
         makeMonorepoEnv(async ({path, run}) => {
           await writeWorkspace(path, `workspace-a`, {dependencies: {[`one-range-dep`]: `1.0.0`}});
 
@@ -107,12 +220,12 @@ describe(`Features`, () => {
           const after = await readLockfile(path);
           expect(after.entries[`no-deps@npm:^1.0.0`].resolution.resolution).toEqual(`no-deps@npm:1.1.0`);
 
-          expect(after.project).toEqual(before.project);
+          expect(getWorkspaceEntries(after)).toEqual(getWorkspaceEntries(before));
         }),
       );
 
       test(
-        `it should update the workspace hashes when their dependencies change`,
+        `it should only update the entries of the workspaces whose dependencies change`,
         makeMonorepoEnv(async ({path, run}) => {
           await writeWorkspace(path, `workspace-a`, {dependencies: {[`no-deps`]: `1.0.0`}});
           await writeWorkspace(path, `workspace-b`, {dependencies: {[`no-deps`]: `1.0.0`}});
@@ -125,13 +238,13 @@ describe(`Features`, () => {
           await run(`install`);
           const after = await readLockfile(path);
 
-          expect(after.project.workspaces[`workspace-a`]).not.toEqual(before.project.workspaces[`workspace-a`]);
-          expect(after.project.workspaces[`workspace-b`]).toEqual(before.project.workspaces[`workspace-b`]);
+          expect(after.entries[`workspace-a@workspace:^`]).not.toEqual(before.entries[`workspace-a@workspace:^`]);
+          expect(after.entries[`workspace-b@workspace:^`]).toEqual(before.entries[`workspace-b@workspace:^`]);
         }),
       );
 
       test(
-        `it should update the workspace hashes when the catalog entries they reference change`,
+        `it shouldn't update the workspace entries when the catalog entries they reference change`,
         makeMonorepoEnv(async ({path, run}) => {
           await writeWorkspace(path, `workspace-a`, {dependencies: {[`no-deps`]: `catalog:`}});
           await writeWorkspace(path, `workspace-b`, {dependencies: {[`no-deps`]: `1.0.0`}});
@@ -141,21 +254,23 @@ describe(`Features`, () => {
           await run(`install`);
           const before = await readLockfile(path);
 
-          // Once normalized, both workspaces have the exact same dependencies
-          expect(before.project.workspaces[`workspace-a`]).toEqual(before.project.workspaces[`workspace-b`]);
+          // The workspace entries store the dependencies as declared; the
+          // catalog entries they reference are stored on the side
+          expect(before.entries[`workspace-a@workspace:^`].resolution.dependencies).toEqual({[`no-deps`]: `catalog:`});
+          expect(before.project.catalogs).toEqual({default: {[`no-deps`]: `1.0.0`}});
 
           await yarn.writeConfiguration(path, {catalog: {[`no-deps`]: `2.0.0`}});
 
           await run(`install`);
           const after = await readLockfile(path);
 
-          expect(after.project.workspaces[`workspace-a`]).not.toEqual(before.project.workspaces[`workspace-a`]);
-          expect(after.project.workspaces[`workspace-b`]).toEqual(before.project.workspaces[`workspace-b`]);
+          expect(after.project.catalogs).toEqual({default: {[`no-deps`]: `2.0.0`}});
+          expect(getWorkspaceEntries(after)).toEqual(getWorkspaceEntries(before));
         }),
       );
 
       test(
-        `it should store the transient resolutions, but not the workspaces`,
+        `it should store the transient resolutions and the workspaces`,
         makeMonorepoEnv(async ({path, run}) => {
           await xfs.mkdirpPromise(ppath.join(path, `vendor/portal` as PortablePath));
           await xfs.writeJsonPromise(ppath.join(path, `vendor/portal/package.json` as PortablePath), {
@@ -191,6 +306,10 @@ describe(`Features`, () => {
             `link@link:../../vendor/link::parent=workspace-a@workspace:workspace-a`,
             `no-deps@npm:1.0.0`,
             `portal@portal:../../vendor/portal::parent=workspace-a@workspace:workspace-a`,
+            `root-workspace@workspace:^`,
+            `workspace-a@workspace:^`,
+            `workspace-b@workspace:^`,
+            `workspace-c@npm:^1.0.0, workspace-c@workspace:^`,
           ]);
 
           // The lockfile must remain stable despite the transient entries
@@ -271,7 +390,7 @@ describe(`Features`, () => {
             .filter((protocol, index, list) => list.indexOf(protocol) === index)
             .sort();
 
-          expect(protocols).toEqual([`exec`, `file`, `link`, `npm`, `patch`, `portal`]);
+          expect(protocols).toEqual([`exec`, `file`, `link`, `npm`, `patch`, `portal`, `workspace`]);
 
           // Reading the lockfile back has to yield the very same one
           await xfs.removePromise(ppath.join(path, `.yarn/ignore` as PortablePath));
@@ -529,7 +648,6 @@ describe(`Features`, () => {
 
           const lockfile = await readLockfile(path);
           expect(lockfile.project).toEqual({
-            workspaces: expect.anything(),
             catalogs: {default: {[`no-deps`]: `1.0.0`}},
           });
 
@@ -566,29 +684,23 @@ describe(`Features`, () => {
             await run(`install`);
           });
 
-          const {project, ...lockfile} = await readLockfile(path);
+          const lockfile = await readLockfile(path);
 
-          await xfs.writeJsonPromise(ppath.join(path, Filename.lockfile), {
-            ...lockfile,
-            workspaces: project.workspaces,
+          await xfs.writeJsonPromise(ppath.join(path, Filename.lockfile), toLegacyLockfile(lockfile));
+
+          await setPackageWhitelist(new Map([[`no-deps`, new Set([`1.0.0`, `1.1.0`])]]), async () => {
+            await run(`install`);
           });
 
-          await run(`install`);
-
-          const migrated = await readLockfile(path);
-
-          expect(migrated).not.toHaveProperty(`workspaces`);
-          expect(migrated.project).toEqual(project);
-
           // The locked resolutions must have been preserved
-          expect(migrated.entries[`no-deps@npm:^1.0.0`].resolution.resolution).toEqual(`no-deps@npm:1.0.0`);
+          await expect(readLockfile(path)).resolves.toEqual(lockfile);
         }),
       );
     });
 
     describe(`Tree hashes`, () => {
       test(
-        `it should cover the whole dependency tree, unlike the hashes from the lockfile`,
+        `it should cover the whole dependency tree, unlike the workspace entries from the lockfile`,
         makeMonorepoEnv(async ({path, run}) => {
           await writeWorkspace(path, `workspace-a`, {dependencies: {[`one-range-dep`]: `1.0.0`}});
           await writeWorkspace(path, `workspace-b`, {dependencies: {[`workspace-a`]: `workspace:^`}});
@@ -608,7 +720,7 @@ describe(`Features`, () => {
           const after = await getTreeHashes(run);
           const lockfileAfter = await readLockfile(path);
 
-          expect(lockfileAfter.project).toEqual(lockfileBefore.project);
+          expect(getWorkspaceEntries(lockfileAfter)).toEqual(getWorkspaceEntries(lockfileBefore));
 
           expect(after[`workspace-a`]).not.toEqual(before[`workspace-a`]);
           expect(after[`workspace-b`]).not.toEqual(before[`workspace-b`]);
@@ -1003,22 +1115,44 @@ describe(`Features`, () => {
 
           await run(`install`);
 
-          const {project, ...lockfile} = await readLockfile(path);
-
-          await xfs.writeJsonPromise(ppath.join(path, Filename.lockfile), {
-            ...lockfile,
-            workspaces: project.workspaces,
-          });
+          const lockfile = await readLockfile(path);
+          await xfs.writeJsonPromise(ppath.join(path, Filename.lockfile), toLegacyLockfile(lockfile));
 
           await initRepository(path);
           await run(`install`);
 
-          // The hashes from the base lockfile have different semantics, so we
-          // can't tell what changed; better be safe than sorry
+          // The base lockfile doesn't describe the workspaces, so we can't
+          // tell what changed; better be safe than sorry
           await expect(getChangedWorkspaces(run)).resolves.toEqual([
             `root-workspace`,
             `workspace-a`,
             `workspace-b`,
+          ]);
+        }),
+      );
+
+      test(
+        `it should report the dependents of a workspace whose lockfile entry is stale`,
+        makeMonorepoEnv(async ({path, run}) => {
+          await writeWorkspace(path, `workspace-a`, {dependencies: {[`no-deps`]: `1.0.0`}});
+          await writeWorkspace(path, `workspace-b`, {dependencies: {[`workspace-a`]: `workspace:^`}});
+          await writeWorkspace(path, `workspace-c`, {dependencies: {[`no-deps`]: `1.0.0`}});
+          await writeWorkspace(path, `workspace-d`);
+
+          await run(`install`);
+          await initRepository(path);
+
+          // The lockfile changes because of workspace-c ...
+          await writeWorkspace(path, `workspace-c`, {dependencies: {[`no-deps`]: `2.0.0`}});
+          await run(`install`);
+
+          // ... but nobody ran an install after changing workspace-a
+          await writeWorkspace(path, `workspace-a`, {dependencies: {[`no-deps`]: `1.0.0`, [`is-number`]: `1.0.0`}});
+
+          await expect(getChangedWorkspaces(run)).resolves.toEqual([
+            `workspace-a`,
+            `workspace-b`,
+            `workspace-c`,
           ]);
         }),
       );
