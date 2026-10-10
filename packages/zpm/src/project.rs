@@ -1479,9 +1479,16 @@ impl Project {
             self.local_cache_path().fs_exists()
         };
 
+        // After a production install, the user explicitly asked to leave
+        // devDependencies out; don't undo that by extending the install
+        let production
+            = self.install_state.as_ref().is_some_and(|install_state| install_state.production);
+        let include_dev_dependencies
+            = !production;
+
         let required_workspaces
             = self.try_workspace_by_rel_path(&self.package_cwd)?
-                .map(|workspace| self.workspace_dependency_closure([workspace.name.clone()], true))
+                .map(|workspace| self.workspace_dependency_closure([workspace.name.clone()], include_dev_dependencies))
                 .transpose()?;
 
         if cache_exists {
@@ -1521,7 +1528,7 @@ impl Project {
                             .chain(required_workspaces.iter())
                             .cloned();
 
-                        Some(self.workspace_dependency_closure(roots, true)?)
+                        Some(self.workspace_dependency_closure(roots, include_dev_dependencies)?)
                     } else {
                         None
                     }
@@ -1535,7 +1542,7 @@ impl Project {
             check_checksums: false,
             check_resolutions: false,
             enforced_resolutions: BTreeMap::new(),
-            prune_dev_dependencies: false,
+            prune_dev_dependencies: production,
             refresh_lockfile: false,
             silent_or_error: true,
             mode: None,

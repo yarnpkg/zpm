@@ -201,6 +201,67 @@ describe(`Features`, () => {
     );
 
     test(
+      `it should not run install after a production focused install`,
+      makeTemporaryEnv({}, async ({path, run}) => {
+        await setupMonorepo(path);
+
+        // A devDependency on another workspace: production installs leave it out
+        await xfs.writeJsonPromise(ppath.join(path, `packages/foo/package.json` as PortablePath), {
+          name: `foo`,
+          dependencies: {
+            [`no-deps`]: `1.0.0`,
+          },
+          devDependencies: {
+            [`bar`]: `workspace:*`,
+          },
+        });
+
+        await run(`install`);
+        await run(`workspaces`, `focus`, `foo`, `--production`, {cwd: ppath.join(path, `packages/foo` as PortablePath)});
+
+        const installStatePath = ppath.join(path, `.yarn/ignore/install` as PortablePath);
+        const stateBefore = await xfs.statPromise(installStatePath);
+
+        await new Promise(resolve => setTimeout(resolve, 10));
+
+        await run(`node`, `-e`, `require('no-deps')`, {
+          cwd: ppath.join(path, `packages/foo` as PortablePath),
+        });
+
+        const stateAfter = await xfs.statPromise(installStatePath);
+        expect(stateAfter.mtimeMs).toEqual(stateBefore.mtimeMs);
+      }),
+    );
+
+    test(
+      `it should keep devDependencies out when a production focused install gets extended`,
+      makeTemporaryEnv({}, async ({path, run}) => {
+        await setupMonorepo(path);
+
+        await xfs.writeJsonPromise(ppath.join(path, `packages/foo/package.json` as PortablePath), {
+          name: `foo`,
+          dependencies: {
+            [`no-deps`]: `1.0.0`,
+          },
+          devDependencies: {
+            [`one-fixed-dep`]: `1.0.0`,
+          },
+        });
+
+        await run(`install`);
+        await run(`workspaces`, `focus`, `foo`, `--production`, {cwd: ppath.join(path, `packages/foo` as PortablePath)});
+
+        // A command from another workspace extends the focused install
+        await run(`node`, `-e`, `require('no-deps')`, {
+          cwd: ppath.join(path, `packages/bar` as PortablePath),
+        });
+
+        const pnp = await xfs.readFilePromise(ppath.join(path, `.pnp.cjs` as PortablePath), `utf8`);
+        expect(pnp).not.toContain(`one-fixed-dep`);
+      }),
+    );
+
+    test(
       `it should extend a focused install when the active workspace is missing and the lockfile is fresh`,
       makeTemporaryEnv({}, async ({path, run, source}) => {
         await setupMonorepo(path);
