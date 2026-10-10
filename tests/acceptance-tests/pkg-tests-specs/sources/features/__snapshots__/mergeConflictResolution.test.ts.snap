@@ -3,7 +3,7 @@
 exports[`Features Merge Conflict Resolution it shouldn't re-fetch the lockfile metadata when performing simple merge conflict resolutions 1`] = `
 "{
   "__metadata": {
-    "version": 9
+    "version": 10
   },
   "entries": {
     "no-deps@npm:*": {

@@ -12,7 +12,7 @@ use crate::{
     error::Error, http_npm, install::{DependencyNormalizer, InstallContext, normalize_resolutions_with}, manifest::resolutions::ResolutionsField, npm, primitives_exts::RangeExt, project::Project, resolvers::Resolution
 };
 
-const LOCKFILE_VERSION: u64 = 9;
+const LOCKFILE_VERSION: u64 = 10;
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
@@ -820,7 +820,7 @@ mod tests {
 
     const LOCKFILE: &str = r#"{
   "__metadata": {
-    "version": 9
+    "version": 10
   },
   "project": {
     "catalogs": {
