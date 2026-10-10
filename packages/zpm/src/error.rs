@@ -295,6 +295,15 @@ pub enum Error {
     #[error("Failed to read pnpm node_modules directory")]
     PnpmNodeModulesReadError,
 
+    #[error("An error occured while parsing the pnpm lockfile: {0}")]
+    PnpmLockfileParseError(Arc<serde_yaml::Error>),
+
+    #[error("Unsupported pnpm lockfile version ({0}); only versions 6 and 9 can be imported")]
+    UnsupportedPnpmLockfileVersion(String),
+
+    #[error("No pnpm lockfile found at {}", .0.to_print_string())]
+    PnpmLockfileNotFound(Path),
+
     #[error("An error occured while parsing your configuration: {0}")]
     ConfigurationParseError(Arc<dyn std::error::Error + Send + Sync>),
 

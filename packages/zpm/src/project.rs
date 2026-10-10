@@ -25,6 +25,8 @@ use crate::{
     manifest::{Manifest, helpers::read_manifest_with_size},
     manifest_finder::CachedManifestFinder,
     npm::NpmEntryExt,
+    pnpm_lockfile::{PNPM_LOCKFILE_NAME, preferred_versions_from_pnpm_lockfile},
+    preferred_versions::PreferredVersions,
     primitives_exts::RangeExt,
     report::{StreamReport, StreamReportConfig, async_section, current_report, with_report_result},
     resolvers::workspace::resolve_locator_ident,
@@ -130,6 +132,14 @@ pub struct RunInstallOptions {
     pub json: bool,
     pub inline_builds: bool,
     pub force: bool,
+
+    /// Versions to prefer when resolving dependencies; when not set, they
+    /// get imported from `pnpm-lock.yaml` if the project has no lockfile
+    pub preferred_versions: Option<Arc<PreferredVersions>>,
+
+    /// Ignore the current lockfile, typically to resolve everything again
+    /// from the preferred versions
+    pub discard_lockfile: bool,
 }
 
 pub struct Project {
@@ -385,12 +395,15 @@ impl Project {
 
     fn lockfile_from(lockfile_path: &Path, config: &Configuration) -> Result<Lockfile, Error> {
         if !lockfile_path.fs_exists() {
-            // Check for pnpm node_modules in the same directory
+            // Check for pnpm node_modules in the same directory; we don't
+            // need it when pnpm's lockfile is around, as we import it instead
             if let Some(project_cwd) = lockfile_path.dirname() {
                 let pnpm_dir
                     = project_cwd.with_join_str("node_modules/.pnpm");
+                let pnpm_lockfile_path
+                    = project_cwd.with_join_str(PNPM_LOCKFILE_NAME);
 
-                if pnpm_dir.fs_exists() {
+                if pnpm_dir.fs_exists() && !pnpm_lockfile_path.fs_exists() {
                     return from_pnpm_node_modules(&project_cwd, config);
                 }
             }
@@ -414,6 +427,49 @@ impl Project {
                 .map_err(|e| Error::LockfileParseError(e))?;
 
         Ok(lockfile)
+    }
+
+    pub fn pnpm_lockfile_path(&self) -> Path {
+        self.project_cwd.with_join_str(PNPM_LOCKFILE_NAME)
+    }
+
+    /**
+     * Reads the versions locked by a `pnpm-lock.yaml` file.
+     */
+    pub fn preferred_versions_from_pnpm(&self, pnpm_lockfile_path: &Path) -> Result<PreferredVersions, Error> {
+        let src = match pnpm_lockfile_path.fs_read_text() {
+            Ok(src) => src,
+            Err(err) if err.io_kind() == Some(ErrorKind::NotFound) => return Err(Error::PnpmLockfileNotFound(pnpm_lockfile_path.clone())),
+            Err(err) => return Err(err.into()),
+        };
+
+        preferred_versions_from_pnpm_lockfile(&src)
+    }
+
+    /**
+     * Projects migrating from pnpm don't have a Yarn lockfile yet; to avoid
+     * upgrading their whole dependency tree on the first install we import
+     * the versions pnpm locked. Once the Yarn lockfile is written it takes
+     * over, so this only ever happens once.
+     */
+    fn detect_preferred_versions(&self) -> Result<Option<PreferredVersions>, Error> {
+        let has_lockfile = self.lockfile_path()
+            .fs_read()
+            .ok_missing()?
+            .is_some_and(|content| !content.is_empty());
+
+        if has_lockfile {
+            return Ok(None);
+        }
+
+        let pnpm_lockfile_path
+            = self.pnpm_lockfile_path();
+
+        if !pnpm_lockfile_path.fs_exists() {
+            return Ok(None);
+        }
+
+        Ok(Some(self.preferred_versions_from_pnpm(&pnpm_lockfile_path)?))
     }
 
     pub fn import_install_state(&mut self) -> Result<&mut Self, Error> {
@@ -1600,8 +1656,39 @@ impl Project {
             let package_cache
                 = self.package_cache()?;
 
-            let mut lockfile
-                = self.lockfile();
+            let mut lockfile = match options.discard_lockfile {
+                true => Ok(Lockfile::new()),
+                false => self.lockfile(),
+            };
+
+            let is_auto_import
+                = options.preferred_versions.is_none();
+
+            let preferred_versions = match options.preferred_versions.clone() {
+                Some(preferred_versions) => Some(preferred_versions),
+                None => self.detect_preferred_versions()?.map(Arc::new),
+            };
+
+            if let Some(preferred_versions) = &preferred_versions {
+                let report_guard = current_report().await;
+
+                if let Some(report) = report_guard.as_ref() {
+                    if is_auto_import {
+                        report.info(format!(
+                            "No {} found, but found {}; Yarn will prefer the {} versions it locks",
+                            DataType::Path.colorize(LOCKFILE_NAME),
+                            DataType::Path.colorize(PNPM_LOCKFILE_NAME),
+                            DataType::Number.colorize(&preferred_versions.package_count().to_string()),
+                        ));
+                    } else {
+                        report.info(format!(
+                            "Importing the {} versions locked by {}",
+                            DataType::Number.colorize(&preferred_versions.package_count().to_string()),
+                            DataType::Path.colorize(PNPM_LOCKFILE_NAME),
+                        ));
+                    }
+                }
+            }
 
             async_section("Project validation", async {
                 let report_guard = current_report().await;
@@ -1662,7 +1749,8 @@ impl Project {
                     .set_mode(options.mode)
                     .set_inline_builds(options.inline_builds)
                     .with_systems(Some(&systems))
-                    .with_background_writes(Some(background_writes.clone()));
+                    .with_background_writes(Some(background_writes.clone()))
+                    .with_preferred_versions(preferred_versions.clone());
 
             let roots
                 = self.workspaces.iter()

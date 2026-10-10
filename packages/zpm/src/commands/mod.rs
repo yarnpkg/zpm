@@ -22,6 +22,7 @@ mod constraints;
 mod dedupe;
 mod dlx;
 mod exec;
+mod import_pnpm;
 mod explain;
 mod info;
 mod init;
@@ -108,6 +109,7 @@ pub enum YarnCli {
     Dlx(dlx::Dlx),
     Exec(exec::Exec),
     ExplainPeerRequirements(explain::peer_requirements::ExplainPeerRequirements),
+    ImportPnpm(import_pnpm::ImportPnpm),
     Info(info::Info),
     InitWithTemplate(init::InitWithTemplate),
     Init(init::Init),
