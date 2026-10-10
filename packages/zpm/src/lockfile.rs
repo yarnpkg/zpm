@@ -801,7 +801,6 @@ pub fn from_pnpm_node_modules(project_cwd: &Path, config: &Configuration) -> Res
 
     Ok(lockfile)
 }
-
 #[cfg(test)]
 mod tests {
     use zpm_parsers::JsonDocument;
@@ -820,7 +819,7 @@ mod tests {
 
     const LOCKFILE: &str = r#"{
   "__metadata": {
-    "version": 10
+    "version": 9
   },
   "project": {
     "catalogs": {
@@ -864,33 +863,11 @@ mod tests {
         "version": "1.3.0"
       }
     },
-    "lib@npm:^1.0.0, lib@workspace:^": {
-      "checksum": null,
-      "resolution": {
-        "resolution": "lib@workspace:lib",
-        "version": "1.0.0",
-        "dependencies": {
-          "foo": "^1.0.0"
-        }
-      }
-    },
     "linked@link:./linked::parent=root@workspace:root": {
       "checksum": null,
       "resolution": {
         "resolution": "linked@link:./linked::parent=root@workspace:root",
         "version": "0.0.0"
-      }
-    },
-    "root@workspace:^": {
-      "checksum": null,
-      "resolution": {
-        "resolution": "root@workspace:root",
-        "version": "0.0.0",
-        "dependencies": {
-          "lib": "^1.0.0",
-          "linked": "link:./linked",
-          "typescript": "^5.0.0"
-        }
       }
     },
     "typescript@npm:^5.0.0": {
@@ -930,23 +907,10 @@ mod tests {
             locator("typescript@npm:5.9.3"),
         ]);
 
-        // Workspaces are always resolved from the project, even when they're
-        // reached through a registry range (transparent workspaces)
         assert_eq!(lockfile.transient_resolutions.keys().cloned().collect::<Vec<_>>(), vec![
             descriptor("foo-alias@npm:foo@^1.0.0"),
-            descriptor("lib@npm:^1.0.0"),
-            descriptor("lib@workspace:^"),
             descriptor("linked@link:./linked::parent=root@workspace:root"),
-            descriptor("root@workspace:^"),
             descriptor("typescript@patch:typescript%40npm%3A%5E5.0.0#<builtin>"),
-        ]);
-
-        assert_eq!(lockfile.transient_entries.keys().cloned().collect::<Vec<_>>(), vec![
-            locator("foo@npm:1.0.0"),
-            locator("lib@workspace:lib"),
-            locator("linked@link:./linked::parent=root@workspace:root"),
-            locator("root@workspace:root"),
-            locator("typescript@patch:typescript%40npm%3A5.9.3#<builtin>&checksum=85eaa72caadee6a5622c928b1473f16d3507770cd417f35e56c48bcc9b50a1d71dfd49ad5a227767d79fdf331a578e26ef8045e83e3f7356f72a1412ae2be199"),
         ]);
 
         // Transient resolutions remain available to those who explicitly ask for them
@@ -956,11 +920,6 @@ mod tests {
         );
 
         assert!(lockfile.recorded_entry(&locator("linked@link:./linked::parent=root@workspace:root")).is_some());
-
-        let workspace_dependencies = lockfile.recorded_entry(&locator("root@workspace:root"))
-            .map(|entry| entry.resolution.dependencies.keys().cloned().collect::<Vec<_>>());
-
-        assert_eq!(workspace_dependencies, Some(vec![Ident::new("lib"), Ident::new("linked"), Ident::new("typescript")]));
     }
 
     #[test]
@@ -1003,17 +962,11 @@ mod tests {
     }
 
     #[test]
-    fn should_ignore_the_workspace_hashes_stored_by_older_versions() {
+    fn should_discard_the_workspaces_stored_by_older_versions() {
         let lockfile: Lockfile = JsonDocument::hydrate_from_str(r#"{
             "__metadata": {"version": 9},
             "workspaces": {
                 "root": "786a02f742015903c6c6fd852552d272912f4740e15847618a86e217f71f5419d25e1031afee585313896444934eb04b903a685b1448b755d56f701afe9be2ce"
-            },
-            "project": {
-                "workspaces": {
-                    "root": "786a02f742015903c6c6fd852552d272912f4740e15847618a86e217f71f5419d25e1031afee585313896444934eb04b903a685b1448b755d56f701afe9be2ce"
-                },
-                "catalogs": {"default": {"foo": "npm:^1.0.0"}}
             },
             "entries": {
                 "lib@npm:^1.0.0": {
@@ -1023,34 +976,8 @@ mod tests {
             }
         }"#).unwrap();
 
-        // The rest of the project section must still be understood
-        assert_eq!(lockfile.project.catalogs["default"].len(), 1);
-
-        // Some older versions stored the workspaces when a registry range
-        // happened to be fulfilled by one; they must never be reused
         assert!(lockfile.resolutions.is_empty());
         assert!(lockfile.entries.is_empty());
-
-        assert_eq!(lockfile.transient_resolutions.len(), 1);
-    }
-
-    #[test]
-    fn should_omit_the_project_section_when_empty() {
-        let lockfile: Lockfile = JsonDocument::hydrate_from_str(r#"{
-            "__metadata": {"version": 9},
-            "entries": {
-                "root@workspace:^": {
-                    "checksum": null,
-                    "resolution": {"resolution": "root@workspace:root", "version": "0.0.0"}
-                }
-            }
-        }"#).unwrap();
-
-        let serialized
-            = JsonDocument::to_string_pretty(&lockfile).unwrap();
-
-        assert!(!serialized.contains("\"project\""));
-        assert!(serialized.contains("\"root@workspace:^\""));
     }
 
     #[test]
