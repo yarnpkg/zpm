@@ -6,14 +6,14 @@ use futures::future::{BoxFuture, FutureExt};
 use futures::stream::{FuturesUnordered, StreamExt};
 use rayon::iter::{IntoParallelIterator, ParallelIterator};
 use zpm_config::PackageExtension;
-use zpm_primitives::{Descriptor, GitRange, Ident, Locator, PatchRange, PeerRange, Range, Reference, RegistrySemverRange, RegistryTagRange, SemverDescriptor, SemverPeerRange, WorkspaceIdentRange};
+use zpm_primitives::{Descriptor, GitRange, Ident, Locator, PatchRange, PeerRange, Range, Reference, RegistrySemverRange, RegistryTagRange, SemverDescriptor, SemverPeerRange, WorkspaceIdentRange, WorkspaceIdentReference};
 use zpm_utils::{DataType, Hash64, IoResultExt, Path, SystemSet, ToHumanString, UrlEncoded};
 use rkyv::Archive;
 use serde::{Deserialize, Serialize};
 use zpm_utils::{FromFileString, ToFileString};
 
 use crate::{
-    build, cache::CompositeCache, constraints::check_constraints, content_flags::ContentFlags, error::Error, fetchers::{PackageData, SyncFetchAttempt, fetch_locator, patch::has_builtin_patch, try_fetch_locator_sync}, graph::WaitMap, http_npm, linker, lockfile::{Lockfile, LockfileCatalogs, LockfileEntry, LockfileMetadata, LockfilePackageExtension, LockfileProject, catalogs_from_config}, manifest::resolutions::{ResolutionSelector, ResolutionsField}, primitives_exts::{InnerDependencyKind, RangeExt}, project::{InstallMode, Project}, report::{self, ReportContext, async_section, current_report, with_context_result}, resolvers::{Resolution, SyncResolutionAttempt, catalog::{catalog_name, lookup_catalog_entry_in}, resolve_descriptor, resolve_locator, try_resolve_descriptor_sync}, tree_resolver::{ResolutionTree, TreeResolver}
+    build, cache::CompositeCache, constraints::check_constraints, content_flags::ContentFlags, error::Error, fetchers::{PackageData, SyncFetchAttempt, fetch_locator, patch::has_builtin_patch, try_fetch_locator_sync}, graph::WaitMap, http_npm, linker, lockfile::{Lockfile, LockfileCatalogs, LockfileEntry, LockfileMetadata, LockfilePackageExtension, LockfileProject, catalogs_from_config}, manifest::resolutions::{ResolutionSelector, ResolutionsField}, primitives_exts::{InnerDependencyKind, RangeExt}, project::{InstallMode, Project}, report::{self, ReportContext, async_section, current_report, with_context_result}, resolvers::{Resolution, SyncResolutionAttempt, catalog::{catalog_name, lookup_catalog_entry_in}, resolve_descriptor, resolve_locator, try_resolve_descriptor_sync, workspace::resolve_locator_ident}, tree_resolver::{ResolutionTree, TreeResolver}
 };
 
 #[derive(Clone)]
@@ -1649,6 +1649,37 @@ impl<'a> InstallManager<'a> {
         }
 
         self.result.lockfile.resolutions = self.result.install_state.descriptor_to_locator.clone();
+
+        // The island workspaces aren't resolved like the other workspaces,
+        // but the lockfile must describe them all the same
+        if let Some(project) = self.context.project {
+            for ident in &island_workspace_idents {
+                let workspace
+                    = project.workspace_by_ident(ident)?;
+
+                let result
+                    = resolve_locator_ident(&self.context, &workspace.locator(), &WorkspaceIdentReference {ident: ident.clone()})?;
+
+                self.result.lockfile.resolutions.insert(workspace.descriptor(), workspace.locator());
+
+                // The islands don't record the descriptors their workspaces use
+                // to depend on other workspaces either
+                for descriptor in result.resolution.dependencies.values() {
+                    if !descriptor.range.is_workspace() {
+                        continue;
+                    }
+
+                    if let Some(dependency) = project.try_workspace_by_descriptor(descriptor)? {
+                        self.result.lockfile.resolutions.insert(descriptor.clone(), dependency.locator());
+                    }
+                }
+
+                self.result.lockfile.entries.insert(workspace.locator(), LockfileEntry {
+                    checksum: None,
+                    resolution: result.original_resolution,
+                });
+            }
+        }
 
         self.result.skip_build = self.context.mode == Some(InstallMode::SkipBuild);
 

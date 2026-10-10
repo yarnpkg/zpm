@@ -6,13 +6,13 @@ use serde_with::{serde_as, DefaultOnError};
 use zpm_config::Configuration;
 use zpm_parsers::JsonDocument;
 use zpm_primitives::{Descriptor, Ident, Locator, PeerRange, Range, Reference, RegistryReference, RegistrySemverRange, SemverDescriptor};
-use zpm_utils::{FromFileString, Hash64, Hash64Writer, Path, ToFileString, UrlEncoded};
+use zpm_utils::{FromFileString, Hash64, Path, ToFileString, UrlEncoded};
 
 use crate::{
     error::Error, http_npm, install::{DependencyNormalizer, InstallContext, normalize_resolutions_with}, manifest::resolutions::ResolutionsField, npm, primitives_exts::RangeExt, project::Project, resolvers::Resolution
 };
 
-const LOCKFILE_VERSION: u64 = 9;
+const LOCKFILE_VERSION: u64 = 10;
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
@@ -78,14 +78,6 @@ pub fn catalogs_from_config(catalogs: &BTreeMap<String, BTreeMap<Ident, zpm_conf
 #[serde(rename_all = "camelCase")]
 pub struct LockfileProject {
     /**
-     * Hash of the normalized dependencies of each workspace. It only covers
-     * the dependencies the workspace itself declares, not their own
-     * dependencies; those must be obtained by walking the lockfile.
-     */
-    #[serde(default)]
-    pub workspaces: BTreeMap<Ident, Hash64>,
-
-    /**
      * The entries from the `catalog` and `catalogs` settings that are
      * referenced by the project; the former is stored under the `default`
      * key, just like it is in the configuration.
@@ -112,22 +104,22 @@ pub struct LockfileProject {
 }
 
 impl LockfileProject {
+    pub fn is_empty(&self) -> bool {
+        self.catalogs.is_empty()
+            && self.dependency_overrides.is_empty()
+            && self.package_extensions.is_empty()
+    }
+
     /**
      * Snapshots the rules the given project applies on its dependency tree.
-     * We only keep those that have an actual effect on the given packages, so
-     * that the lockfile doesn't change when unrelated settings are modified.
+     * We only keep those that have an actual effect on the given packages
+     * (workspaces included), so that the lockfile doesn't change when
+     * unrelated settings are modified.
      */
     pub fn from_project<'a>(project: &Project, resolutions: impl IntoIterator<Item = &'a Resolution>) -> Result<Self, Error> {
         let context
             = InstallContext::default()
                 .with_project(Some(project));
-
-        let mut workspaces
-            = BTreeMap::new();
-
-        for (ident, dependencies) in project.workspace_dependencies_with(&context) {
-            workspaces.insert(ident, hash_workspace_dependencies(&dependencies?));
-        }
 
         let all_overrides
             = &context.dependency_overrides;
@@ -143,11 +135,7 @@ impl LockfileProject {
             let normalizer
                 = DependencyNormalizer::from_context(&context);
 
-            // The workspaces have already been accounted for when we retrieved their dependencies
-            let package_resolutions = resolutions.into_iter()
-                .filter(|resolution| !resolution.locator.reference.is_workspace_reference());
-
-            for resolution in package_resolutions {
+            for resolution in resolutions {
                 normalize_resolutions_with(&normalizer, resolution)?;
             }
         }
@@ -184,7 +172,6 @@ impl LockfileProject {
             .collect();
 
         Ok(Self {
-            workspaces,
             catalogs,
             dependency_overrides: ResolutionsField::from_entries(dependency_overrides),
             package_extensions,
@@ -193,20 +180,13 @@ impl LockfileProject {
 }
 
 /**
- * Hashes the dependencies of a workspace. They're expected to be normalized
- * (ie. to be the descriptors that get resolved rather than the ones found
- * in the manifest), so that the hash changes should a catalog be updated.
+ * Whether the given resolution must be recomputed by every install rather
+ * than be reused from the lockfile. Workspaces are always resolved from the
+ * project itself, regardless of the range that led to them (a transparent
+ * workspace can be reached through a regular registry range).
  */
-pub fn hash_workspace_dependencies(dependencies: &BTreeMap<Ident, Descriptor>) -> Hash64 {
-    let mut writer
-        = Hash64Writer::new();
-
-    for descriptor in dependencies.values() {
-        writer.update(descriptor.to_file_string());
-        writer.update([0]);
-    }
-
-    writer.finalize()
+fn is_transient_resolution(descriptor: &Descriptor, locator: &Locator) -> bool {
+    locator.reference.is_workspace_reference() || descriptor.range.details().transient_resolution
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, Archive, rkyv::Serialize, rkyv::Deserialize)]
@@ -226,10 +206,11 @@ pub struct Lockfile {
     pub entries: BTreeMap<Locator, LockfileEntry>,
 
     /**
-     * Transient resolutions are recomputed by every install, so they're kept
-     * out of the regular resolution tables to guarantee that nothing ever
-     * reuses them. They're only stored in the lockfile so that the dependency
-     * tree can be reconstructed from the lockfile alone.
+     * Transient resolutions (workspaces included) are recomputed by every
+     * install, so they're kept out of the regular resolution tables to
+     * guarantee that nothing ever reuses them. They're only stored in the
+     * lockfile so that the dependency tree can be reconstructed from the
+     * lockfile alone.
      */
     pub transient_resolutions: BTreeMap<Descriptor, Locator>,
     pub transient_entries: BTreeMap<Locator, LockfileEntry>,
@@ -275,16 +256,9 @@ impl<'de> Deserialize<'de> for Lockfile {
         lockfile.project = payload.project;
 
         for (key, entry) in payload.entries {
-            // Workspaces are always resolved from the project itself. We don't
-            // write them in the lockfile, but older versions used to when a
-            // registry range happened to be fulfilled by a workspace.
-            if entry.resolution.locator.reference.is_workspace_reference() {
-                continue;
-            }
-
             let (transient_descriptors, descriptors): (Vec<_>, Vec<_>)
                 = key.0.into_iter()
-                    .partition(|descriptor| descriptor.range.details().transient_resolution);
+                    .partition(|descriptor| is_transient_resolution(descriptor, &entry.resolution.locator));
 
             if !transient_descriptors.is_empty() {
                 for descriptor in transient_descriptors {
@@ -333,12 +307,6 @@ impl Serialize for Lockfile {
 
         let mut descriptors_to_resolutions: BTreeMap<Locator, MultiKeyLockfileEntry> = BTreeMap::new();
         for (descriptor, locator) in recorded_resolutions {
-            // Workspaces are always resolved from the project itself; we
-            // only keep track of the hash of their dependencies.
-            if locator.reference.is_workspace_reference() {
-                continue;
-            }
-
             let entry = self.recorded_entry(locator)
                 .expect("Expected a matching resolution to be found in the lockfile for any resolved locator.");
 
@@ -356,7 +324,7 @@ impl Serialize for Lockfile {
             // either: keys that are entirely transient are hydrated into the
             // side tables, which installs never look at. Keys shared with a
             // regular descriptor (an alias and its inner package) keep theirs.
-            if entry.key.0.iter().all(|descriptor| descriptor.range.details().transient_resolution) {
+            if entry.key.0.iter().all(|descriptor| is_transient_resolution(descriptor, &entry.inner.resolution.locator)) {
                 entry.inner.checksum = None;
             }
 
@@ -571,6 +539,7 @@ struct LockfilePayload {
     // The project section is only informative; should we fail to make sense
     // of it, the next install will regenerate it anyway.
     #[serde(default)]
+    #[serde(skip_serializing_if = "LockfileProject::is_empty")]
     #[serde_as(deserialize_as = "DefaultOnError")]
     project: LockfileProject,
 
@@ -832,7 +801,6 @@ pub fn from_pnpm_node_modules(project_cwd: &Path, config: &Configuration) -> Res
 
     Ok(lockfile)
 }
-
 #[cfg(test)]
 mod tests {
     use zpm_parsers::JsonDocument;
@@ -854,9 +822,6 @@ mod tests {
     "version": 9
   },
   "project": {
-    "workspaces": {
-      "root": "786a02f742015903c6c6fd852552d272912f4740e15847618a86e217f71f5419d25e1031afee585313896444934eb04b903a685b1448b755d56f701afe9be2ce"
-    },
     "catalogs": {
       "default": {
         "bar": "npm:^2.0.0"
@@ -1010,10 +975,6 @@ mod tests {
                 }
             }
         }"#).unwrap();
-
-        // The hashes older versions stored at the top-level covered the whole
-        // dependency tree, so they can't be compared with the current ones.
-        assert!(lockfile.project.workspaces.is_empty());
 
         assert!(lockfile.resolutions.is_empty());
         assert!(lockfile.entries.is_empty());
