@@ -76,6 +76,14 @@
       "format": "uri-reference",
       "default": ".yarn/versions"
     },
+    "enableAutoDedupe": {
+      "_package": "@yarnpkg/core",
+      "title": "Define whether Yarn should automatically deduplicate dependencies.",
+      "description": "When enabled, Yarn automatically deduplicates dependencies during full-project installs using the `highest` strategy, reusing the highest compatible versions already present in the dependency graph. This also applies to installs triggered by commands such as `yarn add` and automatic installs before running scripts. Focused installs preserve the lockfile's resolutions, and explicit dedupe commands retain control over their patterns and checks. Immutable installs fail if deduplication would change the lockfile.",
+      "type": "boolean",
+      "default": false,
+      "examples": [true]
+    },
     "enableConstraintsChecks": {
       "_package": "@yarnpkg/plugin-constraints",
       "title": "Define whether constraints should run on every install.",

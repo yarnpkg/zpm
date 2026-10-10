@@ -159,6 +159,7 @@ pub async fn install_dependencies(workspace_path: &Path, loose_resolutions: Vec<
         .run_install(RunInstallOptions {
             silent_or_error: quiet,
             skip_constraints_check: true,
+            skip_auto_dedupe: true,
             enforced_resolutions,
             ..Default::default()
         }).await?;

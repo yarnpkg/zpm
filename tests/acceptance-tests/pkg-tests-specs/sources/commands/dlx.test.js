@@ -97,10 +97,11 @@ describe(`Commands`, () => {
     );
 
     test(
-      `it should skip the caller's constraints for temporary installs while checking normal installs`,
+      `it should skip the caller's constraints for temporary installs with auto-dedupe enabled while checking normal installs`,
       makeTemporaryEnv({}, async ({path, run}) => {
         await yarn.writeConfiguration(path, {
           enableConstraintsChecks: true,
+          enableAutoDedupe: true,
         });
 
         await writeFile(`${path}/yarn.config.cjs`, [
