@@ -309,3 +309,19 @@ impl<'de> Visitor<'de> for ResolutionsFieldVisitor {
         Ok(field)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn removal_resolutions_serialize_as_dashes() {
+        let resolutions: ResolutionsField
+            = serde_json::from_str(r#"{"parent/child":null,"parent/peer":"-","@types/react-native":null}"#).unwrap();
+
+        assert_eq!(
+            serde_json::to_string(&resolutions).unwrap(),
+            r#"{"parent/child":"-","parent/peer":"-","@types/react-native":"-"}"#,
+        );
+    }
+}
