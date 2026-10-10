@@ -250,6 +250,48 @@ describe(`Features`, () => {
     );
 
     test(
+      `pnpmPublicHoistPatterns should hoist packages that only non-root workspaces depend on`,
+      makeTemporaryMonorepoEnv({
+        workspaces: [`packages/*`],
+      }, {
+        // Declared by a workspace, and
+        // expected at the root by code that doesn't declare it
+        [`packages/lib`]: {name: `lib`, dependencies: {[`no-deps`]: `1.0.0`}},
+      }, async ({path, run}) => {
+        await xfs.writeFilePromise(ppath.join(path, `.yarnrc.yml`), `nodeLinker: pnpm\npnpmPublicHoistPatterns:\n  - no-deps\n`);
+        await run(`install`);
+
+        const hoisted = await xfs.readJsonPromise(ppath.join(path, `node_modules/no-deps/package.json`));
+        expect(hoisted.version).toEqual(`1.0.0`);
+      }),
+    );
+
+    test(
+      `pnpmHoistPatterns should prefer the version closest to the workspaces`,
+      makeTemporaryEnv(
+        {
+          dependencies: {
+            [`no-deps`]: `2.0.0`,
+            [`one-fixed-dep`]: `1.0.0`,
+          },
+        },
+        {
+          nodeLinker: `pnpm`,
+          pnpmHoistPatterns: [`*`],
+        },
+        async ({path, run}) => {
+          await run(`install`);
+
+          // Same as pnpm, which hoists breadth-first: the direct dependency's
+          // version wins over the transitive no-deps@1.0.0, whatever the
+          // locator order
+          const hoisted = await xfs.readJsonPromise(ppath.join(path, `node_modules/.pnpm/node_modules/no-deps/package.json`));
+          expect(hoisted.version).toEqual(`2.0.0`);
+        },
+      ),
+    );
+
+    test(
       `pnpmPublicHoistPatterns with wildcard should hoist all transitive dependencies`,
       makeTemporaryEnv(
         {
