@@ -6,6 +6,7 @@ pub struct PathIterator<'a> {
     path_str: &'a str,
     lookup_idx: Option<(usize, usize)>,
     emit_empty_path: bool,
+    skip_root: bool,
 }
 
 impl<'a> PathIterator<'a> {
@@ -17,10 +18,18 @@ impl<'a> PathIterator<'a> {
         let emit_empty_path
             = path.is_relative();
 
+        // On Windows, the portable root (`/`) isn't the parent of the drive
+        // roots (`/C:`); it'd resolve to the root of the current drive.
+        let path_bytes
+            = path_str.as_bytes();
+        let skip_root
+            = cfg!(windows) && path_bytes.len() >= 3 && path_bytes[0] == b'/' && path_bytes[1].is_ascii_alphabetic() && path_bytes[2] == b':';
+
         Self {
             path_str,
             lookup_idx,
             emit_empty_path,
+            skip_root,
         }
     }
 }
@@ -29,6 +38,33 @@ impl<'a> Iterator for PathIterator<'a> {
     type Item = Path;
 
     fn next(&mut self) -> Option<Self::Item> {
+        let path
+            = self.next_front()?;
+
+        if self.skip_root && path.is_root() {
+            return self.next_front();
+        }
+
+        Some(path)
+    }
+}
+
+impl<'a> DoubleEndedIterator for PathIterator<'a> {
+    fn next_back(&mut self) -> Option<Self::Item> {
+        let path
+            = self.next_back_inner()?;
+
+        if self.skip_root && path.is_root() {
+            self.lookup_idx = None;
+            return None;
+        }
+
+        Some(path)
+    }
+}
+
+impl<'a> PathIterator<'a> {
+    fn next_front(&mut self) -> Option<Path> {
         let Some((lookup_idx, back_idx)) = self.lookup_idx else {
             return None;
         };
@@ -59,10 +95,8 @@ impl<'a> Iterator for PathIterator<'a> {
 
         Some(Path::from_str(sub_path).unwrap())
     }
-}
 
-impl<'a> DoubleEndedIterator for PathIterator<'a> {
-    fn next_back(&mut self) -> Option<Self::Item> {
+    fn next_back_inner(&mut self) -> Option<Path> {
         let Some((lookup_idx, back_idx)) = self.lookup_idx else {
             return None;
         };
@@ -139,5 +173,23 @@ mod tests {
             .collect::<Vec<_>>();
 
         assert_eq!(yielded_path_strs, expected);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn test_path_iterator_stops_at_drive_roots() {
+        let path
+            = Path::from_str(r"C:\a\b").unwrap();
+
+        let forward = path.iter_path()
+            .map(|p| p.as_str().to_string())
+            .collect::<Vec<_>>();
+
+        let backward = path.iter_path().rev()
+            .map(|p| p.as_str().to_string())
+            .collect::<Vec<_>>();
+
+        assert_eq!(forward, vec!["/C:", "/C:/a", "/C:/a/b"]);
+        assert_eq!(backward, vec!["/C:/a/b", "/C:/a", "/C:"]);
     }
 }

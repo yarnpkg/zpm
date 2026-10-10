@@ -1,9 +1,9 @@
-use std::{collections::BTreeMap, ffi::OsStr, fs::Permissions, io::Read, os::unix::{fs::PermissionsExt, process::ExitStatusExt}, process::{ExitStatus, Output}, sync::{Arc, LazyLock}};
+use std::{collections::BTreeMap, ffi::OsStr, io::Read, process::{ExitStatus, Output}, sync::{Arc, LazyLock}};
 
 use serde::{Deserialize, Serialize};
 use zpm_parsers::JsonDocument;
 use zpm_primitives::Locator;
-use zpm_utils::{FromFileString, Hash64, Path, ToFileString, shell_escape, to_shell_line};
+use zpm_utils::{exit_status_from_code, FromFileString, Hash64, Path, ToFileString, PATH_LIST_SEPARATOR, shell_escape, to_shell_line};
 use itertools::Itertools;
 use regex::Regex;
 use tokio::process::Command;
@@ -11,11 +11,12 @@ use tokio::process::Command;
 use crate::{
     error::Error,
     project::Project,
+    shims::{make_cmd_shim, make_sh_shim},
     trust::{ensure_project_trusted, ProjectTrustReason},
 };
 
-static CJS_LOADER_MATCHER: LazyLock<Regex> = LazyLock::new(|| regex::Regex::new(r"\s*--require\s+\S*\.pnp\.c?js\s*").unwrap());
-static ESM_LOADER_MATCHER: LazyLock<Regex> = LazyLock::new(|| regex::Regex::new(r"\s*--experimental-loader\s+\S*\.pnp\.loader\.mjs\s*").unwrap());
+static CJS_LOADER_MATCHER: LazyLock<Regex> = LazyLock::new(|| regex::Regex::new(r#"\s*--require\s+(?:"[^"]*\.pnp\.c?js"|\S*\.pnp\.c?js)\s*"#).unwrap());
+static ESM_LOADER_MATCHER: LazyLock<Regex> = LazyLock::new(|| regex::Regex::new(r#"\s*--experimental-loader\s+(?:"[^"]*\.pnp\.loader\.mjs"|\S*\.pnp\.loader\.mjs)\s*"#).unwrap());
 static PACKAGE_MAP_MATCHER: LazyLock<Regex> = LazyLock::new(|| regex::Regex::new(r#"\s*--experimental-package-map(?:=|\s+)(?:"[^"]*"|'[^']*'|\S+)\s*"#).unwrap());
 static JS_EXTENSION: LazyLock<Regex> = LazyLock::new(|| regex::Regex::new(r"\.[cm]?[jt]sx?$").unwrap());
 
@@ -29,9 +30,28 @@ fn make_python_entry_point_snippet(binary_name: &str, package_path: &Path, modul
     let object
         = serde_json::to_string(object).expect("expected valid python object");
 
-    format!(
+    let snippet = format!(
         "import importlib, sys\nsys.path.insert(0, {package_path})\nmodule = importlib.import_module({module})\nentry = module\nfor part in {object}.split('.'):\n    entry = getattr(entry, part)\nsys.argv[0] = {binary_name}\nsys.exit(entry())"
-    )
+    );
+
+    // The snippet ends up inside `.cmd` shims on Windows, which can't
+    // contain multi-line arguments
+    if cfg!(windows) {
+        format!("exec({})", serde_json::to_string(&snippet).expect("expected valid python snippet"))
+    } else {
+        snippet
+    }
+}
+
+/// The specifier used to register the PnP ESM loader. Node only accepts
+/// URLs there on Windows, as `C:` would be interpreted as a protocol.
+fn get_esm_loader_specifier(loader_path: &Path) -> String {
+    #[cfg(windows)]
+    if let Ok(url) = url::Url::from_file_path(loader_path.to_path_buf()) {
+        return url.to_string();
+    }
+
+    quote_path_if_needed(&loader_path.to_native_string())
 }
 
 fn quote_path_if_needed(path: &str) -> String {
@@ -44,41 +64,40 @@ fn quote_path_if_needed(path: &str) -> String {
 
 fn make_executable_wrapper(bin_dir: &Path, name: &str, argv0: &str, args: &[String]) -> Result<(), Error> {
     if cfg!(windows) {
-        let escaped_args = args
-            .iter()
-            .map(|arg| format!(r#""{}""#, arg.replace(r#"""#, r#""""#)))
-            .collect::<Vec<String>>()
-            .join(" ");
-
-        let cmd_script = format!(
-            r#"@goto #_undefined_# 2>NUL || @title %COMSPEC% & @setlocal & @"{}" {} %*"#,
-            argv0,
-            escaped_args,
-        );
-
+        // cmd and PowerShell find the `.cmd` file through PATHEXT, whereas Git
+        // Bash (which runs the scripts) looks for an extension-less script.
         bin_dir
             .with_join_str(format!("{}.cmd", name))
-            .fs_write_text(&cmd_script)?;
-    } else {
-        let escaped_args = args
-            .iter()
-            .map(|arg| format!("'{}'", arg.replace("'", "'\"'\"'")))
-            .collect_vec()
-            .join(" ");
-
-        let sh_script = format!(
-            "#!/bin/sh\nexec \"{}\" {} \"$@\"\n",
-            argv0,
-            escaped_args,
-        );
+            .fs_write_text(make_cmd_shim(argv0, args))?;
 
         bin_dir
             .with_join_str(name)
-            .fs_write_text(&sh_script)?
-            .fs_set_permissions(Permissions::from_mode(0o755))?;
+            .fs_write_text(make_sh_shim(argv0, args))?;
+    } else {
+        bin_dir
+            .with_join_str(name)
+            .fs_write_text(make_sh_shim(argv0, args))?
+            .fs_set_mode(0o755)?;
     }
 
     Ok(())
+}
+
+/// The shell used to run scripts. On Windows, it's the bash shipped with Git
+/// for Windows (or any other bash found in the `PATH`), since cmd doesn't
+/// understand the POSIX syntax used by package scripts.
+fn get_script_shell() -> Result<String, Error> {
+    #[cfg(windows)]
+    {
+        crate::shims::windows::find_bash()
+            .map(|bash| bash.to_native_string())
+            .ok_or(Error::ScriptShellNotFound)
+    }
+
+    #[cfg(not(windows))]
+    {
+        Ok("bash".to_string())
+    }
 }
 
 fn is_node_script(p: Path) -> bool {
@@ -254,6 +273,20 @@ impl ScriptBinaries {
                             args: vec![binary_path_abs.to_file_string()],
                         });
                     } else {
+                        // Windows ignores shebangs, so we must spawn the interpreter ourselves
+                        #[cfg(windows)]
+                        if let Some((program, mut interpreter_args)) = crate::shims::get_windows_interpreter(&binary_path_abs) {
+                            interpreter_args.push(binary_path_abs.to_file_string());
+
+                            self.binaries.push(ScriptBinary {
+                                name: name.clone(),
+                                argv0: program,
+                                args: interpreter_args,
+                            });
+
+                            continue;
+                        }
+
                         self.binaries.push(ScriptBinary {
                             name: name.clone(),
                             argv0: binary_path_abs.to_file_string(),
@@ -295,7 +328,7 @@ pub enum ScriptResult {
 impl ScriptResult {
     pub fn new_success() -> Self {
         Self::Success(Output {
-            status: ExitStatus::from_raw(0),
+            status: exit_status_from_code(0),
             stdout: Vec::new(),
             stderr: Vec::new(),
         })
@@ -440,7 +473,7 @@ impl ScriptEnvironment {
         let self_path
             = get_self_path()?;
 
-        value.env.insert("npm_execpath".to_string(), Some(self_path.to_file_string()));
+        value.env.insert("npm_execpath".to_string(), Some(self_path.to_native_string()));
         value.env.insert("npm_config_user_agent".to_string(), Some(format!("yarn/{}", zpm_switch::get_bin_version())));
 
         Ok(value)
@@ -532,18 +565,18 @@ impl ScriptEnvironment {
         }
 
         if let Some(pnp_path) = project.pnp_path().if_exists() {
-            self.append_env("NODE_OPTIONS", ' ', &format!("--require {}", pnp_path.to_file_string()));
+            self.append_env("NODE_OPTIONS", ' ', &format!("--require {}", quote_path_if_needed(&pnp_path.to_native_string())));
         }
 
         if let Some(pnp_loader_path) = project.pnp_loader_path().if_exists() {
-            self.append_env("NODE_OPTIONS", ' ', &format!("--experimental-loader {}", pnp_loader_path.to_file_string()));
+            self.append_env("NODE_OPTIONS", ' ', &format!("--experimental-loader {}", get_esm_loader_specifier(&pnp_loader_path)));
         }
 
         self.refresh_package_map(project);
 
-        self.env.insert("PROJECT_CWD".to_string(), Some(project.project_cwd.to_file_string()));
-        self.env.insert("INIT_CWD".to_string(), Some(project.project_cwd.with_join(&project.shell_cwd).to_file_string()));
-        self.env.insert("CACHE_CWD".to_string(), Some(project.preferred_cache_path().to_file_string()));
+        self.env.insert("PROJECT_CWD".to_string(), Some(project.project_cwd.to_native_string()));
+        self.env.insert("INIT_CWD".to_string(), Some(project.project_cwd.with_join(&project.shell_cwd).to_native_string()));
+        self.env.insert("CACHE_CWD".to_string(), Some(project.preferred_cache_path().to_native_string()));
         self.trust_check_project_cwd = Some(project.project_cwd.clone());
 
         self
@@ -598,7 +631,7 @@ impl ScriptEnvironment {
         }
 
         if let Some(package_map_path) = project.package_map_path(package_map_workspace).if_exists() {
-            self.append_env("NODE_OPTIONS", ' ', &format!("--experimental-package-map={}", quote_path_if_needed(&package_map_path.to_file_string())));
+            self.append_env("NODE_OPTIONS", ' ', &format!("--experimental-package-map={}", quote_path_if_needed(&package_map_path.to_native_string())));
         }
     }
 
@@ -665,7 +698,7 @@ impl ScriptEnvironment {
 
         self.env.insert("npm_package_name".to_string(), Some(locator.ident.to_file_string()));
         self.env.insert("npm_package_version".to_string(), Some(resolution.version.to_file_string()));
-        self.env.insert("npm_package_json".to_string(), Some(manifest_location_abs.to_file_string()));
+        self.env.insert("npm_package_json".to_string(), Some(manifest_location_abs.to_native_string()));
 
         Ok(())
     }
@@ -731,6 +764,31 @@ impl ScriptEnvironment {
 
     /// Prepares a command with the current environment settings.
     fn prepare_command(&mut self, program: &str, args: &[String]) -> Result<(Command, Path), Error> {
+        let bin_dir = self.install_binaries()?;
+
+        let bin_dir_str
+            = bin_dir.to_native_string();
+
+        let env_path = self.env.get("PATH")
+            .cloned()
+            .unwrap_or_else(|| std::env::var("PATH").ok())
+            .unwrap_or_default();
+
+        let next_env_path = match env_path.is_empty() {
+            true => bin_dir_str.clone(),
+            false => format!("{}{}{}", bin_dir_str, PATH_LIST_SEPARATOR, env_path),
+        };
+
+        // Rust only looks for `.exe` files when resolving programs on Windows,
+        // so we resolve them ourselves to also find `.cmd` files (our shims,
+        // but also tools like npm or pnpm).
+        #[cfg(windows)]
+        let mut cmd = match crate::shims::windows::resolve_program(program, &next_env_path) {
+            Some(resolved_program) => Command::new(resolved_program),
+            None => Command::new(program),
+        };
+
+        #[cfg(not(windows))]
         let mut cmd = Command::new(program);
 
         cmd.current_dir(self.cwd.to_path_buf());
@@ -746,20 +804,20 @@ impl ScriptEnvironment {
             };
         }
 
-        let bin_dir = self.install_binaries()?;
-
-        let env_path = self.env.get("PATH")
-            .cloned()
-            .unwrap_or_else(|| std::env::var("PATH").ok())
-            .unwrap_or_default();
-
-        let next_env_path = match env_path.is_empty() {
-            true => bin_dir.to_file_string(),
-            false => format!("{}:{}", bin_dir.to_file_string(), env_path),
-        };
-
         cmd.env("PATH", next_env_path);
-        cmd.env("BERRY_BIN_FOLDER", bin_dir.to_file_string());
+        cmd.env("BERRY_BIN_FOLDER", bin_dir_str);
+
+        // The MSYS bash doesn't parse its command line like other programs do
+        #[cfg(windows)]
+        if crate::shims::is_posix_shell(cmd.as_std().get_program().as_ref()) {
+            for arg in args {
+                cmd.raw_arg(crate::shims::msys_quote_arg(arg));
+            }
+        } else {
+            cmd.args(args);
+        }
+
+        #[cfg(not(windows))]
         cmd.args(args);
 
         if self.stdin.is_some() {
@@ -801,7 +859,7 @@ impl ScriptEnvironment {
 
         // If signal delegation is enabled, ignore SIGINT/SIGTERM while waiting
         // for the child. This allows the child to handle signals and exit gracefully.
-        #[cfg(unix)]
+        #[cfg(any(unix, windows))]
         let _guard = if self.signal_delegation {
             Some(zpm_utils::IgnoreSignals::new())
         } else {
@@ -842,6 +900,12 @@ impl ScriptEnvironment {
         #[cfg(unix)]
         cmd.process_group(0);
 
+        #[cfg(windows)]
+        {
+            const CREATE_NEW_PROCESS_GROUP: u32 = 0x00000200;
+            cmd.creation_flags(CREATE_NEW_PROCESS_GROUP);
+        }
+
         let mut child = cmd.spawn()
             .map_err(|e| Error::SpawnFailed { name: program.to_string(), path: self.cwd.clone(), error: Arc::new(Box::new(e)) })?;
 
@@ -870,7 +934,16 @@ impl ScriptEnvironment {
             },
 
             Binary::Path {path, kind: BinaryKind::Default} => {
-                self.run_exec(&path.to_file_string(), args).await
+                // Windows ignores shebangs, so we must spawn the interpreter ourselves
+                #[cfg(windows)]
+                if let Some((program, mut interpreter_args)) = crate::shims::get_windows_interpreter(path) {
+                    interpreter_args.push(path.to_native_string());
+                    interpreter_args.extend(args.into_iter().map(|arg| arg.as_ref().to_string()));
+
+                    return self.run_exec(&program, interpreter_args).await;
+                }
+
+                self.run_exec(&path.to_native_string(), args).await
             },
 
             Binary::PythonEntryPoint {name, package_path, module, object} => {
@@ -894,7 +967,10 @@ impl ScriptEnvironment {
             final_script.push_str(&shell_escape(arg.to_string().as_str()));
         }
 
-        self.run_exec("bash", ["-c", &final_script, "yarn-script"]).await
+        let shell
+            = get_script_shell()?;
+
+        self.run_exec(&shell, ["-c", &final_script, "yarn-script"]).await
     }
 
     /// Spawns a script and returns the running process with piped stdout/stderr.
@@ -907,7 +983,10 @@ impl ScriptEnvironment {
             bash_args.push(arg.to_string());
         }
 
-        self.spawn_exec("bash", bash_args.iter().map(|s| s.as_str())).await
+        let shell
+            = get_script_shell()?;
+
+        self.spawn_exec(&shell, bash_args.iter().map(|s| s.as_str())).await
     }
 
     /// Runs a script with inherited stdio (output goes directly to terminal).
@@ -931,8 +1010,11 @@ impl ScriptEnvironment {
                 .map(|s| s.to_string())
                 .collect_vec();
 
+        let shell
+            = get_script_shell()?;
+
         let (mut cmd, _)
-            = self.prepare_command("bash", &bash_args)?;
+            = self.prepare_command(&shell, &bash_args)?;
 
         cmd.stdout(std::process::Stdio::inherit());
         cmd.stderr(std::process::Stdio::inherit());
@@ -940,9 +1022,9 @@ impl ScriptEnvironment {
 
         let mut child
             = cmd.spawn()
-                .map_err(|e| Error::SpawnFailed { name: "bash".to_string(), path: self.cwd.clone(), error: Arc::new(Box::new(e)) })?;
+                .map_err(|e| Error::SpawnFailed { name: shell.clone(), path: self.cwd.clone(), error: Arc::new(Box::new(e)) })?;
 
-        #[cfg(unix)]
+        #[cfg(any(unix, windows))]
         let _guard = if self.signal_delegation {
             Some(zpm_utils::IgnoreSignals::new())
         } else {
@@ -951,7 +1033,7 @@ impl ScriptEnvironment {
 
         let status
             = child.wait().await
-                .map_err(|e| Error::SpawnFailed { name: "bash".to_string(), path: self.cwd.clone(), error: Arc::new(Box::new(e)) })?;
+                .map_err(|e| Error::SpawnFailed { name: shell.clone(), path: self.cwd.clone(), error: Arc::new(Box::new(e)) })?;
 
         Ok(status)
     }

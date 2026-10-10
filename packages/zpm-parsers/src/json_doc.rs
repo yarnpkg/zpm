@@ -137,6 +137,13 @@ impl JsonDocument {
     }
 
     fn replace_range(&mut self, range: Range<usize>, data: &[u8]) -> Result<(), Error> {
+        // Files checked out on Windows often use CRLF line endings; we
+        // preserve them in the content we inject (which only uses LF).
+        let data = match self.input.windows(2).any(|w| w == b"\r\n") {
+            true => to_crlf(data),
+            false => std::borrow::Cow::Borrowed(data),
+        };
+
         let (before, after)
             = self.input.split_at(range.start);
         let (_, after)
@@ -144,7 +151,7 @@ impl JsonDocument {
 
         self.changed = true;
 
-        self.input = [before, data, after].concat();
+        self.input = [before, &data, after].concat();
         self.rescan()?;
 
         Ok(())
@@ -583,6 +590,30 @@ fn push_string(content: &mut Vec<u8>, string: &str) {
     content.push(b'"');
 }
 
+fn is_json_whitespace(c: u8) -> bool {
+    c == b' ' || c == b'\t' || c == b'\n' || c == b'\r'
+}
+
+/// Converts the bare LF line endings of the given content into CRLF.
+fn to_crlf(data: &[u8]) -> std::borrow::Cow<'_, [u8]> {
+    if !data.contains(&b'\n') {
+        return std::borrow::Cow::Borrowed(data);
+    }
+
+    let mut converted
+        = Vec::with_capacity(data.len() + 16);
+
+    for (index, &c) in data.iter().enumerate() {
+        if c == b'\n' && (index == 0 || data[index - 1] != b'\r') {
+            converted.push(b'\r');
+        }
+
+        converted.push(c);
+    }
+
+    std::borrow::Cow::Owned(converted)
+}
+
 #[derive(Clone)]
 struct Scanner<'a> {
     input: &'a [u8],
@@ -619,13 +650,13 @@ impl<'a> Scanner<'a> {
     }
 
     fn skip_whitespace(&mut self) {
-        while self.offset < self.input.len() && (self.input[self.offset] == b' ' || self.input[self.offset] == b'\t' || self.input[self.offset] == b'\n') {
+        while self.offset < self.input.len() && is_json_whitespace(self.input[self.offset]) {
             self.offset += 1;
         }
     }
 
     fn rskip_whitespace(&mut self) {
-        while self.offset > 0 && (self.input[self.offset - 1] == b' ' || self.input[self.offset - 1] == b'\t' || self.input[self.offset - 1] == b'\n') {
+        while self.offset > 0 && is_json_whitespace(self.input[self.offset - 1]) {
             self.offset -= 1;
         }
     }
@@ -992,6 +1023,12 @@ mod tests {
 
     // Deeply nested with tab indentation
     #[case(b"{\n\t\"a\": {\n\t\t\"b\": {}\n\t}\n}", vec!["a", "b", "c"], Value::String("deep".to_string()), b"{\n\t\"a\": {\n\t\t\"b\": {\n\t\t\t\"c\": \"deep\"\n\t\t}\n\t}\n}")]
+
+    // CRLF line endings (as checked out by Git on Windows) are preserved
+    #[case(b"{\r\n  \"existing\": \"value\"\r\n}\r\n", vec!["new_key"], Value::String("another".to_string()), b"{\r\n  \"existing\": \"value\",\r\n  \"new_key\": \"another\"\r\n}\r\n")]
+    #[case(b"{\r\n  \"test\": {}\r\n}", vec!["test", "nested"], Value::String("foo".to_string()), b"{\r\n  \"test\": {\r\n    \"nested\": \"foo\"\r\n  }\r\n}")]
+    #[case(b"{\r\n  \"test\": \"value\"\r\n}", vec!["test"], Value::String("foo".to_string()), b"{\r\n  \"test\": \"foo\"\r\n}")]
+    #[case(b"{\r\n  \"keep\": \"this\",\r\n  \"delete\": \"me\"\r\n}", vec!["delete"], Value::Undefined, b"{\r\n  \"keep\": \"this\"\r\n}")]
 
     fn test_update_document(#[case] document: &[u8], #[case] path: Vec<&str>, #[case] value: Value, #[case] expected: &[u8]) {
         let mut document

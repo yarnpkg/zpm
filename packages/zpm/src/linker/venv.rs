@@ -92,7 +92,7 @@ fn link_package_into_venv(
         },
 
         Some(PackageData::Local {package_directory, ..}) => {
-            package_path.fs_symlink(package_directory)?;
+            package_path.fs_symlink_with(package_directory, project.config.settings.win_link_type.value.into())?;
             Ok(())
         },
 
@@ -107,11 +107,11 @@ fn link_package_into_venv(
         },
 
         None => match &locator.reference {
-            Reference::Link(params) if params.path.starts_with('/') => {
+            Reference::Link(params) if Path::from_file_string(&params.path).is_ok_and(|path| path.is_absolute()) => {
                 let target_path
                     = Path::from_file_string(&params.path)?;
 
-                package_path.fs_symlink(&target_path)?;
+                package_path.fs_symlink_with(&target_path, project.config.settings.win_link_type.value.into())?;
 
                 Ok(())
             },

@@ -412,13 +412,8 @@ async fn handle_command(
                 TaskCompletionResult::Exited(status) => {
                     let code
                         = status.code().unwrap_or(-1);
-                    #[cfg(unix)]
-                    let sig = {
-                        use std::os::unix::process::ExitStatusExt;
-                        status.signal()
-                    };
-                    #[cfg(not(unix))]
-                    let sig = None;
+                    let sig
+                        = zpm_utils::exit_status_signal(&status);
                     (code, sig)
                 }
                 TaskCompletionResult::Error(e) => {
@@ -1108,14 +1103,26 @@ async fn watch_project_root(project_root: Path, command_tx: CommandSender, shutd
         }
     }
 
+    // Inodes aren't exposed on other platforms; we use the creation time to
+    // detect the project folder being removed or replaced.
     #[cfg(not(unix))]
     {
-        // On non-Unix platforms, just keep the watcher alive without inode checking
-        let _ = command_tx;
-        let _ = project_root;
-        let _ = shutdown_notify;
+        let get_identity = || {
+            project_root.fs_metadata().ok()
+                .and_then(|metadata| metadata.created().ok())
+        };
+
+        let Some(initial_identity) = get_identity() else {
+            return;
+        };
+
         loop {
-            tokio::time::sleep(Duration::from_secs(60)).await;
+            tokio::time::sleep(Duration::from_secs(5)).await;
+
+            if get_identity() != Some(initial_identity) {
+                graceful_shutdown(command_tx, shutdown_notify).await;
+                return;
+            }
         }
     }
 }

@@ -36,16 +36,23 @@ const OS: Os = Os::MacOS;
 #[cfg(target_os = "windows")]
 const OS: Os = Os::Windows;
 
-#[cfg(target_env = "gnu")]
+#[cfg(all(target_os = "linux", target_env = "gnu"))]
 const LIBC: Option<Libc> = Some(Libc::Glibc);
 
 #[cfg(target_env = "musl")]
 const LIBC: Option<Libc> = Some(Libc::Musl);
 
-#[cfg(target_env = "")]
+#[cfg(not(any(all(target_os = "linux", target_env = "gnu"), target_env = "musl")))]
 const LIBC: Option<Libc> = None;
 
 fn detect_libc() -> Option<Libc> {
+    // The libc requirement only makes sense on Linux; on Windows `/usr/bin/ldd`
+    // would resolve against the current drive and could pick up a Git Bash or
+    // Cygwin installation.
+    if cfg!(windows) {
+        return LIBC;
+    }
+
     let ldd_contents
         = Path::from_str(LDD_PATH).unwrap()
             .fs_read_text_prealloc()

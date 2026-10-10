@@ -2098,6 +2098,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "junction"
+version = "2.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "cde48f36530cbd91b65f050101e6c056d6eb743cea2a8f0f19beef69c6742ff8"
+dependencies = [
+ "scopeguard",
+ "windows-sys 0.61.2",
+]
+
+[[package]]
 name = "konst"
 version = "0.2.20"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5316,6 +5326,7 @@ dependencies = [
  "ring",
  "rkyv",
  "rust-ini",
+ "same-file",
  "serde",
  "serde_json",
  "serde_with",
@@ -5537,6 +5548,7 @@ dependencies = [
  "fundu",
  "hex",
  "indexmap 2.14.0",
+ "junction",
  "libc",
  "num",
  "ouroboros",
@@ -5553,5 +5565,6 @@ dependencies = [
  "tokio",
  "urlencoding",
  "wax",
+ "windows-sys 0.61.2",
  "zpm-macro-enum",
 ]

@@ -236,9 +236,12 @@ async fn prepare_yarn_classic_project(folder_path: &Path, params: &PrepareParams
     let pack_path = folder_path
         .with_join_str("package.tgz");
 
+    let pack_path_str
+        = pack_path.to_native_string();
+
     let pack_args = match &params.workspace {
-        Some(workspace) => vec!["workspace", workspace.as_str(), "pack", "--filename", pack_path.as_str()],
-        None => vec!["pack", "--filename", pack_path.as_str()],
+        Some(workspace) => vec!["workspace", workspace.as_str(), "pack", "--filename", pack_path_str.as_str()],
+        None => vec!["pack", "--filename", pack_path_str.as_str()],
     };
 
     run_prepared_command(
@@ -289,8 +292,11 @@ async fn prepare_yarn_modern_project(folder_path: &Path, params: &PrepareParams)
         }
     }
 
+    let pack_path_str
+        = pack_path.to_native_string();
+
     pack_args.push("--filename");
-    pack_args.push(pack_path.as_str());
+    pack_args.push(pack_path_str.as_str());
 
     run_prepared_command(
         make_yarn_command(zpm_switch::ReleaseLine::Berry).await?,
@@ -347,8 +353,11 @@ async fn prepare_yarn_zpm_project(folder_path: &Path, params: &PrepareParams) ->
     pack_args.push("pack");
     pack_args.push("--preserve-workspaces");
     pack_args.push("--install-if-needed");
+    let archive_path_str
+        = archive_path.to_native_string();
+
     pack_args.push("--out");
-    pack_args.push(archive_path.as_str());
+    pack_args.push(archive_path_str.as_str());
 
     let current_exe
         = Path::current_exe()?;

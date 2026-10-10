@@ -11,6 +11,16 @@ Yarn is intended to be used with [Yarn Switch](/concepts/switch), a tool that le
 curl -sS https://repo.yarnpkg.com/install | bash
 ```
 
+On Windows, run the following command from PowerShell instead:
+
+```powershell
+powershell -c "irm https://repo.yarnpkg.com/install.ps1 | iex"
+```
+
+:::note
+Package scripts are executed by bash. On Windows, Yarn uses the bash shipped with [Git for Windows](https://gitforwindows.org/), or any other `bash.exe` found in your `PATH` (except for the WSL launcher, since scripts must run on the host).
+:::
+
 :::caution
 You will likely have to restart your terminal sessions, **IDEs included**, for the changes to take effect.
 :::

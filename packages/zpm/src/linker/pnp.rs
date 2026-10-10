@@ -477,7 +477,7 @@ pub async fn link_project_pnp<'a>(project: &'a Project, install: &'a Install) ->
         package_location_abs
             .with_join_str("node_modules")
             .fs_create_dir_all()?
-            .fs_sync_dir(symlinks_to_create)
+            .fs_sync_dir(symlinks_to_create, project.config.settings.win_link_type.value.into())
             .map_err(Error::from)?;
     }
 

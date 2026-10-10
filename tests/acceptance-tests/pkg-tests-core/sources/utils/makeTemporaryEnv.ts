@@ -51,9 +51,11 @@ const baseEnv = (nativePath: string, nativeHomePath: string, registryUrl: string
   ...env,
 });
 
+const exeSuffix = process.platform === `win32` ? `.exe` : ``;
+
 const getYarnBinaryPath = () => {
   return process.env.TEST_BINARY
-    ?? require.resolve(`${__dirname}/../../../../../target/release/yarn-bin`);
+    ?? require.resolve(`${__dirname}/../../../../../target/release/yarn-bin${exeSuffix}`);
 };
 
 const mte = generatePkgDriver({
@@ -120,7 +122,7 @@ const mte = generatePkgDriver({
       : [];
 
     const switchBinary = process.env.TEST_SWITCH_BINARY
-      ?? require.resolve(`${__dirname}/../../../../../target/release/yarn`);
+      ?? require.resolve(`${__dirname}/../../../../../target/release/yarn${exeSuffix}`);
 
     const yarnBinBinary = getYarnBinaryPath();
 

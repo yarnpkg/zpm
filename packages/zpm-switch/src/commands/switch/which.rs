@@ -1,5 +1,5 @@
 use clipanion::cli;
-use zpm_utils::{Path, ToFileString};
+use zpm_utils::Path;
 
 /// Print the path of the current Yarn Switch binary
 #[cli::command]
@@ -11,6 +11,6 @@ pub struct WhichCommand {
 
 impl WhichCommand {
     pub async fn execute(&self) {
-        println!("{}", Path::current_exe().unwrap().to_file_string());
+        println!("{}", Path::current_exe().unwrap().to_native_string());
     }
 }

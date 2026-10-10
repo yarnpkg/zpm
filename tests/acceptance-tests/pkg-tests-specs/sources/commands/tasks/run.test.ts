@@ -16,7 +16,7 @@ function cleanupDaemon(cb: RunFunction): RunFunction {
 
 const getYarnBinBinaryPath = () =>
   process.env.TEST_BINARY
-    ?? require.resolve(`${__dirname}/../../../../../../target/release/yarn-bin`);
+    ?? require.resolve(`${__dirname}/../../../../../../target/release/yarn-bin${process.platform === `win32` ? `.exe` : ``}`);
 
 /**
  * Spawn `yarn-bin` directly via cp.spawn, returning the child process handle
