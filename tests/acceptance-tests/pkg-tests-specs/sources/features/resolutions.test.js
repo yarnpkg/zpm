@@ -35,16 +35,20 @@ describe(`Features`, () => {
       ),
     );
 
-    test(
-      `it should support overriding a packages with another, but only if it's the dependency of a specific other package`,
-      makeTemporaryEnv(
+    test.each([
+      `one-range-dep/no-deps`,
+      `one-range-dep@1.0.0/no-deps`,
+      `one-range-dep@^1.0.0/no-deps`,
+    ])(
+      `it should only override dependencies of the matching parent with %s`,
+      resolution => makeTemporaryEnv(
         {
           dependencies: {
             [`one-fixed-dep`]: `1.0.0`,
             [`one-range-dep`]: `1.0.0`,
           },
           resolutions: {
-            [`one-range-dep/no-deps`]: `2.0.0`,
+            [resolution]: `2.0.0`,
           },
         },
         async ({path, run, source}) => {
@@ -72,7 +76,7 @@ describe(`Features`, () => {
             },
           });
         },
-      ),
+      )(),
     );
 
     test(
