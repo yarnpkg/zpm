@@ -78,7 +78,7 @@ impl ResolutionSelector {
                 }
 
                 if params.parent_descriptor.ident != parent.ident {
-                    return None;
+                    return false;
                 }
 
                 if let Range::AnonymousSemver(parent_params) = &params.parent_descriptor.range {
