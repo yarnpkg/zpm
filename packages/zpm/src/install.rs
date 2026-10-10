@@ -1786,10 +1786,8 @@ fn normalize_resolution_rec(normalizer: &DependencyNormalizer<'_>, descriptor: &
 
         let resolution_override = candidate_resolutions
             .and_then(|overrides| {
-                overrides.iter().find_map(|(rule, range)| {
-                    rule.apply(&resolution.locator, &resolution.version, descriptor, range)
-                        .map(|replacement_range| (rule, replacement_range))
-                })
+                overrides.iter().find(|(rule, _)| rule.matches(&resolution.locator, &resolution.version, descriptor))
+                    .and_then(|(rule, range)| range.as_ref().map(|range| (rule, range.clone())))
             });
 
         if let Some((rule, replacement_range)) = resolution_override {
@@ -1897,6 +1895,18 @@ static BUILTIN_EXTENSIONS: LazyLock<BTreeMap<SemverDescriptor, PackageExtension>
 
 pub fn normalize_resolutions(context: &InstallContext<'_>, resolution: &Resolution) -> Result<(BTreeMap<Ident, Descriptor>, BTreeMap<Ident, PeerRange>), Error> {
     normalize_resolutions_with(&DependencyNormalizer::from_context(context), resolution)
+}
+
+fn is_removed_dependency(normalizer: &DependencyNormalizer<'_>, resolution: &Resolution, descriptor: &Descriptor) -> bool {
+    let matching = normalizer.dependency_overrides.get_by_ident(&descriptor.ident)
+        .and_then(|rules| rules.iter().find(|(rule, _)| rule.matches(&resolution.locator, &resolution.version, descriptor)));
+    let Some((rule, None)) = matching else {
+        return false;
+    };
+    if let Some(usage) = normalizer.rule_usage {
+        usage.lock().unwrap().dependency_overrides.insert(rule.clone());
+    }
+    true
 }
 
 pub fn normalize_resolutions_with(normalizer: &DependencyNormalizer<'_>, resolution: &Resolution) -> Result<(BTreeMap<Ident, Descriptor>, BTreeMap<Ident, PeerRange>), Error> {
@@ -2008,6 +2018,8 @@ pub fn normalize_resolutions_with(normalizer: &DependencyNormalizer<'_>, resolut
         }
     }
 
+    dependencies.retain(|_, descriptor| !is_removed_dependency(normalizer, resolution, descriptor));
+
     // Some protocols need to know about the package that declares the
     // dependency (for example the `portal:` protocol, which always points
     // to a location relative to the parent package. We mutate the
@@ -2020,6 +2032,12 @@ pub fn normalize_resolutions_with(normalizer: &DependencyNormalizer<'_>, resolut
         normalize_resolution(normalizer, descriptor, resolution, true)?;
     }
 
+    let mut retain_peer = |ident: &Ident, range: &mut PeerRange| {
+        let descriptor = Descriptor::new(ident.clone(), range.to_range());
+        !is_removed_dependency(normalizer, resolution, &descriptor)
+    };
+    peer_dependencies.retain(&mut retain_peer);
+
     for name in peer_dependencies.keys().filter(|ident| ident.scope() != Some("@types")).cloned().collect::<Vec<_>>() {
         let types_ident
             = name.type_ident();
@@ -2031,6 +2049,8 @@ pub fn normalize_resolutions_with(normalizer: &DependencyNormalizer<'_>, resolut
         peer_dependencies.entry(types_ident)
             .or_insert(SemverPeerRange {range: zpm_semver::Range::from_file_string("*").unwrap()}.into());
     }
+
+    peer_dependencies.retain(&mut retain_peer);
 
     Ok((dependencies, peer_dependencies))
 }

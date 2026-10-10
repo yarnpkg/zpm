@@ -67,8 +67,12 @@ pub fn extract_alnum_hyphen(str: &mut std::iter::Peekable<std::str::Chars>) -> O
 pub fn extract_rc_segment(str: &mut std::iter::Peekable<std::str::Chars>) -> Option<VersionRc> {
     let curr = str.clone();
 
+    // A segment is numeric only if it's entirely made of digits; anything that
+    // can't continue an identifier (separators, spaces, range operators, ...)
+    // ends it. Checking for an explicit list of terminators instead used to
+    // turn `41` into a string in `>=1.0.0-beta.41 <1.0.0-c`, breaking ordering.
     if let Some(n) = extract_number(str) {
-        if let Some('.' | '+') | None = str.peek() {
+        if !matches!(str.peek(), Some(&c) if c.is_alphanumeric() || c == '-') {
             return Some(VersionRc::Number(n));
         }
     }
@@ -157,10 +161,14 @@ pub fn extract_predicate(str: &mut std::iter::Peekable<std::str::Chars>) -> Opti
                     // Skip all whitespaces
                 }
 
-                if let Some((version, _)) = extract_version(str) {
-                    let upper_bound = match (version.major, version.minor) {
-                        (0, 0) => version.next_patch_rc(),
-                        (0, _) => version.next_minor_rc(),
+                if let Some((version, missing)) = extract_version(str) {
+                    // Missing components are wildcards, so `^0` and `^0.0`
+                    // respectively mean `0.x` and `0.0.x`
+                    let upper_bound = match (version.major, version.minor, missing) {
+                        (_, _, 2..) => version.next_major_rc(),
+                        (0, 0, 1) => version.next_minor_rc(),
+                        (0, 0, _) => version.next_patch_rc(),
+                        (0, _, _) => version.next_minor_rc(),
                         _ => version.next_major_rc(),
                     };
 
@@ -187,9 +195,12 @@ pub fn extract_predicate(str: &mut std::iter::Peekable<std::str::Chars>) -> Opti
                     // Skip all whitespaces
                 }
 
-                if let Some((version, _)) = extract_version(str) {
-                    let next_minor
-                        = version.next_minor_rc();
+                if let Some((version, missing)) = extract_version(str) {
+                    // `~1` only fixes the major, so it means `1.x`
+                    let upper_bound = match missing {
+                        2.. => version.next_major_rc(),
+                        _ => version.next_minor_rc(),
+                    };
 
                     Some(EcoVec::from([
                         Token::Operation(
@@ -199,7 +210,7 @@ pub fn extract_predicate(str: &mut std::iter::Peekable<std::str::Chars>) -> Opti
                         Token::Syntax(TokenType::SAnd),
                         Token::Operation(
                             OperatorType::LessThan,
-                            next_minor,
+                            upper_bound,
                         ),
                     ]))
                 } else {
