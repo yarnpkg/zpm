@@ -151,6 +151,30 @@ describe(`Commands`, () => {
     );
 
     test(
+      `should stop quietly when its output is closed early`,
+      makeTemporaryEnv(
+        {
+          private: true,
+          workspaces: [`packages/*`, `packages/*/packages/*`],
+        },
+        async ({path, run, yarnBinary}) => {
+          await setupWorkspaces(path);
+          await run(`install`);
+
+          // `head` exits after the first line, so the remaining workspaces
+          // write into a closed pipe
+          const {stdout, stderr} = await execFile(`/bin/sh`, [`-c`, `"$YARN" workspaces foreach --all exec pwd | head -n1`], {
+            cwd: npath.fromPortablePath(path),
+            env: {...process.env, YARN: yarnBinary, YARN_ENABLE_TELEMETRY: `0`, RUST_BACKTRACE: `0`},
+          });
+
+          expect(stdout.trim()).toEqual(npath.fromPortablePath(path));
+          expect(stderr).not.toMatch(/panicked/);
+        },
+      ),
+    );
+
+    test(
       `should execute 'node' command`,
       makeTemporaryEnv(
         {

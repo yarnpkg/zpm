@@ -671,6 +671,26 @@ describe(`Commands`, () => {
     );
 
     test(
+      `it should pack files whose path doesn't fit in the tar header`,
+      makeTemporaryEnv({}, async ({path, run, source}) => {
+        const longPath = `${`nested-directory/`.repeat(8)}index.js`;
+        await xfs.mkdirPromise(npath.dirname(`${path}/${longPath}`), {recursive: true});
+        await xfs.writeFilePromise(`${path}/${longPath}`, `module.exports = 42;`);
+
+        await run(`install`);
+        await run(`pack`);
+
+        const paths = [];
+        await tar.t({
+          file: npath.fromPortablePath(`${path}/package.tgz`),
+          onentry: entry => paths.push(entry.path),
+        });
+
+        expect(paths).toContain(`package/${longPath}`);
+      }),
+    );
+
+    test(
       `it should set the +x flag on bin entries`,
       makeTemporaryEnv({
         name: `pkg`,
