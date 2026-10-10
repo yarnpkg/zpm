@@ -250,6 +250,31 @@ describe(`Features`, () => {
     );
 
     test(
+      `it should link every dependency next to a store package, even hoisted ones`,
+      makeTemporaryEnv(
+        {
+          dependencies: {
+            [`one-fixed-dep`]: `1.0.0`,
+          },
+        },
+        {
+          nodeLinker: `pnpm`,
+          pnpmHoistPatterns: [`*`],
+        },
+        async ({path, run}) => {
+          await run(`install`);
+
+          // Tools that crawl the store (bundlers, type corpora) read a
+          // package's dependencies from its own node_modules, as pnpm lays
+          // them out; the hoisted copy isn't a substitute
+          const store = ppath.join(path, `node_modules/.pnpm`);
+          const [entry] = (await xfs.readdirPromise(store)).filter(name => name.startsWith(`one-fixed-dep-`));
+          await expect(xfs.existsPromise(ppath.join(store, entry, `node_modules/no-deps/package.json`))).resolves.toEqual(true);
+        },
+      ),
+    );
+
+    test(
       `pnpmPublicHoistPatterns with wildcard should hoist all transitive dependencies`,
       makeTemporaryEnv(
         {
