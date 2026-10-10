@@ -664,10 +664,25 @@ struct Task {
 
 impl Task {
     fn write_ln(&mut self, writer: &mut StdoutLock<'_>, str: &str) {
-        if self.verbose_level >= 1 {
-            writeln!(writer, "{}{}", self.prefix, str).unwrap();
+        let result = if self.verbose_level >= 1 {
+            writeln!(writer, "{}{}", self.prefix, str)
         } else {
-            writeln!(writer, "{}", str).unwrap();
+            writeln!(writer, "{}", str)
+        };
+
+        match result {
+            Ok(()) => {},
+
+            // The reader went away (`yarn workspaces foreach ... | head`);
+            // nobody can see the remaining output, so stop like a process
+            // killed by SIGPIPE would, minus the panic.
+            Err(err) if err.kind() == std::io::ErrorKind::BrokenPipe => {
+                std::process::exit(0);
+            },
+
+            Err(err) => {
+                panic!("Failed to write to stdout: {}", err);
+            },
         }
     }
 
