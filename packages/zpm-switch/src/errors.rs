@@ -87,8 +87,11 @@ pub enum Error {
     #[error("You opted-in to a package manager migration, but the manifest in {} doesn't list a {} field", .0.to_print_string(), DataType::Code.colorize("packageManagerMigration"))]
     MissingMigration(Path),
 
-    #[error("Yarn cannot be used on project configured for use with {0}")]
-    UnsupportedProject(&'static str),
+    #[error("Yarn cannot be used on project configured for use with {name} ({field})")]
+    UnsupportedProject {
+        field: &'static str,
+        name: String,
+    },
 
     #[error("No project found in current directory or any parent")]
     NoProjectFound,
