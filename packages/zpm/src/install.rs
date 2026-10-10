@@ -1661,6 +1661,19 @@ impl<'a> InstallManager<'a> {
                     = resolve_locator_ident(&self.context, &workspace.locator(), &WorkspaceIdentReference {ident: ident.clone()})?;
 
                 self.result.lockfile.resolutions.insert(workspace.descriptor(), workspace.locator());
+
+                // The islands don't record the descriptors their workspaces use
+                // to depend on other workspaces either
+                for descriptor in result.resolution.dependencies.values() {
+                    if !descriptor.range.is_workspace() {
+                        continue;
+                    }
+
+                    if let Some(dependency) = project.try_workspace_by_descriptor(descriptor)? {
+                        self.result.lockfile.resolutions.insert(descriptor.clone(), dependency.locator());
+                    }
+                }
+
                 self.result.lockfile.entries.insert(workspace.locator(), LockfileEntry {
                     checksum: None,
                     resolution: result.original_resolution,
