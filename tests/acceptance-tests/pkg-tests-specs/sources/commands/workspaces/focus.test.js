@@ -249,6 +249,91 @@ describe(`Commands`, () => {
         },
       ),
     );
+
+    test(
+      `should not run the build scripts with --mode=skip-build`,
+      makeTemporaryEnv(
+        {
+          private: true,
+          workspaces: [`packages/*`],
+        },
+        async ({path, run}) => {
+          await setupProject(path);
+
+          await run(`workspaces`, `focus`, `foo`, `--mode=skip-build`);
+
+          await expect(xfs.existsSync(ppath.join(path, `packages/foo/postinstall.log`))).toBeFalsy();
+        },
+      ),
+    );
+
+    test(
+      `should refuse to modify the lockfile with --immutable`,
+      makeTemporaryEnv(
+        {
+          private: true,
+          workspaces: [`packages/*`],
+        },
+        async ({path, run}) => {
+          await setupProject(path);
+
+          await run(`install`);
+          await run(`workspaces`, `focus`, `foo`, `--immutable`);
+
+          await xfs.writeJsonPromise(ppath.join(path, `packages/foo/package.json`), {
+            name: `foo`,
+            dependencies: {[`one-fixed-dep`]: `1.0.0`},
+          });
+
+          await expect(run(`workspaces`, `focus`, `foo`, `--immutable`)).rejects.toMatchObject({
+            code: 1,
+          });
+        },
+      ),
+    );
+
+    test(
+      `should reject --mode=update-lockfile`,
+      makeTemporaryEnv(
+        {
+          private: true,
+          workspaces: [`packages/*`],
+        },
+        async ({path, run}) => {
+          await setupProject(path);
+
+          await expect(run(`workspaces`, `focus`, `foo`, `--mode=update-lockfile`)).rejects.toMatchObject({
+            code: 1,
+            stdout: expect.stringContaining(`use yarn install instead`),
+          });
+        },
+      ),
+    );
+
+    test(
+      `should focus a workspace that doesn't depend on the root with the pnpm linker`,
+      makeTemporaryEnv(
+        {
+          private: true,
+          workspaces: [`packages/*`],
+        },
+        {
+          nodeLinker: `pnpm`,
+        },
+        async ({path, run}) => {
+          await setupProject(path);
+
+          await run(`workspaces`, `focus`, `foo`, {
+            cwd: ppath.join(path, `packages/foo`),
+          });
+
+          await expect(xfs.readJsonPromise(ppath.join(path, `packages/foo/node_modules/no-deps/package.json`))).resolves.toMatchObject({
+            name: `no-deps`,
+            version: `1.0.0`,
+          });
+        },
+      ),
+    );
   });
 });
 

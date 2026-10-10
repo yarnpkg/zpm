@@ -252,10 +252,15 @@ impl PnpmPackageMapBuilder {
     }
 
     pub fn build(&self) -> Result<PackageMap, Error> {
-        let top_level_package_map_node
+        // A focused install that doesn't include the root workspace has no
+        // top-level dependencies to share with the loose map
+        let empty_dependencies
+            = BTreeMap::new();
+
+        let top_level_dependencies
             = self.package_map_nodes_by_locator
                 .get(&self.top_level_locator)
-                .ok_or_else(|| package_map_error("expected the top-level package to have been registered"))?;
+                .map_or(&empty_dependencies, |node| &node.dependencies);
 
         let package_ids_by_locator: BTreeMap<Locator, String>
             = self.package_map_nodes_by_locator
@@ -280,7 +285,7 @@ impl PnpmPackageMapBuilder {
                 NodePackageMapType::Standard => package_map_node.dependencies.clone(),
                 NodePackageMapType::Loose => {
                     let mut dependencies
-                        = top_level_package_map_node.dependencies.clone();
+                        = top_level_dependencies.clone();
 
                     dependencies.extend(package_map_node.dependencies.clone());
                     dependencies

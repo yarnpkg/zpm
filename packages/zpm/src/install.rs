@@ -1092,6 +1092,34 @@ impl Install {
         }
     }
 
+    fn check_partial_lockfile(&self, project: &Project) -> Result<(), Error> {
+        let mut expected
+            = project.lockfile()?;
+
+        expected.resolutions.extend(self.lockfile.resolutions.iter().map(|(k, v)| (k.clone(), v.clone())));
+        expected.entries.extend(self.lockfile.entries.iter().map(|(k, v)| (k.clone(), v.clone())));
+
+        let resolutions
+            = self.lockfile.entries.values()
+                .map(|entry| &entry.resolution);
+
+        let current_project
+            = LockfileProject::from_project(project, resolutions)?;
+
+        for (ident, hash) in current_project.workspaces {
+            let is_installed
+                = self.installed_workspaces.as_ref().map_or(true, |installed| installed.contains(&ident));
+
+            if is_installed {
+                expected.project.workspaces.insert(ident, hash);
+            }
+        }
+
+        // Compares against the lockfile on disk (and reports the diff) since
+        // immutable installs are enabled
+        project.write_lockfile(&expected)
+    }
+
     pub async fn link_and_build(mut self, project: &mut Project) -> Result<InstallResult, Error> {
         self.report_package_extension_diagnostics(project).await;
 
@@ -1102,6 +1130,13 @@ impl Install {
 
             self.lockfile.project
                 = LockfileProject::from_project(project, resolutions)?;
+        }
+
+        // Focused installs only resolve part of the project, so they don't
+        // write the lockfile; an immutable one must still contain everything
+        // they resolved, unchanged
+        if self.skip_lockfile_update && project.config.settings.enable_immutable_installs.value {
+            self.check_partial_lockfile(project)?;
         }
 
         if self.skip_link_step {

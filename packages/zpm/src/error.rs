@@ -310,6 +310,9 @@ pub enum Error {
     #[error("--immutable and --immutable-cache cannot be used with --mode=update-lockfile")]
     ImmutableWithUpdateLockfile,
 
+    #[error("yarn workspaces focus doesn't support --mode=update-lockfile; use yarn install instead")]
+    FocusWithUpdateLockfile,
+
     #[error("Repository clone failed")]
     RepositoryCloneFailed(String),
 
