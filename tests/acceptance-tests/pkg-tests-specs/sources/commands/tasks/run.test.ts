@@ -82,6 +82,105 @@ describe(`Commands`, () => {
       }),
     );
 
+    for (const {scenario, script, message} of [
+      {
+        scenario: `when the launcher prints a URL but exits with an error`,
+        script: `echo ws://127.0.0.1:1\nexit 42`,
+        message: `Failed to start daemon: ws://127.0.0.1:1`,
+      },
+      {
+        scenario: `when the launcher exits silently with an error`,
+        script: `exit 42`,
+        message: `Failed to start daemon: exit status: 42`,
+      },
+      {
+        scenario: `when the launcher reports an error on stderr`,
+        script: `echo "Error: launcher failed" >&2\nexit 42`,
+        message: `Failed to start daemon: launcher failed`,
+      },
+      {
+        scenario: `when the launcher reports multiple lines on both streams`,
+        script: `echo "Error: launcher failed"\necho "stdout details"\necho "stderr details" >&2\nexit 42`,
+        message: `Failed to start daemon: launcher failed\nstdout details\nstderr details`,
+      },
+      {
+        scenario: `when the launcher is terminated by a signal`,
+        script: `kill -TERM $$`,
+        message: `Failed to start daemon: signal: 15`,
+      },
+      {
+        scenario: `when the launcher succeeds without printing a URL`,
+        script: `exit 0`,
+        message: `Daemon closed without printing URL`,
+      },
+    ]) {
+      test(
+        `it should report daemon startup failure ${scenario}`,
+        makeTemporaryEnv({
+          name: `test-package`,
+        }, async ({path, run}) => {
+          await xfs.writeFilePromise(ppath.join(path, `taskfile`), [
+            `build:`,
+            `  echo "building"`,
+          ].join(`\n`));
+
+          const launcherPath = ppath.join(path, `launcher`);
+          await xfs.writeFilePromise(launcherPath, `#!/bin/sh\n${script}\n`);
+          await xfs.chmodPromise(launcherPath, 0o755);
+
+          await expect(run(`tasks`, `run`, `build`, {
+            env: {YARNSW_PATH: npath.fromPortablePath(launcherPath)},
+          })).rejects.toMatchObject({
+            code: 1,
+            stdout: expect.stringContaining(message),
+          });
+        }),
+      );
+    }
+
+    test(
+      `it should time out and terminate a daemon launcher that hangs after printing a URL`,
+      makeTemporaryEnv({
+        name: `test-package`,
+      }, async ({path, run}) => {
+        await xfs.writeFilePromise(ppath.join(path, `taskfile`), [
+          `build:`,
+          `  echo "building"`,
+        ].join(`\n`));
+
+        const launcherPath = ppath.join(path, `launcher`);
+        await xfs.writeFilePromise(launcherPath, [
+          `#!/bin/sh`,
+          `echo $$ > launcher.pid`,
+          `echo ws://127.0.0.1:1`,
+          `exec sleep 30`,
+          ``,
+        ].join(`\n`));
+        await xfs.chmodPromise(launcherPath, 0o755);
+
+        try {
+          await expect(run(`tasks`, `run`, `build`, {
+            env: {YARNSW_PATH: npath.fromPortablePath(launcherPath)},
+          })).rejects.toMatchObject({
+            code: 1,
+            stdout: expect.stringContaining(`Timeout waiting for daemon to start`),
+          });
+
+          const pid = Number(await xfs.readFilePromise(ppath.join(path, `launcher.pid`), `utf8`));
+          expect(() => process.kill(pid, 0)).toThrow();
+        } finally {
+          if (await xfs.existsPromise(ppath.join(path, `launcher.pid`))) {
+            const pid = Number(await xfs.readFilePromise(ppath.join(path, `launcher.pid`), `utf8`));
+            try {
+              process.kill(pid, `SIGKILL`);
+            } catch {
+              // The launcher should already have been terminated by the timeout.
+            }
+          }
+        }
+      }),
+    );
+
     test(
       `it should run a simple task`,
       makeTemporaryEnv({
