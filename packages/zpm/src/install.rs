@@ -1602,6 +1602,13 @@ impl<'a> InstallManager<'a> {
             entry.checksum = checksum;
         }
 
+        // pnpm merges compatible peer instances by default; with its linker,
+        // so do we, so projects migrating from it keep the same layout
+        let dedupe_peer_dependents = self.context.project.map_or(false, |project| {
+            project.config.settings.dedupe_peer_dependents.value
+                .unwrap_or(project.config.settings.node_linker.value == zpm_config::NodeLinker::Pnpm)
+        });
+
         // Build resolution tree. If islands are configured, run a separate
         // TreeResolver per island (isolated peer dep context) and one for
         // greedy-resolved workspaces, then merge the results.
@@ -1610,6 +1617,7 @@ impl<'a> InstallManager<'a> {
             let mut merged_tree = TreeResolver::default()
                 .with_resolutions(&self.result.install_state.descriptor_to_locator, &self.result.install_state.normalized_resolutions)?
                 .with_roots(self.result.roots.clone())
+                .with_peer_dedupe(dedupe_peer_dependents)
                 .run();
 
             // Per-island trees (isolated peer dep context per island)
@@ -1631,6 +1639,7 @@ impl<'a> InstallManager<'a> {
                 let island_tree = TreeResolver::default()
                     .with_resolutions(island_d2l, &island_resolutions)?
                     .with_roots(island_roots)
+                    .with_peer_dedupe(dedupe_peer_dependents)
                     .run();
 
                 // Merge island tree into the combined tree
@@ -1645,6 +1654,7 @@ impl<'a> InstallManager<'a> {
             self.result.install_state.resolution_tree = TreeResolver::default()
                 .with_resolutions(&self.result.install_state.descriptor_to_locator, &self.result.install_state.normalized_resolutions)?
                 .with_roots(self.result.roots.clone())
+                .with_peer_dedupe(dedupe_peer_dependents)
                 .run();
         }
 

@@ -46,6 +46,10 @@
       "description": "Default warm-up period for long-lived tasks in the daemon. After a long-lived task starts, dependents are unblocked once this period elapses.",
       "default": "1s"
     },
+    "dedupePeerDependents": {
+      "type": ["boolean", "null"],
+      "description": "Whether compatible virtual instances of a package should be merged (defaults to true with the pnpm linker, false otherwise)"
+    },
     "defaultSemverRangePrefix": {
       "type": "zpm_semver::RangeKind",
       "description": "The default semver range prefix to use for dependencies",

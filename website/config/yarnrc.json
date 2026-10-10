@@ -61,6 +61,17 @@
       "description": "Possible values go from `0` (\"no compression, faster\") to `9` (\"heavy compression, slower\").",
       "enum": [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
     },
+    "dedupePeerDependents": {
+      "title": "Define whether compatible virtual instances of a package should be merged.",
+      "description": "Packages with peer dependencies get one virtual instance per set of peers their dependents provide. If true, an instance is merged into another one that already provides all of its dependencies, resolved to the same packages (typically because their dependents provide different subsets of optional peers). This avoids duplicated module instances and the type mismatches they cause. This matches pnpm's `dedupe-peer-dependents` setting.\n\nWhen unset, it defaults to `true` with `nodeLinker: pnpm` and to `false` with the other linkers.",
+      "type": "boolean",
+      "_examples": [
+        {
+          "description": "Always merge compatible virtual instances.",
+          "value": true
+        }
+      ]
+    },
     "defaultSemverRangePrefix": {
       "_package": "@yarnpkg/plugin-essentials",
       "type": "string",

@@ -46,6 +46,7 @@ pub struct TreeResolver {
     virtual_instances: BTreeMap<Locator, BTreeMap<(Vec<Ident>, Vec<Locator>), Descriptor>>,
     volatile_descriptor: BTreeSet<Descriptor>,
     volatile_locator: BTreeSet<Locator>,
+    dedupe_peer_dependents: bool,
 }
 
 impl TreeResolver {
@@ -115,6 +116,13 @@ impl TreeResolver {
         Ok(self)
     }
 
+    /// Merges the virtual instances of a package that are compatible (see
+    /// `dedupe_peer_dependents`), like pnpm's `dedupe-peer-dependents`.
+    pub fn with_peer_dedupe(mut self, dedupe_peer_dependents: bool) -> Self {
+        self.dedupe_peer_dependents = dedupe_peer_dependents;
+        self
+    }
+
     pub fn with_roots(mut self, roots: BTreeSet<Descriptor>) -> Self {
         self.resolution_tree.roots = roots;
         self
@@ -149,7 +157,7 @@ impl TreeResolver {
             );
         }
 
-        for locator in self.original_workspace_definitions {
+        for locator in std::mem::take(&mut self.original_workspace_definitions) {
             if let Some(resolution) = self.resolution_tree.locator_resolutions.get_mut(&locator.0) {
                 resolution.peer_dependencies.clear();
             }
@@ -164,7 +172,101 @@ impl TreeResolver {
             self.resolution_tree.optional_builds.remove(volatile_locator);
         }
 
+        if self.dedupe_peer_dependents {
+            self.dedupe_peer_dependents();
+        }
+
         self.resolution_tree
+    }
+
+    /**
+     * A package with peer dependencies gets one virtual instance per set of
+     * peers its dependents provide. When dependents provide different
+     * subsets of optional peers (one workspace has `pg`, another `pglite`),
+     * the same package ends up instantiated several times, which breaks
+     * anything relying on module identity (TypeScript types, instanceof,
+     * module-level registries).
+     *
+     * Like pnpm, an instance is merged into another one when the other
+     * provides every dependency it has (peers included) resolved to the
+     * same packages, plus possibly more: the merged instance then sees
+     * packages its dependents didn't provide, but never different ones.
+     * Instances are never combined into a new union, which could expose a
+     * package to peers none of its dependents had (pnpm doesn't either).
+     * Merging instances can make their own dependents compatible in turn,
+     * so this runs until nothing changes.
+     */
+    fn dedupe_peer_dependents(&mut self) {
+        loop {
+            let mut groups: BTreeMap<Locator, Vec<Locator>>
+                = BTreeMap::new();
+
+            for locator in self.resolution_tree.locator_resolutions.keys() {
+                if locator.reference.is_virtual_reference() {
+                    groups.entry(locator.physical_locator()).or_default().push(locator.clone());
+                }
+            }
+
+            let mut replacements: BTreeMap<Locator, Locator>
+                = BTreeMap::new();
+
+            for instances in groups.values() {
+                if instances.len() < 2 {
+                    continue;
+                }
+
+                // Instances receiving the most dependencies go first, so the
+                // others merge into the most complete one
+                let mut instances = instances.clone();
+                instances.sort_by_cached_key(|locator| (std::cmp::Reverse(self.resolution_tree.locator_resolutions[locator].dependencies.len()), locator.clone()));
+
+                let mut masters: Vec<(Locator, BTreeMap<Ident, Locator>)>
+                    = vec![];
+
+                for instance in instances {
+                    let dependencies
+                        = self.resolved_dependencies(&instance);
+
+                    // Masters come in decreasing dependency count, so the
+                    // first superset found is the most complete one
+                    let superset_master = masters.iter().find(|(_, master_dependencies)| {
+                        dependencies.iter().all(|(ident, locator)| master_dependencies.get(ident) == Some(locator))
+                    });
+
+                    match superset_master {
+                        Some((master, _)) => {
+                            replacements.insert(instance, master.clone());
+                        },
+
+                        None => {
+                            masters.push((instance, dependencies));
+                        },
+                    }
+                }
+            }
+
+            if replacements.is_empty() {
+                break;
+            }
+
+            // The masters already have everything the merged instances had
+            for instance in replacements.keys() {
+                self.resolution_tree.locator_resolutions.remove(instance);
+                self.resolution_tree.optional_builds.remove(instance);
+            }
+
+            for locator in self.resolution_tree.descriptor_to_locator.values_mut() {
+                if let Some(master) = replacements.get(locator) {
+                    *locator = master.clone();
+                }
+            }
+        }
+    }
+
+    fn resolved_dependencies(&self, locator: &Locator) -> BTreeMap<Ident, Locator> {
+        self.resolution_tree.locator_resolutions[locator].dependencies.iter()
+            .filter_map(|(ident, descriptor)| Some((ident.clone(), self.resolution_tree.descriptor_to_locator.get(descriptor)?.clone())))
+            .collect()
     }
 
     fn resolve_peer_dependencies_impl(&mut self, parent_descriptor: &Descriptor, parent_locator: &Locator, peer_slots: &BTreeMap<Ident, Locator>, top_locator: &Locator, is_optional: bool) {

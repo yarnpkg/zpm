@@ -47,6 +47,41 @@ describe(`Features`, () => {
     );
 
     test(
+      `it should merge compatible peer instances inside islands when dedupePeerDependents is enabled`,
+      makeTemporaryMonorepoEnv(
+        {
+          workspaces: [`packages/*`],
+        },
+        {
+          [`packages/with-peer`]: {name: `with-peer`, dependencies: {[`optional-peer-deps`]: `1.0.0`, [`no-deps`]: `1.0.0`}},
+          [`packages/without-peer`]: {name: `without-peer`, dependencies: {[`optional-peer-deps`]: `1.0.0`}},
+        },
+        async ({path, run}) => {
+          await yarn.writeConfiguration(path, {
+            dedupePeerDependents: true,
+            unstableIslands: {
+              main: {
+                workspaces: [`with-peer`, `without-peer`],
+                linker: `node-modules`,
+              },
+            },
+          });
+
+          await run(`install`);
+
+
+          // Both workspaces get the same virtual instance
+          const locatorOf = async (workspace: string) => {
+            const packageMap = await xfs.readJsonPromise(`${path}/packages/${workspace}/node_modules/.package-map.json` as PortablePath);
+            return packageMap.packages[`optional-peer-deps`].locator;
+          };
+
+          expect(await locatorOf(`without-peer`)).toEqual(await locatorOf(`with-peer`));
+        },
+      ),
+    );
+
+    test(
       `it should succeed with multiple islands`,
       makeTemporaryMonorepoEnv(
         {
