@@ -56,6 +56,10 @@ pub struct CoordinatorState {
     pub event_history: EventHistory,
     pub taskfile_watcher: TaskfileWatcher,
     pub file_watcher: FileWatcher,
+    /// Number of terminal transitions so far; lets the coordinator detect
+    /// that a scheduling pass made progress (e.g. script-less tasks
+    /// completing synchronously) and that another pass is needed.
+    pub closed_tasks_counter: u64,
 }
 
 impl CoordinatorState {
@@ -76,12 +80,15 @@ impl CoordinatorState {
             event_history: EventHistory::new(),
             taskfile_watcher: TaskfileWatcher::new(taskfile_notify_tx),
             file_watcher: FileWatcher::new(file_notify_tx, project_cwd),
+            closed_tasks_counter: 0,
         }
     }
 
     /// Clean up all registries for a task that has reached a terminal state.
     /// Called by every transition that ends a task (complete, fail, cancel).
     fn close_task(&mut self, task_id: &ContextualTaskId) -> CloseTaskEffect {
+        self.closed_tasks_counter += 1;
+
         // 1. Decrement the context's active task counter
         self.contexts.decrement(&task_id.context_id);
 
