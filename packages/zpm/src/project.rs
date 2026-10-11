@@ -1693,7 +1693,7 @@ impl Project {
         install_outcome
     }
 
-    /// Parse the `@workspaces` default tasks declared in the root taskfile.
+    /// Parse the `@defaultTask` default tasks declared in the root taskfile.
     pub fn workspace_task_defaults(&self) -> BTreeMap<TaskName, Task> {
         self.try_workspace_task_defaults().unwrap_or_default()
     }
@@ -1715,7 +1715,7 @@ impl Project {
     }
 
     /// Load the effective taskfile of a workspace: its own `taskfile` layered
-    /// over the `@workspaces` defaults of the root taskfile. Returns the paths
+    /// over the `@defaultTask` defaults of the root taskfile. Returns the paths
     /// of the files that were read so callers can watch them.
     pub fn load_workspace_taskfile(&self, workspace: &Workspace, defaults: &BTreeMap<TaskName, Task>) -> (Option<TaskFile>, Vec<Path>) {
         let task_file_path

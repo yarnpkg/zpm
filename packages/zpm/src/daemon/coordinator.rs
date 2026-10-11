@@ -906,7 +906,7 @@ fn initialize_taskfile_watcher(watcher: &mut TaskfileWatcher, project: &Project)
         let task_file_path = workspace.taskfile_path();
 
         // Always watch the default taskfile path, even if it doesn't exist
-        // yet, and the root taskfile, whose `@workspaces` defaults apply to
+        // yet, and the root taskfile, whose `@defaultTask` defaults apply to
         // every other workspace
         let mut sources = vec![task_file_path];
 
@@ -1019,7 +1019,7 @@ fn reload_taskfile(
     );
 
     // Re-register source files (includes may have changed). Non-root
-    // workspaces always watch the root taskfile, since `@workspaces`
+    // workspaces always watch the root taskfile, since `@defaultTask`
     // defaults may be added to it at any time.
     let mut sources = vec![task_file_path];
     if workspace.rel_path != Path::new() {

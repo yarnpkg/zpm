@@ -7,14 +7,14 @@ use crate::ast::{
 };
 
 /// Attribute marking a root taskfile task as a default applying to every
-/// workspace of the project (similar to a `turbo.json` task definition).
-pub const WORKSPACES_ATTRIBUTE: &str = "workspaces";
+/// non-root workspace unless it defines its own task with the same name.
+pub const DEFAULT_TASK_ATTRIBUTE: &str = "defaultTask";
 
 pub fn is_workspace_default(task: &Task) -> bool {
-    task.attributes.iter().any(|attr| attr.name == WORKSPACES_ATTRIBUTE)
+    task.attributes.iter().any(|attr| attr.name == DEFAULT_TASK_ATTRIBUTE)
 }
 
-/// Extract the `@workspaces` tasks from the root taskfile.
+/// Extract the `@defaultTask` tasks from the root taskfile.
 pub fn extract_workspace_defaults(root_task_file: &TaskFile) -> BTreeMap<TaskName, Task> {
     root_task_file.tasks.iter()
         .filter(|(_, task)| is_workspace_default(task))
@@ -22,7 +22,7 @@ pub fn extract_workspace_defaults(root_task_file: &TaskFile) -> BTreeMap<TaskNam
         .collect()
 }
 
-/// Remove the `@workspaces` tasks from the root workspace's own taskfile;
+/// Remove the `@defaultTask` tasks from the root workspace's own taskfile;
 /// they are templates for the other workspaces, not root tasks.
 pub fn strip_workspace_defaults(task_file: &mut TaskFile) {
     task_file.tasks.retain(|_, task| !is_workspace_default(task));
@@ -31,10 +31,11 @@ pub fn strip_workspace_defaults(task_file: &mut TaskFile) {
 /// Build the effective taskfile of a workspace by layering the root defaults
 /// below its local taskfile (local definitions always win).
 ///
-/// A default task without a script body is "script-backed": if the workspace
-/// declares a `package.json` script of the same name it runs it (through
-/// `yarn run`, so binaries and environment are the same as when running the
-/// script manually), otherwise it's a no-op that still propagates ordering.
+/// An inherited task without commands runs the workspace's matching
+/// `package.json` script through `yarn run`, when present. Otherwise, it only
+/// waits for its task dependencies. For example, with `build: *:build` and a
+/// dependency chain app -> bridge -> core, app still waits for core's build
+/// even if bridge has no build script.
 pub fn apply_workspace_defaults<S>(
     local_task_file: Option<TaskFile>,
     defaults: &BTreeMap<TaskName, Task>,
@@ -79,7 +80,7 @@ mod tests {
     #[test]
     fn test_defaults_layering() {
         let root
-            = parse("@workspaces\nbuild: ^build\n\n@workspaces\ncheck: test:ci\n\nown:\n  echo own").unwrap();
+            = parse("@defaultTask\nbuild: *:build\n\n@defaultTask\ncheck: test-ci\n\nown:\n  echo own").unwrap();
 
         let defaults
             = extract_workspace_defaults(&root);
@@ -94,6 +95,7 @@ mod tests {
 
         assert_eq!(tf.tasks["build"].script, vec!["yarn run build \"$@\""]);
         assert_eq!(tf.tasks["check"].script, vec!["echo local"]);
+        assert!(tf.tasks["check"].dependencies.is_empty());
         assert!(!tf.tasks.contains_key("own"));
 
         let tf

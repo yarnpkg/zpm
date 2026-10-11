@@ -2,17 +2,9 @@ use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 
 use serde::Serialize;
 use zpm_primitives::{Ident, IdentGlob};
-use zpm_utils::{
-    scc_tarjan_pearce,
-    ToFileString,
-};
+use zpm_utils::scc_tarjan_pearce;
 
-use crate::ast::{
-    Dependency,
-    TaskFile,
-    TaskId,
-    TaskName,
-};
+use crate::ast::{Dependency, TaskFile, TaskId};
 use crate::error::Error;
 
 #[derive(Debug, Clone, Serialize)]
@@ -105,9 +97,6 @@ where
         let dependencies
             = task.dependencies.clone();
 
-        let local_task_names: HashSet<TaskName>
-            = task_file.tasks.keys().cloned().collect();
-
         let mut deps_with_parallel: Vec<(TaskId, bool)>
             = Vec::new();
 
@@ -128,26 +117,6 @@ where
                     }
                 }
                 Dependency::External { ident_glob, task_name, parallel } => {
-                    // Task names may contain colons (`test:ci`), which makes
-                    // `test:ci` ambiguous with "task `ci` of workspace `test`".
-                    // Tasks of the current workspace take precedence.
-                    let local_name
-                        = TaskName::new(&format!("{}:{}", ident_glob.to_file_string(), task_name.as_str())).ok()
-                            .filter(|name| local_task_names.contains(name));
-
-                    if let Some(name) = local_name {
-                        let dep_id = TaskId {
-                            workspace: task_id.workspace.clone(),
-                            task_name: name,
-                        };
-                        deps_with_parallel.push((dep_id.clone(), *parallel));
-                        all_deps.insert(dep_id.clone());
-                        if !visited.contains(&dep_id) {
-                            to_visit.push(dep_id);
-                        }
-                        continue;
-                    }
-
                     let matching_workspaces
                         = resolve_ident_glob(ident_glob, &task_id.workspace);
 
@@ -289,7 +258,7 @@ fn build_dependency_phases(deps: Vec<(TaskId, bool)>) -> Vec<Vec<TaskId>> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ast::Task;
+    use crate::ast::{Task, TaskName};
 
     fn task_name(name: &str) -> TaskName {
         TaskName::new(name).unwrap()
