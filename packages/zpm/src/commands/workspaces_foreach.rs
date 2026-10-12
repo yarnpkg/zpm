@@ -66,6 +66,10 @@ pub struct WorkspacesForeach {
     #[cli::option("--since")]
     since: Option<Option<String>>,
 
+    /// Compare against this ref rather than the working tree when used with `--since`
+    #[cli::option("--head")]
+    head: Option<String>,
+
     /// Include workspace dependencies of the selected workspaces
     #[cli::option("--recursive", default = false)]
     recursive: bool,
@@ -193,6 +197,7 @@ impl WorkspacesForeach {
             all: self.all,
             from: &self.from,
             since: &self.since,
+            head: &self.head,
             recursive: self.recursive,
             follow_dependencies: self.follow_dependencies,
             follow_dependents: self.follow_dependents,

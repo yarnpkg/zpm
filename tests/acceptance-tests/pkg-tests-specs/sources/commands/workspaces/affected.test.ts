@@ -150,6 +150,54 @@ describe(`Commands`, () => {
     );
 
     test(
+      `--since / --head should take precedence over the environment variables`,
+      affectedEnv(async ({path, run, git}) => {
+        const base = git(`rev-parse`, `HEAD`);
+
+        await xfs.writeFilePromise(ppath.join(path, `packages/pkg-b/index.js` as PortablePath), `// change\n`);
+        git(`add`, `-A`);
+        git(`commit`, `-q`, `-m`, `change b`);
+        const middle = git(`rev-parse`, `HEAD`);
+
+        await xfs.writeFilePromise(ppath.join(path, `packages/pkg-d/index.js` as PortablePath), `// change\n`);
+        git(`add`, `-A`);
+        git(`commit`, `-q`, `-m`, `change d`);
+
+        const env = {YARN_CHANGESET_BASE: middle, YARN_CHANGESET_HEAD: middle, TURBO_SCM_BASE: middle, TURBO_SCM_HEAD: middle};
+
+        const {stdout: fromEnv} = await run(`workspaces`, `list`, `--since`, `--json`, {env});
+        expect(names(fromEnv)).toEqual([]);
+
+        const {stdout: explicitBase} = await run(`workspaces`, `list`, `--since=${base}`, `--json`, {env});
+        expect(names(explicitBase)).toEqual([`pkg-b`]);
+
+        const {stdout: explicitBoth} = await run(`workspaces`, `list`, `--since=${base}`, `--head=HEAD`, `--json`, {env});
+        expect(names(explicitBoth)).toEqual([`pkg-b`, `pkg-d`]);
+
+        const {stdout: foreachOutput} = await run(`workspaces`, `foreach`, `--since=${base}`, `--head=HEAD`, `exec`, `node`, `-p`, `require('./package.json').name`, {env});
+        expect(foreachOutput.trim().split(`\n`).filter(line => line.startsWith(`pkg-`)).sort()).toEqual([`pkg-b`, `pkg-d`]);
+      }),
+    );
+
+    test(
+      `foreach --head should compare two refs, ignoring the working tree`,
+      affectedEnv(async ({path, run, git}) => {
+        const base = git(`rev-parse`, `HEAD`);
+
+        await xfs.writeFilePromise(ppath.join(path, `packages/pkg-b/index.js` as PortablePath), `// change\n`);
+        git(`add`, `-A`);
+        git(`commit`, `-q`, `-m`, `change b`);
+        const head = git(`rev-parse`, `HEAD`);
+
+        // Uncommitted change that must be ignored when --head is set
+        await xfs.writeFilePromise(ppath.join(path, `packages/pkg-d/index.js` as PortablePath), `// change\n`);
+
+        const {stdout} = await run(`workspaces`, `foreach`, `--since=${base}`, `--head=${head}`, `--recursive`, `exec`, `node`, `-p`, `require('./package.json').name`);
+        expect(stdout.trim().split(`\n`).filter(line => line.startsWith(`pkg-`)).sort()).toEqual([`pkg-b`, `pkg-c`]);
+      }),
+    );
+
+    test(
       `lockfile changes should only mark workspaces whose dependency tree changed`,
       affectedEnv(async ({path, run, git}) => {
         const manifestPath = ppath.join(path, `packages/pkg-d/package.json` as PortablePath);

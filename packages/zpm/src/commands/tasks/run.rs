@@ -27,6 +27,9 @@ use crate::workspace_selection::{FollowedDependencies, WorkspaceSelection};
 ///
 /// - `--since [ref]` runs it in the workspaces changed since the ref, or since
 ///   the configured base refs (`changesetBaseRefs`) when no ref is provided.
+///   The working tree is compared to the base unless `--head <ref>` is set.
+///   Unset bounds are read from `YARN_CHANGESET_BASE` / `YARN_CHANGESET_HEAD`
+///   (or `TURBO_SCM_BASE` / `TURBO_SCM_HEAD`).
 ///
 /// - `--follow-dependencies` adds the transitive workspace dependencies of the
 ///   selection, and `--follow-dependents` adds its dependents. `--recursive`
@@ -72,6 +75,10 @@ pub struct TaskRun {
     /// Run the task in the workspaces changed since a ref, or since the configured base refs when no ref is provided
     #[cli::option("--since")]
     since: Option<Option<String>>,
+
+    /// Compare against this ref rather than the working tree when used with `--since`
+    #[cli::option("--head")]
+    head: Option<String>,
 
     /// Follow dependencies, or dependents when combined with `--since`
     #[cli::option("--recursive", default = false)]
@@ -150,6 +157,7 @@ impl TaskRun {
             all: self.all,
             from: &self.from,
             since: &self.since,
+            head: &self.head,
             recursive: self.recursive,
             follow_dependencies: self.follow_dependencies,
             follow_dependents: self.follow_dependents,
