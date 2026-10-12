@@ -1,6 +1,5 @@
 mod helpers;
 mod runner;
-mod selection;
 
 pub mod history;
 pub mod list;

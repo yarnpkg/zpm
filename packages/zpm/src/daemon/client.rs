@@ -29,8 +29,8 @@ type PendingRequests = Arc<Mutex<HashMap<u64, oneshot::Sender<DaemonResponse>>>>
 pub struct PushTasksOptions {
     /// Skip cross-workspace dependencies outside of the pushed workspaces
     pub only: bool,
-    /// Maximum number of concurrent processes in the context
-    pub concurrency: Option<usize>,
+    /// Task running the command that pushes the tasks (nested `yarn tasks run`)
+    pub caller_task_id: Option<String>,
 }
 
 /// Result of pushing tasks to the daemon
@@ -400,7 +400,7 @@ impl DaemonClient {
                 status_subscription,
                 context_id,
                 only: options.only.then_some(true),
-                concurrency: options.concurrency,
+                caller_task_id: options.caller_task_id,
             };
 
         match self.send_request(request).await? {

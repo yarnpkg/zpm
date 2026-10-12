@@ -6,9 +6,14 @@ use crate::daemon::coordinator_state::TaskGraph;
 /// Find tasks that are ready to execute.
 /// A task is ready when all its prerequisites are completed (in the same context).
 /// For long-lived prerequisites, being "warmed up" counts as ready for dependents.
+///
+/// At most `task_concurrency` processes run at once, across all contexts.
+/// Long-lived tasks, script-less tasks, and tasks blocked on a nested run
+/// (see `TaskGraph::context_callers`) don't count toward the limit.
 pub fn find_ready_tasks(
     graph: &TaskGraph,
     running: &HashSet<ContextualTaskId>,
+    task_concurrency: usize,
 ) -> Vec<ContextualTaskId> {
     // Collect all contexts that have pending work
     let active_contexts: HashSet<&String> = graph
@@ -18,22 +23,21 @@ pub fn find_ready_tasks(
         .map(|ctx_id| &ctx_id.context_id)
         .collect();
 
+    let blocked_callers: HashSet<&ContextualTaskId>
+        = graph.context_callers.values().collect();
+
+    let running_count
+        = running.iter()
+            .filter(|id| !graph.is_long_lived(id) && !blocked_callers.contains(id))
+            .count();
+
+    let mut available_slots
+        = task_concurrency.max(1).saturating_sub(running_count);
+
     let mut ready = Vec::new();
 
     // For each context, check which tasks are ready
     for context_id in active_contexts {
-        // Contexts may carry a concurrency limit (`yarn tasks run -j`); tasks
-        // without a script don't spawn a process and aren't counted.
-        let mut available_slots: Option<usize>
-            = graph.concurrency_limits.get(context_id).map(|limit| {
-                let running_in_context
-                    = running.iter()
-                        .filter(|id| &id.context_id == context_id)
-                        .count();
-
-                limit.saturating_sub(running_in_context)
-            });
-
         for ctx_task_id in graph.prepared.keys().filter(|id| &id.context_id == context_id) {
             let Some(prerequisites) = graph.prerequisites_of(&ctx_task_id.task_id, context_id) else {
                 continue;
@@ -81,18 +85,16 @@ pub fn find_ready_tasks(
                 continue;
             }
 
-            if let Some(slots) = available_slots.as_mut() {
-                let spawns_process
-                    = graph.prepared.get(&ctx_task_id)
-                        .map_or(false, |prepared| !prepared.script.is_empty());
+            let takes_slot
+                = graph.prepared.get(&ctx_task_id)
+                    .map_or(false, |prepared| !prepared.script.is_empty() && !prepared.is_long_lived);
 
-                if spawns_process {
-                    if *slots == 0 {
-                        continue;
-                    }
-
-                    *slots -= 1;
+            if takes_slot {
+                if available_slots == 0 {
+                    continue;
                 }
+
+                available_slots -= 1;
             }
 
             ready.push(ctx_task_id);

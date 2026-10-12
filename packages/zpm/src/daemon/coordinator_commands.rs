@@ -19,7 +19,7 @@ pub enum CoordinatorCommand {
         workspace: Option<String>,
         context_id: Option<String>,
         only: bool,
-        concurrency: Option<usize>,
+        caller_task_id: Option<String>,
         subscription_id: Option<SubscriptionId>,
         response_tx: oneshot::Sender<PushTasksResult>,
     },

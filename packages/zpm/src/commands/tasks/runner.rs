@@ -8,16 +8,18 @@ pub fn exit_status_from_code(code: i32) -> ExitStatus {
 
 use async_trait::async_trait;
 use uuid::Uuid;
+use zpm_primitives::Ident;
+use zpm_tasks::TaskName;
 use zpm_utils::ToFileString;
 
 use super::helpers::{is_long_lived_task, print_attach_header, print_detach_footer};
-use super::selection::TaskSelection;
 use crate::daemon::{
     ContextualTaskId, DaemonClient, DaemonNotification, PushTasksOptions, PushTasksResult, StandaloneDaemonHandle,
-    SubscriptionScope, TaskSubscription,
+    SubscriptionScope, TaskSubscription, CURRENT_TASK_ENV_NAME,
 };
 use crate::error::Error;
 use crate::project::Project;
+use crate::workspace_selection::WorkspaceSelection;
 
 pub struct TaskRunConfig {
     pub output_subscription: SubscriptionScope,
@@ -128,16 +130,47 @@ pub async fn run_task(
     }).await
 }
 
-/// Options for `run_tasks`. The default selection runs the tasks in the
+/// Options for `run_tasks`. Without a selection, the tasks run in the
 /// active workspace only.
 #[derive(Default)]
 pub struct TaskRunOptions<'a> {
-    pub selection: TaskSelection<'a>,
+    pub selection: Option<WorkspaceSelection<'a>>,
     pub standalone: bool,
     pub verbose_level: u8,
     pub only: bool,
-    pub concurrency: Option<usize>,
     pub continue_on_error: bool,
+}
+
+/// Compute the `(workspace, task)` pairs to run: every selected workspace
+/// declaring one of the requested tasks (including through the root
+/// `@workspaces` defaults).
+async fn select_targets(project: &Project, selection: &WorkspaceSelection<'_>, names: &[String]) -> Result<Vec<(Ident, String)>, Error> {
+    let task_names: Vec<TaskName>
+        = names.iter()
+            .map(|name| TaskName::new(name).map_err(|_| Error::TaskNameParseError(name.clone())))
+            .collect::<Result<_, _>>()?;
+
+    let workspaces
+        = selection.select(project).await?;
+
+    let defaults
+        = project.workspace_task_defaults();
+
+    let mut targets
+        = Vec::new();
+
+    for ident in workspaces {
+        let workspace
+            = project.workspace_by_ident(&ident)?;
+
+        for task_name in &task_names {
+            if project.find_workspace_task(workspace, task_name, &defaults).is_some() {
+                targets.push((ident.clone(), task_name.as_str().to_string()));
+            }
+        }
+    }
+
+    Ok(targets)
 }
 
 pub async fn run_tasks(
@@ -157,16 +190,16 @@ pub async fn run_tasks(
     let workspace_name
         = workspace.name.to_file_string();
 
-    let task_subscriptions = match options.selection.is_active() {
-        false => names.iter().map(|name| TaskSubscription {
+    let task_subscriptions = match &options.selection {
+        None => names.iter().map(|name| TaskSubscription {
             name: name.clone(),
             args: args.to_vec(),
             workspace: None,
         }).collect::<Vec<_>>(),
 
-        true => {
+        Some(selection) => {
             let targets
-                = options.selection.select_targets(&project, names).await?;
+                = select_targets(&project, selection, names).await?;
 
             if targets.is_empty() {
                 handler.on_nothing_to_run();
@@ -212,9 +245,14 @@ pub async fn run_tasks(
     let name
         = names.join(" ");
 
+    // Nested runs (`yarn tasks run` from a task script) let the daemon know
+    // which task is waiting on them
     let push_options = PushTasksOptions {
         only: options.only,
-        concurrency: options.concurrency,
+        caller_task_id: match options.standalone {
+            true => None,
+            false => std::env::var(CURRENT_TASK_ENV_NAME).ok(),
+        },
     };
 
     let mut ctx = TaskRunContext {
@@ -253,7 +291,7 @@ pub async fn run_tasks(
     // Single-task runs keep their historical behavior (only dependents of a
     // failed task are cancelled); multi-workspace runs default to fail-fast.
     let fail_fast
-        = !options.continue_on_error && (options.selection.is_active() || names.len() > 1);
+        = !options.continue_on_error && (options.selection.is_some() || names.len() > 1);
 
     let mut has_cancelled_context
         = false;

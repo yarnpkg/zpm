@@ -57,10 +57,10 @@ pub enum DaemonRequest {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         #[ts(optional)]
         only: Option<bool>,
-        /// Maximum number of processes running at the same time in this context.
+        /// Task running the command that pushes these tasks (nested `yarn tasks run`); it doesn't hold a concurrency slot while they run.
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        #[ts(optional, type = "number")]
-        concurrency: Option<usize>,
+        #[ts(optional)]
+        caller_task_id: Option<String>,
     },
     GetTaskOutput {
         #[ts(type = "string")]

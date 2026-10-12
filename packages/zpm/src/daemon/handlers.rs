@@ -54,9 +54,9 @@ pub async fn dispatch_request(
             status_subscription: _,
             context_id,
             only,
-            concurrency,
+            caller_task_id,
         } => {
-            handle_push_tasks(tasks, parent_task_id, workspace, context_id, only.unwrap_or(false), concurrency, subscription_id, command_tx).await
+            handle_push_tasks(tasks, parent_task_id, workspace, context_id, only.unwrap_or(false), caller_task_id, subscription_id, command_tx).await
         }
 
         DaemonRequest::GetTaskOutput { task_id } => {
@@ -111,7 +111,7 @@ async fn handle_push_tasks(
     workspace: Option<String>,
     context_id: Option<String>,
     only: bool,
-    concurrency: Option<usize>,
+    caller_task_id: Option<String>,
     subscription_id: Option<SubscriptionId>,
     command_tx: &CommandSender,
 ) -> DaemonResponse {
@@ -124,7 +124,7 @@ async fn handle_push_tasks(
             workspace,
             context_id,
             only,
-            concurrency,
+            caller_task_id,
             subscription_id,
             response_tx,
         })

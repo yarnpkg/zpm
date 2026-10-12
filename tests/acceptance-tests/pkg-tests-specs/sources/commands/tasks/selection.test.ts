@@ -78,33 +78,59 @@ describe(`Commands`, () => {
     );
 
     test(
-      `--dependencies-only should run the task in the dependencies only (turbo pkg^...)`,
+      `--recursive should apply to the current workspace when no seed is given`,
       monorepo()(async ({path, run, runSwitch}) => {
         await setup(path, run);
 
-        const {events} = await runJson(runSwitch, [`--from`, `pkg-c`, `--dependencies-only`, `build`]);
-        expect(eventsOf(events, `task-started`)).toEqual([`pkg-a:build`, `pkg-b:build`]);
-      }),
-    );
-
-    test(
-      `--with-dependencies should apply to the current workspace when no seed is given (turbo pkg...)`,
-      monorepo()(async ({path, run, runSwitch}) => {
-        await setup(path, run);
-
-        // Without ^build in typecheck, --with-dependencies is what pulls the dependencies in
-        const {events} = await runJson(runSwitch, [`--with-dependencies`, `typecheck`], {cwd: ppath.join(path, `packages/pkg-c` as PortablePath)});
+        // Without ^build in typecheck, --recursive is what pulls the dependencies in
+        const {events} = await runJson(runSwitch, [`--recursive`, `typecheck`], {cwd: ppath.join(path, `packages/pkg-c` as PortablePath)});
         expect(eventsOf(events, `task-started`).sort()).toEqual([`pkg-a:typecheck`, `pkg-b:typecheck`]);
       }),
     );
 
     test(
-      `--with-dependents should add the dependents of the selection`,
+      `--follow-dependencies should add the dependencies of the selection`,
       monorepo()(async ({path, run, runSwitch}) => {
         await setup(path, run);
 
-        const {events} = await runJson(runSwitch, [`--from`, `pkg-b`, `--with-dependents`, `--only`, `build`]);
+        const {events} = await runJson(runSwitch, [`--from`, `pkg-b`, `--follow-dependencies`, `typecheck`]);
+        expect(eventsOf(events, `task-started`).sort()).toEqual([`pkg-a:typecheck`, `pkg-b:typecheck`]);
+      }),
+    );
+
+    test(
+      `--followed-dependencies should restrict the dependency kinds being followed`,
+      monorepo()(async ({path, run, runSwitch}) => {
+        await setup(path, run);
+
+        // pkg-c only depends on pkg-b through its devDependencies
+        const {events: prod} = await runJson(runSwitch, [`--from`, `pkg-c`, `--follow-dependencies`, `--followed-dependencies`, `prod`, `--only`, `build`]);
+        expect(eventsOf(prod, `task-started`)).toEqual([`pkg-c:build`]);
+
+        const {events: dev} = await runJson(runSwitch, [`--from`, `pkg-c`, `--follow-dependencies`, `--followed-dependencies`, `dev`, `--only`, `build`]);
+        expect(eventsOf(dev, `task-started`)).toEqual([`pkg-b:build`, `pkg-c:build`]);
+      }),
+    );
+
+    test(
+      `--follow-dependents should add the dependents of the selection`,
+      monorepo()(async ({path, run, runSwitch}) => {
+        await setup(path, run);
+
+        const {events} = await runJson(runSwitch, [`--from`, `pkg-b`, `--follow-dependents`, `--only`, `build`]);
         expect(eventsOf(events, `task-started`)).toEqual([`pkg-b:build`, `pkg-c:build`]);
+      }),
+    );
+
+    test(
+      `--no-private should skip private workspaces`,
+      monorepo({
+        [`packages/pkg-d`]: {name: `pkg-d`, private: true, scripts: {build: `echo build-d`}},
+      })(async ({path, run, runSwitch}) => {
+        await setup(path, run);
+
+        const {events} = await runJson(runSwitch, [`-A`, `--no-private`, `build`]);
+        expect(eventsOf(events, `task-started`).sort()).toEqual([`pkg-a:build`, `pkg-b:build`, `pkg-c:build`]);
       }),
     );
 
@@ -214,14 +240,14 @@ describe(`Commands`, () => {
     );
 
     test(
-      `-j should limit the number of concurrent processes`,
+      `taskConcurrency should limit the number of concurrent processes`,
       monorepo({
         [`packages/pkg-a`]: {name: `pkg-a`, scripts: {build: `mkdir lock-a 2>/dev/null; ls -d ../*/lock-* | wc -l | tr -d ' ' > ../../conc-a; sleep 0.3; rmdir lock-a`}},
         [`packages/pkg-d`]: {name: `pkg-d`, scripts: {build: `mkdir lock-d 2>/dev/null; ls -d ../*/lock-* | wc -l | tr -d ' ' > ../../conc-d; sleep 0.3; rmdir lock-d`}},
       })(async ({path, run, runSwitch}) => {
         await setup(path, run);
 
-        const {code} = await runJson(runSwitch, [`--from`, `pkg-{a,d}`, `-j`, `1`, `build`]);
+        const {code} = await runJson(runSwitch, [`--from`, `pkg-{a,d}`, `build`], {env: {YARN_TASK_CONCURRENCY: `1`}});
         expect(code).toEqual(0);
 
         expect((await xfs.readFilePromise(ppath.join(path, `conc-a` as PortablePath), `utf8`)).trim()).toEqual(`1`);
@@ -230,7 +256,67 @@ describe(`Commands`, () => {
     );
 
     test(
-      `--since should run the task in changed workspaces and their dependents`,
+      `taskConcurrency should be shared by the runs of the background daemon`,
+      monorepo({
+        [`packages/pkg-a`]: {name: `pkg-a`, scripts: {build: `mkdir lock-a 2>/dev/null; sleep 0.5; ls -d ../*/lock-* | wc -l | tr -d ' ' > ../../conc-a; rmdir lock-a`}},
+        [`packages/pkg-d`]: {name: `pkg-d`, scripts: {build: `mkdir lock-d 2>/dev/null; sleep 0.5; ls -d ../*/lock-* | wc -l | tr -d ' ' > ../../conc-d; rmdir lock-d`}},
+      })(async ({path, run, runSwitch}) => {
+        await setup(path, run);
+
+        const env = {YARN_TASK_CONCURRENCY: `1`};
+
+        try {
+          // Start the daemon first, so both runs go through the same one
+          await runSwitch(`tasks`, `run`, `--no-standalone`, `--from`, `pkg-e`, `build`, {env});
+
+          await Promise.all([
+            runSwitch(`tasks`, `run`, `--no-standalone`, `--from`, `pkg-a`, `--only`, `build`, {env}),
+            runSwitch(`tasks`, `run`, `--no-standalone`, `--from`, `pkg-d`, `--only`, `build`, {env}),
+          ]);
+
+          expect((await xfs.readFilePromise(ppath.join(path, `conc-a` as PortablePath), `utf8`)).trim()).toEqual(`1`);
+          expect((await xfs.readFilePromise(ppath.join(path, `conc-d` as PortablePath), `utf8`)).trim()).toEqual(`1`);
+        } finally {
+          await runSwitch(`switch`, `daemon`, `--kill-all`);
+        }
+      }),
+    );
+
+    test(
+      `long-lived tasks shouldn't count toward taskConcurrency`,
+      monorepo()(async ({path, run, runSwitch}) => {
+        await setup(path, run);
+        await xfs.writeFilePromise(ppath.join(path, `packages/pkg-b/taskfile` as PortablePath), [
+          `@long-lived`,
+          `server:`,
+          `  sleep 30`,
+          ``,
+          `client: server`,
+          `  echo client-b`,
+        ].join(`\n`));
+
+        const {code, events} = await runJson(runSwitch, [`--from`, `pkg-b`, `client`], {env: {YARN_TASK_CONCURRENCY: `1`}});
+        expect(code).toEqual(0);
+        expect(eventsOf(events, `task-started`)).toContain(`pkg-b:client`);
+      }),
+    );
+
+    test(
+      `tasks waiting on a nested run shouldn't count toward taskConcurrency`,
+      monorepo()(async ({path, run, runSwitch}) => {
+        await setup(path, run);
+        await xfs.writeFilePromise(ppath.join(path, `packages/pkg-d/taskfile` as PortablePath), [
+          `outer:`,
+          `  yarn tasks run --from pkg-a --only build`,
+        ].join(`\n`));
+
+        const {stdout} = await runSwitch(`tasks`, `run`, `--standalone`, `--from`, `pkg-d`, `outer`, {env: {YARN_TASK_CONCURRENCY: `1`}});
+        expect(stdout).toContain(`build-a`);
+      }),
+    );
+
+    test(
+      `--since should run the task in changed workspaces, and their dependents with --recursive`,
       monorepo()(async ({path, run, runSwitch, git}: any) => {
         await setup(path, run);
 
@@ -246,11 +332,14 @@ describe(`Commands`, () => {
 
         await xfs.writeFilePromise(ppath.join(path, `packages/pkg-b/index.js` as PortablePath), `// change\n`);
 
-        const {events} = await runJson(runSwitch, [`--since`, `main`, `--only`, `build`]);
-        expect(eventsOf(events, `task-started`)).toEqual([`pkg-b:build`, `pkg-c:build`]);
+        const {events} = await runJson(runSwitch, [`--since=main`, `--only`, `build`]);
+        expect(eventsOf(events, `task-started`)).toEqual([`pkg-b:build`]);
 
-        // --affected uses the configured base refs (main/master)
-        const {events: affected} = await runJson(runSwitch, [`--affected`, `--only`, `build`]);
+        const {events: recursive} = await runJson(runSwitch, [`--since=main`, `--recursive`, `--only`, `build`]);
+        expect(eventsOf(recursive, `task-started`)).toEqual([`pkg-b:build`, `pkg-c:build`]);
+
+        // Without a ref, --since uses the configured base refs (main/master)
+        const {events: affected} = await runJson(runSwitch, [`--since`, `--recursive`, `--only`, `build`]);
         expect(eventsOf(affected, `task-started`)).toEqual([`pkg-b:build`, `pkg-c:build`]);
       }),
     );

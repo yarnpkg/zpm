@@ -7,9 +7,10 @@ use super::run_errors_only::ErrorsOnlyHandler;
 use super::run_interlaced::InterlacedHandler;
 use super::run_silent_dependencies::SilentDependenciesHandler;
 use super::runner::{run_task, run_tasks, TaskRunOptions};
-use super::selection::TaskSelection;
+use crate::daemon::DAEMON_SERVER_ENV_NAME;
 use crate::error::Error;
 use crate::workspace_glob::WorkspaceGlob;
+use crate::workspace_selection::{FollowedDependencies, WorkspaceSelection};
 
 /// Run a task
 ///
@@ -17,31 +18,34 @@ use crate::workspace_glob::WorkspaceGlob;
 /// the `taskfile` of the current workspace, or across many workspaces at once
 /// when a workspace selection option is set.
 ///
-/// Workspace selection (turbo `--filter` equivalents):
+/// Workspace selection uses the same options as `yarn workspaces foreach`:
 ///
 /// - `-A,--all` runs the task in every workspace declaring it.
 ///
 /// - `--from <glob>` runs it in the workspaces matching the glob (ident glob
 ///   like `@scope/*` or path glob like `./packages/*`); can be repeated.
 ///
-/// - `--affected` runs it in the workspaces changed since the configured base
-///   refs (`changesetBaseRefs`) and in all the workspaces depending on them
-///   (`turbo run --affected`); `--since <ref>` does the same against an
-///   explicit ref.
+/// - `--since [ref]` runs it in the workspaces changed since the ref, or since
+///   the configured base refs (`changesetBaseRefs`) when no ref is provided.
 ///
-/// - `--with-dependencies` (alias `--recursive`) adds the transitive workspace
-///   dependencies of the selection (`--filter pkg...`), `--dependencies-only`
-///   replaces the selection by its dependencies (`--filter pkg^...`), and
-///   `--with-dependents` adds its dependents (`--filter ...pkg`). Without
-///   `-A`/`--from`/`--since`, they apply to the current workspace.
+/// - `--follow-dependencies` adds the transitive workspace dependencies of the
+///   selection, and `--follow-dependents` adds its dependents. `--recursive`
+///   follows dependents when combined with `--since` (so `--since --recursive`
+///   selects all the affected workspaces), and dependencies otherwise.
+///   `--followed-dependencies` restricts the traversal to `prod` or `dev`
+///   dependencies. Without `-A`/`--from`/`--since`, they apply to the current
+///   workspace.
 ///
-/// - `--include`/`--exclude <glob>` filter the final selection.
+/// - `--include`/`--exclude <glob>` and `--no-private` filter the final
+///   selection.
 ///
 /// All selected tasks are resolved into a single deduplicated graph. Use
 /// `--only` to skip cross-workspace dependencies (e.g. `^build`) pointing
 /// outside of the selection. When running across workspaces the first
-/// failure cancels the run unless `--continue` is set, and at most
-/// `-j,--concurrency` processes (CPU count by default) run at once.
+/// failure cancels the run unless `--continue` is set.
+///
+/// The daemon limits the number of processes running at once across all
+/// runs, according to the `taskConcurrency` setting (CPU count by default).
 ///
 /// Several tasks can be run at once by separating them with commas
 /// (`yarn tasks run build,typecheck -A`).
@@ -52,6 +56,7 @@ use crate::workspace_glob::WorkspaceGlob;
 /// By default the tasks run through the background daemon; on CI (when the
 /// `CI` environment variable is set) they run in an in-process daemon instead
 /// (`--standalone`), which can be toggled with `--standalone`/`--no-standalone`.
+/// Runs started from within a task always reuse the daemon running it.
 #[cli::command(proxy)]
 #[cli::path("tasks", "run")]
 #[cli::category("Task management commands")]
@@ -64,25 +69,25 @@ pub struct TaskRun {
     #[cli::option("--from", default = vec![])]
     from: Vec<WorkspaceGlob>,
 
-    /// Run the task in the workspaces changed since a ref (and their dependents)
+    /// Run the task in the workspaces changed since a ref, or since the configured base refs when no ref is provided
     #[cli::option("--since")]
-    since: Option<String>,
+    since: Option<Option<String>>,
 
-    /// Run the task in the workspaces changed since the base refs (and their dependents)
-    #[cli::option("--affected", default = false)]
-    affected: bool,
+    /// Follow dependencies, or dependents when combined with `--since`
+    #[cli::option("--recursive", default = false)]
+    recursive: bool,
 
     /// Also run the task in the dependencies of the selected workspaces
-    #[cli::option("--with-dependencies,--recursive", default = false)]
-    with_dependencies: bool,
-
-    /// Run the task in the dependencies of the selected workspaces, but not in the workspaces themselves
-    #[cli::option("--dependencies-only", default = false)]
-    dependencies_only: bool,
+    #[cli::option("--follow-dependencies", default = false)]
+    follow_dependencies: bool,
 
     /// Also run the task in the dependents of the selected workspaces
-    #[cli::option("--with-dependents", default = false)]
-    with_dependents: bool,
+    #[cli::option("--follow-dependents", default = false)]
+    follow_dependents: bool,
+
+    /// Dependency kinds followed by `--follow-dependencies` and `--follow-dependents`
+    #[cli::option("--followed-dependencies", default = FollowedDependencies::All)]
+    followed_dependencies: FollowedDependencies,
 
     /// Only keep workspaces matching these patterns
     #[cli::option("--include", default = vec![])]
@@ -92,13 +97,13 @@ pub struct TaskRun {
     #[cli::option("--exclude", default = vec![])]
     exclude: Vec<WorkspaceGlob>,
 
+    /// Include private workspaces
+    #[cli::option("--private", default = true)]
+    private: bool,
+
     /// Skip cross-workspace task dependencies outside of the selection
     #[cli::option("--only", default = false)]
     only: bool,
-
-    /// Maximum number of processes running at once (defaults to the CPU count for multi-workspace runs)
-    #[cli::option("-j,--concurrency")]
-    concurrency: Option<usize>,
 
     /// Keep running independent tasks after a failure
     #[cli::option("--continue", default = false)]
@@ -140,21 +145,21 @@ pub struct TaskRun {
 }
 
 impl TaskRun {
-    fn selection(&self) -> TaskSelection<'_> {
-        TaskSelection {
+    fn selection(&self) -> Option<WorkspaceSelection<'_>> {
+        let selection = WorkspaceSelection {
             all: self.all,
             from: &self.from,
-            since: match (&self.since, self.affected) {
-                (Some(since), _) => Some(Some(since.clone())),
-                (None, true) => Some(None),
-                (None, false) => None,
-            },
-            with_dependencies: self.with_dependencies,
-            dependencies_only: self.dependencies_only,
-            with_dependents: self.with_dependents,
+            since: &self.since,
+            recursive: self.recursive,
+            follow_dependencies: self.follow_dependencies,
+            follow_dependents: self.follow_dependents,
+            followed_dependencies: &self.followed_dependencies,
             include: &self.include,
             exclude: &self.exclude,
-        }
+            private: self.private,
+        };
+
+        selection.is_active().then_some(selection)
     }
 
     pub async fn execute(&self) -> Result<ExitStatus, Error> {
@@ -168,13 +173,7 @@ impl TaskRun {
             = self.selection();
 
         let is_multi
-            = selection.is_active() || names.len() > 1;
-
-        let concurrency = match (self.concurrency, is_multi) {
-            (Some(concurrency), _) => Some(concurrency.max(1)),
-            (None, true) => Some(std::thread::available_parallelism().map_or(4, |n| n.get())),
-            (None, false) => None,
-        };
+            = selection.is_some() || names.len() > 1;
 
         // Multi-workspace output without prefixes would be unreadable
         let verbose_level = match is_multi && !self.json {
@@ -184,10 +183,10 @@ impl TaskRun {
 
         let options = TaskRunOptions {
             selection,
-            standalone: self.standalone.unwrap_or_else(|| zpm_utils::is_ci().is_some()),
+            // Nested runs reuse the daemon running their parent task
+            standalone: self.standalone.unwrap_or_else(|| zpm_utils::is_ci().is_some() && std::env::var(DAEMON_SERVER_ENV_NAME).is_err()),
             verbose_level,
             only: self.only,
-            concurrency,
             continue_on_error: self.continue_on_error,
         };
 
