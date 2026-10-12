@@ -1,8 +1,6 @@
-use std::{collections::{BTreeMap, BTreeSet}, str::FromStr};
-
 use clipanion::cli;
 use zpm_parsers::JsonDocument;
-use zpm_primitives::{Ident, Reference};
+use zpm_primitives::Ident;
 use zpm_utils::{Path, ToFileString};
 
 use crate::{
@@ -17,10 +15,16 @@ use crate::{
 /// This command prints the list of workspaces in the project.
 ///
 /// - If `--since` is set, Yarn only lists workspaces modified since the specified ref. Without an explicit ref, Yarn uses the
-///   `changesetBaseRefs` configuration.
+///   `changesetBaseRefs` configuration (or the `YARN_CHANGESET_BASE` / `TURBO_SCM_BASE` environment variables). Changes to the
+///   lockfile mark the workspaces whose dependency tree changed, and changes to files matching `changesetGlobalFiles` mark every
+///   workspace.
+///
+/// - By default the working tree (including uncommitted and untracked files) is compared to the base ref; `--head <ref>` (or the
+///   `YARN_CHANGESET_HEAD` / `TURBO_SCM_HEAD` environment variables) compares two refs instead.
 ///
 /// - If `-R,--recursive` is set along with `--since`, Yarn will also list workspaces that depend on workspaces that have been changed since the
-///   specified ref, recursively following `dependencies` and `devDependencies` fields.
+///   specified ref, recursively following `dependencies`, `devDependencies`, and `peerDependencies` fields. This is the equivalent of
+///   `turbo ls --affected`.
 ///
 /// - If `--no-private` is set, Yarn omits workspaces whose manifest has `private: true`.
 ///
@@ -47,6 +51,10 @@ pub struct WorkspacesList {
     #[cli::option("-R,--recursive", default = false)]
     recursive: bool,
 
+    /// Compare against this ref rather than the working tree when used with `--since`
+    #[cli::option("--head")]
+    head: Option<String>,
+
     /// Format the output as an NDJSON stream
     #[cli::option("--json", default = false)]
     json: bool,
@@ -66,83 +74,16 @@ impl WorkspacesList {
     }
 
     async fn get_since_list<'a>(&self, project: &'a Project, since: Option<&str>) -> Result<Vec<&'a Workspace>, Error> {
-        let changed_files
-            = git_utils::fetch_changed_files(project, since).await?;
+        let range
+            = git_utils::ChangesetRange {
+                base: since.map(|since| since.to_string()),
+                head: self.head.clone(),
+            }.with_env_defaults();
 
-        let mut workspace_set
-            = BTreeSet::new();
-
-        let ignored_files = BTreeSet::from_iter([
-            Path::from_str("yarn.lock").unwrap(),
-            Path::from_str(".pnp.cjs").unwrap(),
-            Path::from_str(".pnp.loader.mjs").unwrap(),
-        ]);
-
-        let ignored_paths = [
-            Path::from_str(".yarn").unwrap(),
-        ];
-
-        for p in changed_files {
-            let rel_p = p
-                .forward_relative_to(&project.project_cwd);
-
-            if let Some(rel_p) = rel_p {
-                if ignored_files.contains(&rel_p) || ignored_paths.iter().any(|ignored_path| ignored_path.contains(&rel_p)) {
-                    continue;
-                }
-
-                let containing_workspace = project.workspaces.iter()
-                    .filter(|w| w.rel_path.contains(&rel_p))
-                    .max_by_key(|w| w.rel_path.as_str().len());
-
-                if let Some(workspace) = containing_workspace {
-                    workspace_set.insert(workspace.name.clone());
-                }
-            }
-        }
-
-        if self.recursive {
-            let install_state = project.install_state.as_ref()
-                .expect("Expected the install state to have been retrieved earlier");
-
-            let mut dependent_map
-                = BTreeMap::new();
-
-            for workspace in project.workspaces.iter() {
-                let workspace_resolution = install_state.resolution_tree.locator_resolutions.get(&workspace.locator())
-                    .expect("Expected the workspace to be in the resolution tree");
-
-                for dependency_descriptor in workspace_resolution.dependencies.values() {
-                    let dependency_locator = install_state.resolution_tree.descriptor_to_locator.get(dependency_descriptor)
-                        .expect("Expected the descriptor to be in the resolution tree");
-
-                    let Reference::WorkspaceIdent(locator_params) = &dependency_locator.reference else {
-                        continue;
-                    };
-
-                    dependent_map.entry(locator_params.ident.clone())
-                        .or_insert(BTreeSet::new())
-                        .insert(workspace.name.clone());
-                }
-            }
-
-            let mut queue = workspace_set.iter()
-                .cloned()
-                .collect::<Vec<_>>();
-
-            while let Some(workspace_ident) = queue.pop() {
-                let dependents
-                    = dependent_map.get(&workspace_ident);
-
-                if let Some(dependents) = dependents {
-                    for dependent in dependents {
-                        if workspace_set.insert(dependent.clone()) {
-                            queue.push(dependent.clone());
-                        }
-                    }
-                }
-            }
-        }
+        let workspace_set = match self.recursive {
+            true => git_utils::fetch_affected_workspaces(project, &range).await?,
+            false => git_utils::fetch_changed_workspaces_in_range(project, &range).await?,
+        };
 
         // We traverse the workspaces in order to ensure that the
         // workspaces are sorted by their position in the workspace list.
@@ -155,13 +96,8 @@ impl WorkspacesList {
     }
 
     pub async fn execute(&self) -> Result<(), Error> {
-        let mut project
+        let project
             = Project::new(None).await?;
-
-        if self.recursive && self.since.is_some() {
-            project
-                .lazy_install().await?;
-        }
 
         let workspaces = match &self.since {
             Some(since) => {

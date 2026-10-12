@@ -1,10 +1,10 @@
-use std::{collections::HashSet, io::Write, sync::Arc, time::{Duration, SystemTime}};
+use std::{collections::{BTreeMap, BTreeSet, HashSet}, io::Write, sync::Arc, time::{Duration, SystemTime}};
 
 use base64::Engine;
 use tokio::sync::{mpsc, oneshot};
 use zpm_primitives::Ident;
-use zpm_tasks::{parse as parse_taskfile, TaskId, TaskName};
-use zpm_utils::{Path, ToFileString};
+use zpm_tasks::{parse as parse_taskfile, Task, TaskId, TaskName};
+use zpm_utils::{FromFileString, Path, ToFileString};
 
 use super::{
     coordinator_commands::{
@@ -57,6 +57,9 @@ async fn run_daemon_internal(
     let daemon_url_str
         = daemon_url(port);
 
+    let is_inline
+        = port_tx.is_some();
+
     // Send port through channel or print to stdout
     if let Some(tx) = port_tx {
         let _ = tx.send(port);
@@ -71,6 +74,8 @@ async fn run_daemon_internal(
         = project.config.settings.daemon_max_closed_tasks.value;
     let default_warmup_period
         = project.config.settings.daemon_default_warmup_period.value;
+    let task_concurrency
+        = project.config.settings.task_concurrency.value;
 
     let (command_tx, command_rx)
         = mpsc::unbounded_channel::<CoordinatorCommand>();
@@ -103,6 +108,13 @@ async fn run_daemon_internal(
     let project_cwd_for_loop
         = project.project_cwd.to_file_string();
 
+    // Inline (standalone) daemons are one-shot: they die with the command
+    // that started them, so they don't need to hot-reload taskfiles.
+    // Registering the watches costs O(workspaces) FSEvents stream restarts,
+    // which dominated the startup time on large monorepos.
+    let watch_taskfiles
+        = !is_inline;
+
     tokio::spawn(async move {
         run_coordinator_loop(
             project_for_loop,
@@ -112,9 +124,11 @@ async fn run_daemon_internal(
             output_buffer_max_lines,
             max_closed_tasks,
             default_warmup_period,
+            task_concurrency,
             file_notify_tx,
             taskfile_notify_tx,
             project_cwd_for_loop,
+            watch_taskfiles,
         ).await;
     });
 
@@ -178,9 +192,11 @@ async fn run_coordinator_loop(
     output_buffer_max_lines: usize,
     max_closed_tasks: usize,
     default_warmup_period: Duration,
+    task_concurrency: usize,
     file_notify_tx: mpsc::UnboundedSender<notify::Event>,
     taskfile_notify_tx: mpsc::UnboundedSender<notify::Event>,
     project_cwd: String,
+    watch_taskfiles: bool,
 ) {
     let mut state
         = CoordinatorState::new(
@@ -191,12 +207,35 @@ async fn run_coordinator_loop(
             std::path::PathBuf::from(project_cwd),
         );
 
-    initialize_taskfile_watcher(&mut state.taskfile_watcher, &project);
+    state.taskfile_watcher.set_enabled(watch_taskfiles);
+
+    if watch_taskfiles {
+        initialize_taskfile_watcher(&mut state.taskfile_watcher, &project);
+    }
 
     let mut executor_pool
         = ExecutorPool::new(daemon_url, command_tx.clone());
 
     while let Some(cmd) = command_rx.recv().await {
+        // Commands that can't change task states don't need a scheduling
+        // pass; output lines are by far the most frequent commands.
+        let needs_scheduling = !matches!(cmd,
+            CoordinatorCommand::TaskOutput { .. }
+            | CoordinatorCommand::GetTaskOutput { .. }
+            | CoordinatorCommand::RegisterPid { .. }
+            | CoordinatorCommand::ListLongLivedTasks { .. }
+            | CoordinatorCommand::GetStats { .. }
+            | CoordinatorCommand::GetTaskHistory { .. }
+            | CoordinatorCommand::CreateSubscription { .. }
+            | CoordinatorCommand::AddTasksToSubscription { .. }
+            | CoordinatorCommand::RemoveSubscription { .. }
+            | CoordinatorCommand::ListDeclaredTasks { .. }
+            | CoordinatorCommand::SubscribeGlobal { .. }
+            | CoordinatorCommand::ReadFile { .. }
+            | CoordinatorCommand::WatchFile { .. }
+            | CoordinatorCommand::NotifyFileEvent { .. }
+        );
+
         let should_shutdown = handle_command(
             cmd,
             &mut state,
@@ -210,7 +249,26 @@ async fn run_coordinator_loop(
             break;
         }
 
-        process_ready_tasks(&mut state, &mut executor_pool);
+        if needs_scheduling {
+            drain_ready_tasks(&mut state, &mut executor_pool, task_concurrency);
+        }
+    }
+}
+
+/// Run scheduling passes until no more progress is made. A single pass isn't
+/// enough when tasks reach a terminal state synchronously (script-less tasks,
+/// cancellations): their dependents only become ready on the next pass, and
+/// no further command would come in to trigger it.
+fn drain_ready_tasks(state: &mut CoordinatorState, executor_pool: &mut ExecutorPool, task_concurrency: usize) {
+    loop {
+        let closed_before
+            = state.closed_tasks_counter;
+
+        process_ready_tasks(state, executor_pool, task_concurrency);
+
+        if state.closed_tasks_counter == closed_before {
+            break;
+        }
     }
 }
 
@@ -284,6 +342,8 @@ async fn handle_command(
             parent_task_id,
             workspace,
             context_id,
+            only,
+            caller_task_id,
             subscription_id,
             response_tx,
         } => {
@@ -292,9 +352,21 @@ async fn handle_command(
                 parent_task_id.as_deref(),
                 workspace.as_deref(),
                 context_id.as_deref(),
+                only,
                 state,
                 project,
             );
+
+            // A task running a nested `yarn tasks run` waits for it; it
+            // releases its concurrency slot to the tasks it pushed until the
+            // context completes (see `close_task`).
+            if let (Some(ctx), Some(caller)) = (context_id.as_ref(), caller_task_id.as_deref()) {
+                if let Ok(caller) = ContextualTaskId::from_file_string(caller) {
+                    if state.contexts.is_active(ctx) {
+                        state.graph.context_callers.insert(ctx.clone(), caller);
+                    }
+                }
+            }
 
             // Add tasks to subscription BEFORE sending the response to avoid race
             // where TaskStarted is processed before the subscription filter is set
@@ -597,7 +669,7 @@ async fn handle_command(
     false
 }
 
-fn process_ready_tasks(state: &mut CoordinatorState, executor_pool: &mut ExecutorPool) {
+fn process_ready_tasks(state: &mut CoordinatorState, executor_pool: &mut ExecutorPool, task_concurrency: usize) {
     let running: HashSet<_>
         = executor_pool.running_tasks().cloned().collect();
 
@@ -613,7 +685,7 @@ fn process_ready_tasks(state: &mut CoordinatorState, executor_pool: &mut Executo
 
     // Find ready tasks
     let ready_ids
-        = dependencies::find_ready_tasks(&state.graph, &running);
+        = dependencies::find_ready_tasks(&state.graph, &running, task_concurrency);
 
     let ready_tasks: Vec<_> = ready_ids
         .into_iter()
@@ -650,6 +722,7 @@ fn execute_push_tasks(
     parent_task_id: Option<&str>,
     workspace: Option<&str>,
     context_id: Option<&str>,
+    only: bool,
     state: &mut CoordinatorState,
     project: &Project,
 ) -> PushTasksResult {
@@ -657,15 +730,49 @@ fn execute_push_tasks(
     let mut dependency_ids = vec![];
     let mut attached_long_lived = vec![];
 
+    // Regular (non long-lived) top-level targets are resolved together as a
+    // single graph so that a task shared by many targets (e.g. a common
+    // `*:build`) is only scheduled once and resolution happens only once.
+    let mut batch: Vec<(TaskId, Vec<String>)>
+        = vec![];
+
+    let can_batch
+        = parent_task_id.is_none() && context_id.is_some() && (tasks.len() > 1 || only);
+
+    let defaults
+        = project.workspace_task_defaults();
+
+    // With `--only`, dependencies outside of the workspaces of the pushed
+    // targets are ignored, including for long-lived targets (which don't go
+    // through the batch)
+    let only_workspaces: Option<BTreeSet<Ident>> = only.then(|| {
+        tasks.iter()
+            .filter_map(|task_sub| build_task_id(&task_sub.name, task_sub.workspace.as_deref().or(workspace), project))
+            .map(|task_id| task_id.workspace)
+            .collect()
+    });
+
     for task_sub in tasks {
+        let task_workspace
+            = task_sub.workspace.as_deref().or(workspace);
+
         let task_id
-            = build_task_id(&task_sub.name, workspace, project);
+            = build_task_id(&task_sub.name, task_workspace, project);
+
+        if task_sub.workspace.is_some() && task_id.is_none() {
+            return PushTasksResult {
+                task_ids: vec![],
+                dependency_ids: vec![],
+                attached_long_lived: vec![],
+                error: Some(format!("Could not resolve task: {}", task_sub.name)),
+            };
+        }
 
         // Check if this is a long-lived task. Use filesystem fallback on first
         // push when the graph cache hasn't been populated yet.
         let is_long_lived = task_id
             .as_ref()
-            .map(|tid| resolve_is_long_lived(&state.graph, project, tid))
+            .map(|tid| resolve_is_long_lived(&state.graph, project, tid, &defaults))
             .unwrap_or(false);
 
         // For long-lived tasks, try to attach to an already-running instance
@@ -673,6 +780,13 @@ fn execute_push_tasks(
             if let Some(attached) = try_attach_long_lived(&task_id, state) {
                 task_ids.push(attached.task_id.clone());
                 attached_long_lived.push(attached);
+                continue;
+            }
+        }
+
+        if can_batch && !is_long_lived {
+            if let Some(tid) = task_id {
+                batch.push((tid, task_sub.args.clone()));
                 continue;
             }
         }
@@ -694,8 +808,9 @@ fn execute_push_tasks(
             &task_sub.name,
             parent_task_id,
             task_sub.args.clone(),
-            workspace,
+            task_workspace,
             effective_context_id,
+            only_workspaces.as_ref(),
             &mut state.contexts,
         ) {
             Ok((ctx_task_id, resolved_ctx_task_ids, source_files)) => {
@@ -738,11 +853,75 @@ fn execute_push_tasks(
         }
     }
 
+    if !batch.is_empty() {
+        let context_id
+            = context_id.expect("Batching requires a context id");
+
+        match state.graph.add_tasks_batch(project, &batch, context_id, only, &mut state.contexts) {
+            Ok((target_ids, resolved_ctx_task_ids, source_files)) => {
+                register_batch_sources(&source_files, &batch, state, project);
+
+                record_scheduled_events(&resolved_ctx_task_ids, &mut state.event_history);
+
+                let target_set: HashSet<&ContextualTaskId>
+                    = target_ids.iter().collect();
+
+                for resolved_id in &resolved_ctx_task_ids {
+                    if !target_set.contains(resolved_id) {
+                        dependency_ids.push(resolved_id.clone());
+                    }
+                }
+
+                task_ids.extend(target_ids);
+            }
+            Err(e) => {
+                return PushTasksResult {
+                    task_ids: vec![],
+                    dependency_ids: vec![],
+                    attached_long_lived: vec![],
+                    error: Some(e.to_string()),
+                };
+            }
+        }
+    }
+
     PushTasksResult {
         task_ids,
         dependency_ids,
         attached_long_lived,
         error: None,
+    }
+}
+
+/// Register the taskfiles read while resolving a batch with the watcher,
+/// grouped by the workspace they belong to.
+fn register_batch_sources(
+    source_files: &[Path],
+    batch: &[(TaskId, Vec<String>)],
+    state: &mut CoordinatorState,
+    project: &Project,
+) {
+    if source_files.is_empty() {
+        return;
+    }
+
+    let workspaces: HashSet<&Ident>
+        = batch.iter().map(|(task_id, _)| &task_id.workspace).collect();
+
+    for ident in workspaces {
+        let Ok(workspace) = project.workspace_by_ident(ident) else {
+            continue;
+        };
+
+        let sources: Vec<Path>
+            = source_files.iter()
+                .filter(|path| workspace.path.contains(path) || **path == project.root_workspace().taskfile_path())
+                .cloned()
+                .collect();
+
+        if !sources.is_empty() {
+            state.taskfile_watcher.register_sources(ident.clone(), sources);
+        }
     }
 }
 
@@ -851,20 +1030,20 @@ fn build_task_id(task_name: &str, workspace: Option<&str>, project: &Project) ->
 }
 
 /// Check if a task is long-lived, with filesystem fallback for first push.
-fn resolve_is_long_lived(graph: &TaskGraph, project: &Project, task_id: &TaskId) -> bool {
+fn resolve_is_long_lived(graph: &TaskGraph, project: &Project, task_id: &TaskId, defaults: &BTreeMap<TaskName, Task>) -> bool {
     // Fast path: check graph cache (populated after first add_task)
     if check_if_long_lived_from_graph(graph, task_id) {
         return true;
     }
 
-    // Slow path: resolve from disk (only needed on first push per task)
-    project.resolve_task(task_id)
-        .ok()
-        .and_then(|result| {
-            result.resolved.task_files.get(&task_id.workspace)
-                .and_then(|tf| tf.tasks.get(task_id.task_name.as_str()))
-                .map(|task| task.attributes.iter().any(|a| a.name == LONG_LIVED_ATTRIBUTE))
-        })
+    // Slow path: read the task definition from disk (only needed on first
+    // push per task). No need to resolve the whole dependency graph here.
+    let Ok(workspace) = project.workspace_by_ident(&task_id.workspace) else {
+        return false;
+    };
+
+    project.find_workspace_task(workspace, &task_id.task_name, defaults)
+        .map(|task| task.attributes.iter().any(|a| a.name == LONG_LIVED_ATTRIBUTE))
         .unwrap_or(false)
 }
 
@@ -883,12 +1062,22 @@ fn initialize_taskfile_watcher(watcher: &mut TaskfileWatcher, project: &Project)
     for workspace in &project.workspaces {
         let task_file_path = workspace.taskfile_path();
 
-        // Always watch the default taskfile path, even if it doesn't exist yet
+        // Always watch the default taskfile path, even if it doesn't exist
+        // yet, and the root taskfile, whose `@defaultTask` defaults apply to
+        // every other workspace
         let mut sources = vec![task_file_path];
 
+        if workspace.rel_path != Path::new() {
+            sources.push(project.root_workspace().taskfile_path());
+        }
+
         if let Some((task_file, extra_sources)) = project.get_workspace_taskfile(workspace) {
-            // Replace sources with the full list (main + includes)
-            sources = extra_sources;
+            // Extend sources with the full list (main + root defaults + includes)
+            for source in extra_sources {
+                if !sources.contains(&source) {
+                    sources.push(source);
+                }
+            }
             watcher.update_cached_taskfile(workspace.name.clone(), task_file);
         }
 
@@ -944,10 +1133,15 @@ fn reload_taskfile(
     };
 
     let task_file_path = workspace.taskfile_path();
-    let content = match task_file_path.fs_read_text() {
-        Ok(c) => c,
-        Err(_) => {
-            // File deleted: treat as empty taskfile — purge all tasks
+
+    let new_taskfile = match project.try_get_workspace_taskfile(workspace) {
+        // Parse error in the workspace taskfile or in the root one providing
+        // its defaults: keep the old version
+        Err(()) => return,
+
+        Ok(Some((tf, _))) => tf,
+        Ok(None) => {
+            // File deleted (and no root defaults): treat as empty taskfile — purge all tasks
             if let Some(old_taskfile) = state.taskfile_watcher.cached_taskfiles().get(workspace_ident).cloned() {
                 for task_name in old_taskfile.tasks.keys() {
                     purge_task_from_graph(workspace_ident, task_name.as_str(), state);
@@ -957,11 +1151,6 @@ fn reload_taskfile(
             }
             return;
         }
-    };
-
-    let new_taskfile = match parse_taskfile(&content) {
-        Ok(tf) => tf,
-        Err(_) => return, // Parse error: keep old version
     };
 
     // Determine removed tasks by comparing with old cached taskfile
@@ -986,8 +1175,13 @@ fn reload_taskfile(
         new_taskfile.clone(),
     );
 
-    // Re-register source files (includes may have changed)
+    // Re-register source files (includes may have changed). Non-root
+    // workspaces always watch the root taskfile, since `@defaultTask`
+    // defaults may be added to it at any time.
     let mut sources = vec![task_file_path];
+    if workspace.rel_path != Path::new() {
+        sources.push(project.root_workspace().taskfile_path());
+    }
     for include in &new_taskfile.includes {
         if let Ok(inc_ws) = project.workspace_by_ident(&include.ident) {
             let inc_path = match &include.path {
@@ -1019,6 +1213,9 @@ fn purge_task_from_graph(
 
     // Remove from resolved.tasks (the dependency graph)
     state.graph.resolved.tasks.remove(&task_id);
+    for prerequisites in state.graph.context_prerequisites.values_mut() {
+        prerequisites.remove(&task_id);
+    }
 
     // Find all contextual instances of this task (across all contexts)
     let ctx_task_ids_to_remove: Vec<ContextualTaskId> = state.graph.tasks.keys()
@@ -1053,26 +1250,38 @@ fn build_declared_tasks_list(project: &Project) -> (Vec<DeclaredTaskInfo>, Vec<s
 
     for workspace in &project.workspaces {
         let task_file_path = workspace.taskfile_path();
-        let Ok(content) = task_file_path.fs_read_text() else { continue };
+        let local_content = task_file_path.fs_read_text().ok();
 
-        match parse_taskfile(&content) {
-            Ok(task_file) => {
-                for (task_name, task) in &task_file.tasks {
-                    let is_long_lived = task.attributes.iter()
-                        .any(|attr| attr.name == LONG_LIVED_ATTRIBUTE);
-                    tasks.push(DeclaredTaskInfo {
-                        workspace: workspace.name.to_file_string(),
-                        task_name: task_name.to_file_string(),
-                        is_long_lived,
-                    });
-                }
+        // Local taskfile syntax errors must still be reported
+        if let Some(Err(e)) = local_content.as_deref().map(parse_taskfile) {
+            errors.push(super::ipc::TaskfileError {
+                workspace: workspace.name.to_file_string(),
+                message: e.to_string(),
+            });
+            continue;
+        }
+
+        let task_file = project.get_workspace_taskfile(workspace)
+            .map(|(task_file, _)| task_file);
+
+        let Some(task_file) = task_file else {
+            continue;
+        };
+
+        for (task_name, task) in &task_file.tasks {
+            // Root defaults that resolve to a no-op in this workspace (no
+            // matching package.json script) aren't worth listing.
+            if task.script.is_empty() && zpm_tasks::is_workspace_default(task) {
+                continue;
             }
-            Err(e) => {
-                errors.push(super::ipc::TaskfileError {
-                    workspace: workspace.name.to_file_string(),
-                    message: e.to_string(),
-                });
-            }
+
+            let is_long_lived = task.attributes.iter()
+                .any(|attr| attr.name == LONG_LIVED_ATTRIBUTE);
+            tasks.push(DeclaredTaskInfo {
+                workspace: workspace.name.to_file_string(),
+                task_name: task_name.to_file_string(),
+                is_long_lived,
+            });
         }
     }
 

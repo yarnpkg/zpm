@@ -8,7 +8,7 @@ typecheck:
 lint:
   yarn eslint
 
-lint:fix:
+lint-fix:
   yarn eslint --fix
 
 import-berry-artifacts:

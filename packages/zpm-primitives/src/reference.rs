@@ -144,7 +144,7 @@ pub enum Reference {
         hash: Option<Hash64>,
     },
 
-    #[pattern(r"patch:(?<inner>.*)#(?<path>.*)(?:&checksum=(?<checksum>[a-f0-9]*))?$")]
+    #[pattern(r"patch:(?<inner>.*)#(?<path>.*?)(?:&checksum=(?<checksum>[a-f0-9]*))?$")]
     #[to_file_string(|params| format_patch(&params.inner, &params.path, &params.checksum))]
     #[to_print_string(|params| DataType::Reference.colorize(&format_patch(&params.inner, &params.path, &params.checksum)))]
     #[struct_attr(rkyv(serialize_bounds(__S: rkyv::ser::Writer + rkyv::ser::Allocator + rkyv::ser::Sharing, <__S as rkyv::rancor::Fallible>::Error: rkyv::rancor::Source)))]
@@ -318,5 +318,23 @@ impl Reference {
                 "workspace".to_string()
             },
         }
+    }
+}
+
+#[test]
+fn test_patch_references_preserve_path_and_checksum() {
+    use zpm_utils::FromFileString;
+
+    for checksum in [None, Some(Hash64::from_data(b"patch contents"))] {
+        let reference: Reference = PatchReference {
+            inner: Box::new(UrlEncoded::new(crate::Locator::from_file_string("pkg@npm:1.0.0").unwrap())),
+            path: "~/patches/pkg.patch".to_string(),
+            checksum,
+        }.into();
+
+        let serialized
+            = reference.to_file_string();
+
+        assert_eq!(Reference::from_file_string(&serialized).unwrap(), reference);
     }
 }

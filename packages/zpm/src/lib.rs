@@ -49,3 +49,4 @@ pub mod trust;
 pub mod versioning;
 pub mod workspace_glob;
 pub mod workspace_graph;
+pub mod workspace_selection;

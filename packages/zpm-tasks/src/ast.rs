@@ -26,7 +26,7 @@ pub enum TaskIdError {
 pub struct TaskName(String);
 
 static TASK_NAME_REGEX: LazyLock<regex::Regex>
-    = LazyLock::new(|| regex::Regex::new(r"^[a-zA-Z_][a-zA-Z0-9_:-]*$").unwrap());
+    = LazyLock::new(|| regex::Regex::new(r"^[a-zA-Z_][a-zA-Z0-9_-]*$").unwrap());
 
 impl TaskName {
     pub fn new(name: &str) -> Result<Self, TaskNameError> {

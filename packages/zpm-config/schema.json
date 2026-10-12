@@ -22,6 +22,14 @@
       },
       "default": ["main", "master"]
     },
+    "changesetGlobalFiles": {
+      "type": "array",
+      "description": "Glob patterns (relative to the project root) of files whose change marks every workspace as changed during changeset detection (similar to turbo's globalDependencies).",
+      "items": {
+        "type": "string"
+      },
+      "default": []
+    },
     "cloneConcurrency": {
       "type": "usize",
       "description": "The number of concurrent git clone operations Yarn can perform",
@@ -45,6 +53,11 @@
       "type": "std::time::Duration",
       "description": "Default warm-up period for long-lived tasks in the daemon. After a long-lived task starts, dependents are unblocked once this period elapses.",
       "default": "1s"
+    },
+    "taskConcurrency": {
+      "type": "usize",
+      "description": "Maximum number of task processes the daemon runs at the same time, across all `yarn tasks run` invocations. Long-lived tasks don't count toward the limit. Defaults to the number of CPUs.",
+      "default": "crate::default_task_concurrency()"
     },
     "defaultSemverRangePrefix": {
       "type": "zpm_semver::RangeKind",

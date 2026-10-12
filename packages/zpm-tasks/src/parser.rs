@@ -183,35 +183,12 @@ fn parse_attribute(input: &mut &str) -> winnow::ModalResult<Attribute> {
     })
 }
 
-/// Find the header separator colon in a task header line.
-///
-/// The separator is the last colon that is either at the end of the string
-/// (after trimming) or followed by a space. This allows task names to contain
-/// colons (e.g. `lint:fix:` parses as task name `lint:fix`).
-fn find_header_colon(input: &str) -> Option<usize> {
-    let trimmed = input.trim_end();
-    // Walk from the end to find the rightmost colon that is either at the end
-    // or followed by a space.
-    for (i, c) in trimmed.char_indices().rev() {
-        if c == ':' {
-            let after = &trimmed[i + 1..];
-            if after.is_empty() || after.starts_with(' ') || after.starts_with('\t') {
-                return Some(i);
-            }
-        }
-    }
-    None
-}
-
 fn parse_task_header(input: &str) -> Result<(TaskName, Vec<Dependency>), String> {
-    // Find the header separator colon. The separator is the last colon that
-    // is either at the end of the string or followed by a space. This allows
-    // task names to contain colons (e.g. `lint:fix:`).
-    let colon_pos = find_header_colon(input)
+    let (name_str, deps_str) = input.split_once(':')
         .ok_or_else(|| format!("Missing ':' in task header: {}", input))?;
 
     let name_str
-        = input[..colon_pos].trim();
+        = name_str.trim();
 
     if name_str.is_empty() {
         return Err("Task name cannot be empty".to_string());
@@ -220,8 +197,12 @@ fn parse_task_header(input: &str) -> Result<(TaskName, Vec<Dependency>), String>
     let name
         = TaskName::new(name_str).map_err(|e| e.to_string())?;
 
+    if !deps_str.is_empty() && !deps_str.starts_with(' ') && !deps_str.starts_with('\t') {
+        return Err(format!("Expected whitespace after ':' in task header (task names cannot contain ':'): {}", input));
+    }
+
     let deps_str
-        = input[colon_pos + 1..].trim();
+        = deps_str.trim();
 
     let dependencies
         = if deps_str.is_empty() {
@@ -269,13 +250,7 @@ fn parse_dependency(token: &str) -> Result<Dependency, String> {
             (token, false)
         };
 
-    if let Some(colon_pos) = token.rfind(':') {
-        let ident_glob_str
-            = &token[..colon_pos];
-
-        let task_name_str
-            = &token[colon_pos + 1..];
-
+    if let Some((ident_glob_str, task_name_str)) = token.split_once(':') {
         if ident_glob_str.is_empty() || task_name_str.is_empty() {
             return Err(format!("Invalid dependency format: {}", token));
         }
@@ -548,24 +523,31 @@ mod tests {
     }
 
     #[test]
-    fn test_parse_task_name_with_colon() {
-        let input = "lint:fix:\n  yarn eslint --fix";
-        let result = parse(input).unwrap();
-        assert_eq!(result.tasks.len(), 1);
-        assert!(result.tasks.contains_key("lint:fix"));
-        assert_eq!(result.tasks["lint:fix"].script, vec!["yarn eslint --fix"]);
+    fn test_reject_task_names_with_colons() {
+        for input in ["lint:fix:", "lint:fix: typecheck", "lint:fix:build"] {
+            assert!(matches!(parse(input), Err(Error::ParseError { line: 1, .. })), "{}", input);
+        }
+        assert!(TaskName::new("lint:fix").is_err());
     }
 
     #[test]
-    fn test_parse_task_name_with_colon_and_deps() {
-        let input = "lint:fix: typecheck\n  yarn eslint --fix";
+    fn test_parse_script_name_with_colon() {
+        let input = "lint-fix: typecheck\n  yarn run lint:fix";
         let result = parse(input).unwrap();
         assert_eq!(result.tasks.len(), 1);
-        assert!(result.tasks.contains_key("lint:fix"));
-        assert_eq!(result.tasks["lint:fix"].dependencies.len(), 1);
-        match &result.tasks["lint:fix"].dependencies[0] {
+        assert_eq!(result.tasks["lint-fix"].script, vec!["yarn run lint:fix"]);
+        assert_eq!(result.tasks["lint-fix"].dependencies.len(), 1);
+        match &result.tasks["lint-fix"].dependencies[0] {
             Dependency::Local { name, .. } => assert_eq!(name, "typecheck"),
             _ => panic!("Expected local dependency"),
+        }
+    }
+
+    #[test]
+    fn test_reject_invalid_dependencies() {
+        for dependency in ["^build", "^build&", "pkg:lint:fix", "*:lint:fix"] {
+            let input = format!("build: {}", dependency);
+            assert!(matches!(parse(&input), Err(Error::ParseError { line: 1, .. })), "{}", input);
         }
     }
 

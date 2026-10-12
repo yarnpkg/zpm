@@ -57,6 +57,7 @@ impl TaskPush {
                 .map(|name| TaskSubscription {
                     name: name.clone(),
                     args: vec![],
+                    workspace: None,
                 })
                 .collect();
 
