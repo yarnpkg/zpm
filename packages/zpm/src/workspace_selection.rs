@@ -116,10 +116,11 @@ impl<'a> WorkspaceSelection<'a> {
         }
 
         if let Some(since) = self.since {
-            let changed_workspaces
-                = git_utils::fetch_changed_workspaces(project, since.as_deref()).await?;
+            let range
+                = git_utils::ChangesetRange::since(since.as_deref())
+                    .with_env_defaults();
 
-            seeds.extend(changed_workspaces.into_keys());
+            seeds.extend(git_utils::fetch_changed_workspaces_in_range(project, &range).await?);
         }
 
         if !self.has_explicit_seeds() {

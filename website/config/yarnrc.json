@@ -47,6 +47,21 @@
         }
       ]
     },
+    "changesetGlobalFiles": {
+      "title": "List of glob patterns whose changes affect every workspace.",
+      "description": "When a file matching one of these patterns (relative to the project root) changed, `yarn workspaces list --since` and `yarn tasks run --affected` consider every workspace as changed, similar to turbo's `globalDependencies`.",
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "default": [],
+      "_examples": [
+        {
+          "description": "Rebuild everything when the Node version or patches change.",
+          "value": [".nvmrc", "patches/**"]
+        }
+      ]
+    },
     "cloneConcurrency": {
       "_package": "@yarnpkg/plugin-git",
       "title": "Amount of `git clone` operations that Yarn will run at the same time.",

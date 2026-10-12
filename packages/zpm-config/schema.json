@@ -22,6 +22,14 @@
       },
       "default": ["main", "master"]
     },
+    "changesetGlobalFiles": {
+      "type": "array",
+      "description": "Glob patterns (relative to the project root) of files whose change marks every workspace as changed during changeset detection (similar to turbo's globalDependencies).",
+      "items": {
+        "type": "string"
+      },
+      "default": []
+    },
     "cloneConcurrency": {
       "type": "usize",
       "description": "The number of concurrent git clone operations Yarn can perform",
