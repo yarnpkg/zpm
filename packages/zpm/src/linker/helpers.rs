@@ -469,9 +469,7 @@ fn link_into_cas(target_path: &Path, data: &[u8], mode: u32, index_root: &Path) 
     if needs_rewrite {
         // Write through the existing path: cross-project hardlinks
         // inherit the repair without losing inode identity.
-        if index_path.fs_exists() {
-            index_path.fs_set_permissions(Permissions::from_mode(mode_bits | 0o200))?;
-        }
+        index_path.fs_set_permissions(Permissions::from_mode(mode_bits | 0o200)).ok_missing()?;
         index_path.fs_write(data)?;
         set_safe_mtime(&index_path)?;
         index_path.fs_set_permissions(Permissions::from_mode(mode_bits))?;
