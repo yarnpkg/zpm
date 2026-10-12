@@ -61,13 +61,28 @@ yarn ./packages/app tasks run test
 
 Use `yarn tasks run <name>` when you want task orchestration. `yarn run <name>` executes a matching package script directly, so `yarn run test` won't first build dependencies when the workspace has its own `test` script.
 
-The root `@defaultTask` declarations don't create root tasks or start every workspace's task. Unlike `turbo run build` from the root, `yarn tasks run build` targets the current workspace. To invoke it in every child workspace, use:
+The root `@defaultTask` declarations don't create root tasks. Unlike `turbo run build` from the root, `yarn tasks run build` targets the current workspace. Select several workspaces with the same options as `yarn workspaces foreach`:
 
 ```bash
-yarn workspaces foreach -A --exclude my-monorepo tasks run build
+yarn tasks run -A build
 ```
 
-Replace `my-monorepo` with the root package's name. Each invocation has its own task graph, so shared dependencies may build more than once across these invocations. Targeting an application's task runs its dependency graph within a single invocation.
+All the selected tasks run in a single task graph, so shared dependencies only build once. Turbo's filters translate as follows:
+
+| Turbo command | Yarn command |
+| --- | --- |
+| `turbo run build` | `yarn tasks run -A build` |
+| `turbo run build --filter=@scope/*` | `yarn tasks run --from '@scope/*' build` |
+| `turbo run build --filter=./packages/*` | `yarn tasks run --from './packages/*' build` |
+| `turbo run build --filter=app...` | `yarn tasks run --from app --follow-dependencies build` |
+| `turbo run build --filter=...app` | `yarn tasks run --from app --follow-dependents build` |
+| `turbo run build --affected` | `yarn tasks run --since --recursive build` |
+| `turbo run build --only` | `yarn tasks run --only build` |
+| `turbo run build lint` | `yarn tasks run -A build,lint` |
+| `turbo run build --concurrency=4` | `taskConcurrency: 4` in `.yarnrc.yml` |
+| `turbo run build --continue` | `yarn tasks run -A --continue build` |
+
+`--since` accepts an explicit ref (`--since=origin/main`) and otherwise uses the `changesetBaseRefs` setting. Multi-workspace runs stop at the first failure unless `--continue` is set.
 
 For CI, add `--standalone` before the task name to run without connecting to a background daemon:
 
@@ -120,6 +135,6 @@ This explicit command runs in every workspace inheriting the default, so each mu
 
 Yarn's task runner currently has no equivalent for Turbo's task artifact cache, remote cache, or `inputs` / `outputs` hashing. Yarn's package download cache serves a different purpose. Keep Turbo for workflows that require its task caching until you have a replacement for that behavior.
 
-Other Turbo configuration and flags, such as environment filtering, `--affected`, `with`, and `persistent`, aren't automatically translated by these examples. Review them separately before removing Turbo. In particular, Yarn's `@long-lived` tasks have their own daemon lifecycle and aren't a direct translation of `persistent: true`.
+Other Turbo configuration and flags, such as environment filtering, `with`, and `persistent`, aren't automatically translated by these examples. Review them separately before removing Turbo. In particular, Yarn's `@long-lived` tasks have their own daemon lifecycle and aren't a direct translation of `persistent: true`.
 
 Update CI and root scripts that invoke `turbo run`, then verify dependency order and generated files with the new commands. Once all required workflows have migrated, remove the unused Turbo configuration and dependency.

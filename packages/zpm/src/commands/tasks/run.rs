@@ -40,7 +40,7 @@ use crate::workspace_selection::{FollowedDependencies, WorkspaceSelection};
 ///   selection.
 ///
 /// All selected tasks are resolved into a single deduplicated graph. Use
-/// `--only` to skip cross-workspace dependencies (e.g. `^build`) pointing
+/// `--only` to skip cross-workspace dependencies (e.g. `*:build`) pointing
 /// outside of the selection. When running across workspaces the first
 /// failure cancels the run unless `--continue` is set.
 ///

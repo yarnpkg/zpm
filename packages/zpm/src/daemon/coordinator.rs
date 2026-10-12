@@ -700,7 +700,7 @@ fn execute_push_tasks(
 
     // Regular (non long-lived) top-level targets are resolved together as a
     // single graph so that a task shared by many targets (e.g. a common
-    // `^build`) is only scheduled once and resolution happens only once.
+    // `*:build`) is only scheduled once and resolution happens only once.
     let mut batch: Vec<(TaskId, Vec<String>)>
         = vec![];
 

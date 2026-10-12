@@ -143,7 +143,7 @@ pub struct TaskRunOptions<'a> {
 
 /// Compute the `(workspace, task)` pairs to run: every selected workspace
 /// declaring one of the requested tasks (including through the root
-/// `@workspaces` defaults).
+/// `@defaultTask` defaults).
 async fn select_targets(project: &Project, selection: &WorkspaceSelection<'_>, names: &[String]) -> Result<Vec<(Ident, String)>, Error> {
     let task_names: Vec<TaskName>
         = names.iter()

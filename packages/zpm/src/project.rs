@@ -1803,7 +1803,7 @@ impl Project {
 
     /// Resolve multiple tasks (typically the same task across many
     /// workspaces) into a single deduplicated graph. When `workspace_filter`
-    /// is set, cross-workspace dependencies (`^build`, `pkg:build`) pointing
+    /// is set, cross-workspace dependencies (`*:build`, `pkg:build`) pointing
     /// outside of it are ignored (turbo's `--only`).
     pub fn resolve_tasks(&self, root_tasks: &[TaskId], workspace_filter: Option<&BTreeSet<Ident>>) -> Result<ResolveTaskResult, Error> {
         let source_files

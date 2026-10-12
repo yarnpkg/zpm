@@ -20,10 +20,10 @@ const monorepo = (extra: Record<string, any> = {}) => makeTemporaryMonorepoEnv.b
 });
 
 const rootTaskfile = [
-  `@workspaces`,
-  `build: ^build`,
+  `@defaultTask`,
+  `build: *:build`,
   ``,
-  `@workspaces`,
+  `@defaultTask`,
   `typecheck:`,
 ];
 
@@ -58,7 +58,7 @@ describe(`Commands`, () => {
     );
 
     test(
-      `--from should select workspaces by ident glob and run their ^ dependencies`,
+      `--from should select workspaces by ident glob and run their *: dependencies`,
       monorepo()(async ({path, run, runSwitch}) => {
         await setup(path, run);
 
@@ -82,7 +82,7 @@ describe(`Commands`, () => {
       monorepo()(async ({path, run, runSwitch}) => {
         await setup(path, run);
 
-        // Without ^build in typecheck, --recursive is what pulls the dependencies in
+        // Without *:build in typecheck, --recursive is what pulls the dependencies in
         const {events} = await runJson(runSwitch, [`--recursive`, `typecheck`], {cwd: ppath.join(path, `packages/pkg-c` as PortablePath)});
         expect(eventsOf(events, `task-started`).sort()).toEqual([`pkg-a:typecheck`, `pkg-b:typecheck`]);
       }),
@@ -135,7 +135,7 @@ describe(`Commands`, () => {
     );
 
     test(
-      `--only should skip ^ dependencies outside of the selection`,
+      `--only should skip *: dependencies outside of the selection`,
       monorepo()(async ({path, run, runSwitch}) => {
         await setup(path, run);
 
@@ -353,7 +353,7 @@ describe(`Commands`, () => {
 
         try {
           // pkg-a:build takes a while; meanwhile an --only run resolves
-          // pkg-b:build without its ^build dependency
+          // pkg-b:build without its *:build dependency
           const full = runSwitch(`tasks`, `run`, `--no-standalone`, `--json`, `--from`, `pkg-b`, `build`);
           await new Promise(resolve => setTimeout(resolve, 500));
           await runSwitch(`tasks`, `run`, `--no-standalone`, `--json`, `--from`, `pkg-b`, `--only`, `build`);
@@ -379,7 +379,7 @@ describe(`Commands`, () => {
         await setup(path, run);
         await xfs.writeFilePromise(ppath.join(path, `packages/pkg-b/taskfile` as PortablePath), [
           `@long-lived`,
-          `dev: ^build`,
+          `dev: *:build`,
           `  echo dev-b`,
         ].join(`\n`));
 
