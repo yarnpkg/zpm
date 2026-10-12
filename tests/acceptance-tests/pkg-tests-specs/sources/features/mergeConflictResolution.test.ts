@@ -16,6 +16,9 @@ function cleanRunResult<T extends {stdout: string}>(result: T): T {
   };
 }
 
+// Git checks files out with CRLF line endings on Windows (core.autocrlf)
+const normalizeLineEndings = (text: string) => text.replace(/\r\n/g, `\n`);
+
 describe(`Features`, () => {
   describe(`Merge Conflict Resolution`, () => {
     test(
@@ -70,7 +73,7 @@ describe(`Features`, () => {
               : expectedV1Lockfile;
 
             const postFixLockfile = await xfs.readFilePromise(ppath.join(path, Filename.lockfile), `utf8`);
-            expect(postFixLockfile).toEqual(expectedLockfile);
+            expect(normalizeLineEndings(postFixLockfile)).toEqual(normalizeLineEndings(expectedLockfile));
 
             await exec.execFile(`git`, [`merge`, `--abort`], {cwd: path});
           }
@@ -91,7 +94,7 @@ describe(`Features`, () => {
               : expectedV2Lockfile;
 
             const postFixLockfile = await xfs.readFilePromise(ppath.join(path, Filename.lockfile), `utf8`);
-            expect(postFixLockfile).toEqual(expectedLockfile);
+            expect(normalizeLineEndings(postFixLockfile)).toEqual(normalizeLineEndings(expectedLockfile));
           }
         },
       ),
@@ -138,7 +141,7 @@ describe(`Features`, () => {
           await run(`install`);
 
           const postFixLockfile = await xfs.readFilePromise(ppath.join(path, Filename.lockfile), `utf8`);
-          expect(postFixLockfile).toEqual(expectedV2Lockfile);
+          expect(normalizeLineEndings(postFixLockfile)).toEqual(normalizeLineEndings(expectedV2Lockfile));
         },
       ),
     );
@@ -189,7 +192,7 @@ describe(`Features`, () => {
             : expectedV1Lockfile;
 
           const postFixLockfile = await xfs.readFilePromise(ppath.join(path, Filename.lockfile), `utf8`);
-          expect(postFixLockfile).toEqual(expectedLockfile);
+          expect(normalizeLineEndings(postFixLockfile)).toEqual(normalizeLineEndings(expectedLockfile));
         },
       ),
     );

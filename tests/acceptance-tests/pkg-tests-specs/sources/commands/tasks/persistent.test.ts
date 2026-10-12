@@ -4,7 +4,7 @@ import {delimiter}                       from 'path';
 
 const getYarnBinBinaryPath = () =>
   process.env.TEST_BINARY
-    ?? require.resolve(`${__dirname}/../../../../../../target/release/yarn-bin`);
+    ?? require.resolve(`${__dirname}/../../../../../../target/release/yarn-bin${process.platform === `win32` ? `.exe` : ``}`);
 
 function spawnYarnBin(cwd: PortablePath, home: PortablePath, args: Array<string>) {
   const child = cp.spawn(getYarnBinBinaryPath(), args, {
