@@ -1,5 +1,5 @@
 import {ppath, xfs, PortablePath} from '@yarnpkg/fslib';
-import {execFileSync}            from 'child_process';
+import {execFileSync}             from 'child_process';
 
 // a <- b <- c ; d independent
 const affectedEnv = (cb: (args: {path: PortablePath, run: any, git: (...args: Array<string>) => string}) => Promise<void>) => makeTemporaryMonorepoEnv({
@@ -30,6 +30,9 @@ const affectedEnv = (cb: (args: {path: PortablePath, run: any, git: (...args: Ar
 const npathOf = (path: PortablePath) => require(`@yarnpkg/fslib`).npath.fromPortablePath(path);
 
 const names = (stdout: string) => stdout.trim().split(`\n`).filter(Boolean).map(line => JSON.parse(line).name).sort();
+
+// Workspace names printed by `foreach exec node -p "require('./package.json').name"`
+const printedNames = (stdout: string) => stdout.trim().split(`\n`).filter(line => line.startsWith(`pkg-`)).sort();
 
 describe(`Commands`, () => {
   describe(`workspaces list --since (affected detection)`, () => {
@@ -175,7 +178,7 @@ describe(`Commands`, () => {
         expect(names(explicitBoth)).toEqual([`pkg-b`, `pkg-d`]);
 
         const {stdout: foreachOutput} = await run(`workspaces`, `foreach`, `--since=${base}`, `--head=HEAD`, `exec`, `node`, `-p`, `require('./package.json').name`, {env});
-        expect(foreachOutput.trim().split(`\n`).filter(line => line.startsWith(`pkg-`)).sort()).toEqual([`pkg-b`, `pkg-d`]);
+        expect(printedNames(foreachOutput)).toEqual([`pkg-b`, `pkg-d`]);
       }),
     );
 
@@ -193,7 +196,7 @@ describe(`Commands`, () => {
         await xfs.writeFilePromise(ppath.join(path, `packages/pkg-d/index.js` as PortablePath), `// change\n`);
 
         const {stdout} = await run(`workspaces`, `foreach`, `--since=${base}`, `--head=${head}`, `--recursive`, `exec`, `node`, `-p`, `require('./package.json').name`);
-        expect(stdout.trim().split(`\n`).filter(line => line.startsWith(`pkg-`)).sort()).toEqual([`pkg-b`, `pkg-c`]);
+        expect(printedNames(stdout)).toEqual([`pkg-b`, `pkg-c`]);
       }),
     );
 
