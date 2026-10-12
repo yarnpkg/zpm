@@ -514,8 +514,8 @@ impl Project {
                 Some(_) => Error::ImmutableLockfileModification,
                 None => Error::ImmutableLockfileCreation,
             });
-        } else {
-            lockfile_path.fs_change(contents, false)?;
+        } else if current_content.as_deref() != Some(contents.as_bytes()) {
+            lockfile_path.fs_write(contents)?;
         }
 
         Ok(())
