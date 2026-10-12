@@ -671,7 +671,7 @@ mod tests {
 
         assert!(!root.with_join_str("extra").fs_exists());
         assert!(!root.with_join_str(".dot").fs_exists());
-        assert_eq!(root.with_join_str("link").fs_read_link().unwrap(), p("target"));
+        assert!(root.with_join_str("link").fs_is_symlink_to(&p("target")).unwrap());
     }
 
     #[test]
@@ -697,7 +697,7 @@ mod tests {
             tree.register_entry(p(".dot"), symlink("target")).unwrap();
         });
 
-        assert_eq!(root.with_join_str(".dot").fs_read_link().unwrap(), p("target"));
+        assert!(root.with_join_str(".dot").fs_is_symlink_to(&p("target")).unwrap());
     }
 
     #[test]
@@ -714,7 +714,7 @@ mod tests {
 
         // The intermediate `node_modules` inherits `All`
         assert!(root.with_join_str("pkg/node_modules/bundled/index.js").fs_exists());
-        assert_eq!(root.with_join_str("pkg/node_modules/self").fs_read_link().unwrap(), p("../../other"));
+        assert!(root.with_join_str("pkg/node_modules/self").fs_is_symlink_to(&p("../../other")).unwrap());
     }
 
     #[test]
@@ -824,6 +824,6 @@ mod tests {
             tree.register_entry(p("link"), symlink("new")).unwrap();
         });
 
-        assert_eq!(root.with_join_str("link").fs_read_link().unwrap(), p("new"));
+        assert!(root.with_join_str("link").fs_is_symlink_to(&p("new")).unwrap());
     }
 }
