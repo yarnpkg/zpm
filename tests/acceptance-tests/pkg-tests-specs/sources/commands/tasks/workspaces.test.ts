@@ -13,7 +13,7 @@ const startedOrder = (events: Array<any>) => events
 describe(`Commands`, () => {
   describe(`tasks run (root workspace defaults)`, () => {
     test(
-      `it should run package.json scripts through @workspaces defaults, honoring ^ dependencies`,
+      `it should run package.json scripts through @defaultTask defaults, honoring workspace dependencies`,
       makeTemporaryMonorepoEnv({
         name: `root`,
         workspaces: [`packages/*`],
@@ -23,8 +23,8 @@ describe(`Commands`, () => {
         [`packages/pkg-c`]: {name: `pkg-c`, scripts: {build: `echo build-c`}, devDependencies: {[`pkg-b`]: `workspace:*`}},
       }, async ({path, run, runSwitch}) => {
         await writeTaskfile(path, `taskfile`, [
-          `@workspaces`,
-          `build: ^build`,
+          `@defaultTask`,
+          `build: *:build`,
         ]);
 
         await run(`install`);
@@ -46,8 +46,8 @@ describe(`Commands`, () => {
         [`packages/pkg-c`]: {name: `pkg-c`, scripts: {build: `echo build-c`}, dependencies: {[`pkg-b`]: `workspace:*`}},
       }, async ({path, run, runSwitch}) => {
         await writeTaskfile(path, `taskfile`, [
-          `@workspaces`,
-          `build: ^build`,
+          `@defaultTask`,
+          `build: *:build`,
         ]);
 
         await run(`install`);
@@ -58,7 +58,7 @@ describe(`Commands`, () => {
     );
 
     test(
-      `it should support local dependencies in defaults (check: test:ci)`,
+      `it should support local task dependencies and explicitly invoke scripts with colons`,
       makeTemporaryMonorepoEnv({
         name: `root`,
         workspaces: [`packages/*`],
@@ -67,14 +67,15 @@ describe(`Commands`, () => {
         [`packages/pkg-b`]: {name: `pkg-b`, scripts: {[`test:ci`]: `echo test-b`}, dependencies: {[`pkg-a`]: `workspace:*`}},
       }, async ({path, run, runSwitch}) => {
         await writeTaskfile(path, `taskfile`, [
-          `@workspaces`,
-          `build: ^build`,
+          `@defaultTask`,
+          `build: *:build`,
           ``,
-          `@workspaces`,
-          `test:ci: ^build ^test:ci`,
+          `@defaultTask`,
+          `test-ci: *:build *:test-ci`,
+          `  yarn run test:ci "$@"`,
           ``,
-          `@workspaces`,
-          `check: test:ci`,
+          `@defaultTask`,
+          `check: test-ci`,
         ]);
 
         await run(`install`);
@@ -83,8 +84,8 @@ describe(`Commands`, () => {
         const order = startedOrder(parseEvents(stdout));
 
         expect(order).toContain(`pkg-a:build`);
-        expect(order).toContain(`pkg-a:test:ci`);
-        expect(order[order.length - 1]).toEqual(`pkg-b:test:ci`);
+        expect(order).toContain(`pkg-a:test-ci`);
+        expect(order[order.length - 1]).toEqual(`pkg-b:test-ci`);
         // check itself has no script and no package.json script: no process started
         expect(order).not.toContain(`pkg-b:check`);
       }),
@@ -100,8 +101,8 @@ describe(`Commands`, () => {
         [`packages/pkg-b`]: {name: `pkg-b`, scripts: {build: `echo build-b`}, dependencies: {[`pkg-a`]: `workspace:*`}},
       }, async ({path, run, runSwitch}) => {
         await writeTaskfile(path, `taskfile`, [
-          `@workspaces`,
-          `build: ^build`,
+          `@defaultTask`,
+          `build: *:build`,
         ]);
 
         await writeTaskfile(path, `packages/pkg-a/taskfile`, [
@@ -125,8 +126,8 @@ describe(`Commands`, () => {
         [`packages/pkg-a`]: {name: `pkg-a`, scripts: {build: `echo build-a`}},
       }, async ({path, run, runSwitch}) => {
         await writeTaskfile(path, `taskfile`, [
-          `@workspaces`,
-          `build: ^build`,
+          `@defaultTask`,
+          `build: *:build`,
         ]);
 
         await run(`install`);
@@ -146,8 +147,8 @@ describe(`Commands`, () => {
         [`packages/pkg-b`]: {name: `pkg-b`, scripts: {build: `echo build-b`}, dependencies: {[`pkg-a`]: `workspace:*`}},
       }, async ({path, run}) => {
         await writeTaskfile(path, `taskfile`, [
-          `@workspaces`,
-          `build: ^build`,
+          `@defaultTask`,
+          `build: *:build`,
         ]);
 
         await run(`install`);
@@ -158,7 +159,7 @@ describe(`Commands`, () => {
     );
 
     test(
-      `it should not expose @workspaces defaults as tasks of the root workspace itself`,
+      `it should not expose @defaultTask defaults as tasks of the root workspace itself`,
       makeTemporaryMonorepoEnv({
         name: `root`,
         workspaces: [`packages/*`],
@@ -167,8 +168,8 @@ describe(`Commands`, () => {
         [`packages/pkg-a`]: {name: `pkg-a`, scripts: {build: `echo build-a`}},
       }, async ({path, run, runSwitch}) => {
         await writeTaskfile(path, `taskfile`, [
-          `@workspaces`,
-          `build: ^build`,
+          `@defaultTask`,
+          `build: *:build`,
           ``,
           `hello:`,
           `  echo hello-root`,

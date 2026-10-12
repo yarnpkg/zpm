@@ -25,6 +25,26 @@ use crate::{range::{OperatorType, Token, TokenType}, Range, Version};
 #[case("~1.2.3", "1.2.10-rc", false)]
 #[case("~1.2.3", "1.10.0", false)]
 #[case("~1.2.3", "2.0.0", false)]
+#[case("~2", "2.1.1", true)]
+#[case("~2", "3.0.0", false)]
+#[case("~2.1", "2.1.9", true)]
+#[case("~2.1", "2.2.0", false)]
+#[case("^0", "0.5.0", true)]
+#[case("^0", "1.0.0", false)]
+#[case("^0.0", "0.0.5", true)]
+#[case("^0.0", "0.1.0", false)]
+#[case("^1.2", "1.9.0", true)]
+
+#[case("1 - 2", "2.12.1", true)]
+#[case("1 - 2", "3.0.0", false)]
+#[case("1.2.3 - 2.3.4", "2.3.4", true)]
+#[case("1.2.3 - 2.3.4", "2.3.5", false)]
+#[case("1.2.3 - 2.3", "2.3.9", true)]
+#[case("1.2.3 - 2.3", "2.4.0", false)]
+#[case("1.2.3 - 2.3", "1.2.2", false)]
+#[case("0.0.0-alpha - *", "0.0.0-alpha", true)]
+#[case("1.2.3 - *", "9.0.0", true)]
+#[case("1.2.3 - *", "1.2.2", false)]
 
 #[case(">1.2.3", "1.2.0", false)]
 #[case(">1.2.3", "1.2.3", false)]
@@ -80,6 +100,13 @@ use crate::{range::{OperatorType, Token, TokenType}, Range, Version};
 #[case("1.2.*", "1.2.0", true)]
 #[case("1.2.x", "1.2.0", true)]
 #[case("1.2.X", "1.2.0", true)]
+
+// Numeric prerelease segments followed by a space must stay numeric
+#[case(">=1.0.0-beta.41 <1.0.0-c", "1.0.0-beta.45", true)]
+#[case(">=1.0.0-beta.41 <1.0.0-c", "1.0.0-beta.5", false)]
+#[case(">=1.0.0-beta.41 <1.0.0-c || ^1.0.0", "1.0.0-beta.45", true)]
+#[case(">=1.0.0-beta.41 <1.0.0-c || ^1.0.0", "1.0.0", true)]
+#[case(">=1.0.0-rc.2 <1.0.0", "1.0.0-rc.10", true)]
 fn test_range_check(#[case] range: Range, #[case] version: Version, #[case] expected: bool) {
     assert_eq!(range.check(&version), expected);
 }
@@ -188,7 +215,7 @@ fn test_range_tokenize() {
         ),
         Token::Syntax(TokenType::SAnd),
         Token::Operation(
-            OperatorType::LessThan,
+            OperatorType::LessThanOrEqual,
             Version::from_file_string("2.3.4").unwrap(),
         ),
     ].into()));

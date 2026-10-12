@@ -21,9 +21,9 @@ contextId: string | null,
  */
 only?: boolean, 
 /**
- * Maximum number of processes running at the same time in this context.
+ * Task running the command that pushes these tasks (nested `yarn tasks run`); it doesn't hold a concurrency slot while they run.
  */
-concurrency?: number, } | { "type": "getTaskOutput", taskId: string, } | { "type": "stopTask", taskName: string, workspace: string | null, } | { "type": "listLongLivedTasks" } | { "type": "listDeclaredTasks" } | { "type": "cancelContext", contextId: string, } | { "type": "getStats" } | { "type": "getTaskHistory" } | { "type": "getAuthUrl" } | { "type": "shutdown" } | { "type": "readFile", path: string, } | { "type": "watchFile", path: string, };
+callerTaskId?: string, } | { "type": "getTaskOutput", taskId: string, } | { "type": "stopTask", taskName: string, workspace: string | null, } | { "type": "listLongLivedTasks" } | { "type": "listDeclaredTasks" } | { "type": "cancelContext", contextId: string, } | { "type": "getStats" } | { "type": "getTaskHistory" } | { "type": "getAuthUrl" } | { "type": "shutdown" } | { "type": "readFile", path: string, } | { "type": "watchFile", path: string, };
 
 export type BufferedOutputLine = { line: string, stream: string, };
 

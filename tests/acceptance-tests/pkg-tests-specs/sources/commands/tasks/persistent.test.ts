@@ -57,7 +57,7 @@ const isAlive = (pid: number) => {
 };
 
 describe(`Commands`, () => {
-  describe(`tasks run (persistent tasks with ^ dependencies)`, () => {
+  describe(`tasks run (persistent tasks with workspace dependencies)`, () => {
     test(
       `it should build the dependencies, then keep the @long-lived dev task running until interrupted`,
       makeTemporaryMonorepoEnv({
@@ -68,12 +68,12 @@ describe(`Commands`, () => {
         [`packages/app`]: {name: `app`, scripts: {dev: `cat ../lib/out.txt && echo $$ > ../../dev.pid && echo dev-started && sleep 60`}, dependencies: {[`lib`]: `workspace:*`}},
       }, async ({path, run}) => {
         await xfs.writeFilePromise(ppath.join(path, `taskfile` as PortablePath), [
-          `@workspaces`,
-          `build: ^build`,
+          `@defaultTask`,
+          `build: *:build`,
           ``,
-          `@workspaces`,
+          `@defaultTask`,
           `@long-lived`,
-          `dev: ^build`,
+          `dev: *:build`,
         ].join(`\n`));
 
         await run(`install`);
@@ -109,9 +109,9 @@ describe(`Commands`, () => {
         [`packages/app`]: {name: `app`, scripts: {dev: `echo $$ > ../../dev.pid && echo dev-started && sleep 60`}},
       }, async ({path, run}) => {
         await xfs.writeFilePromise(ppath.join(path, `taskfile` as PortablePath), [
-          `@workspaces`,
+          `@defaultTask`,
           `@long-lived`,
-          `dev: ^build`,
+          `dev: *:build`,
         ].join(`\n`));
 
         await run(`install`);

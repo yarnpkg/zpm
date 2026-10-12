@@ -71,7 +71,7 @@ impl Unlink {
         if self.targets.is_empty() {
             if self.all {
                 for (selector, range) in root_workspace.manifest.resolutions.iter() {
-                    if matches!(range, zpm_primitives::Range::Portal(_)) {
+                    if matches!(range, Some(zpm_primitives::Range::Portal(_))) {
                         to_unlink.push(selector.target_ident().clone());
                     }
                 }
@@ -110,7 +110,7 @@ impl Unlink {
                     }
                     UnlinkTarget::Glob(glob) => {
                         for (selector, range) in root_workspace.manifest.resolutions.iter() {
-                            if matches!(range, zpm_primitives::Range::Portal(_)) {
+                            if matches!(range, Some(zpm_primitives::Range::Portal(_))) {
                                 let ident
                                     = selector.target_ident();
 

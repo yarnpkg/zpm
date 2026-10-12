@@ -1120,6 +1120,22 @@
         }
       ]
     },
+    "taskConcurrency": {
+      "_package": "@yarnpkg/core",
+      "title": "Maximum number of task processes running at the same time.",
+      "description": "The daemon shares this limit between all the `yarn tasks run` invocations it serves. Long-lived tasks and tasks without a script don't count toward it, nor do tasks waiting on a nested `yarn tasks run`. The background daemon reads it when it starts, so it must be restarted for changes to apply. Defaults to the number of CPUs.",
+      "type": "number",
+      "_examples": [
+        {
+          "description": "Run tasks one at a time.",
+          "value": 1
+        },
+        {
+          "description": "Leave some CPUs available for other work.",
+          "value": 4
+        }
+      ]
+    },
     "enableAutoTypes": {
       "_package": "@yarnpkg/plugin-typescript",
       "title": "Define whether Yarn should automatically add @types packages.",

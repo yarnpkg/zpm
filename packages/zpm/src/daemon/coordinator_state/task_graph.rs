@@ -82,8 +82,10 @@ pub struct TaskGraph {
     pub parents: HashMap<ContextualTaskId, HashSet<ContextualTaskId>>,
     /// Prepared task execution info
     pub prepared: BTreeMap<ContextualTaskId, PreparedTask>,
-    /// Maximum number of concurrently running processes, per context
-    pub concurrency_limits: HashMap<String, usize>,
+    /// Task whose script started the run of a context (a nested `yarn tasks
+    /// run`). It's blocked until that context completes, so it doesn't hold
+    /// a concurrency slot meanwhile.
+    pub context_callers: HashMap<String, ContextualTaskId>,
     /// Prerequisites specific to a context, overriding `resolved.tasks`.
     /// `--only` drops the edges leading outside of the selection; those
     /// edges must not leak into the graph other contexts share.
@@ -108,7 +110,7 @@ impl TaskGraph {
             subtasks: HashMap::new(),
             parents: HashMap::new(),
             prepared: BTreeMap::new(),
-            concurrency_limits: HashMap::new(),
+            context_callers: HashMap::new(),
             context_prerequisites: HashMap::new(),
         }
     }

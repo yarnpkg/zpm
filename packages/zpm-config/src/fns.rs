@@ -8,6 +8,11 @@ pub fn compute_cache_folder(context: &ConfigurationContext) -> Path {
         .unwrap_or_else(Path::new)
 }
 
+pub fn default_task_concurrency() -> usize {
+    std::thread::available_parallelism()
+        .map_or(4, |n| n.get())
+}
+
 pub fn check_tsconfig(context: &ConfigurationContext) -> bool {
     // Probe project root and active package — monorepo workspaces
     // usually own the `tsconfig.json`, the root often doesn't.

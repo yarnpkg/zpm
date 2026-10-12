@@ -92,7 +92,7 @@ impl CoordinatorState {
         // 1. Decrement the context's active task counter
         self.contexts.decrement(&task_id.context_id);
         if !self.contexts.is_active(&task_id.context_id) {
-            self.graph.concurrency_limits.remove(&task_id.context_id);
+            self.graph.context_callers.remove(&task_id.context_id);
             self.graph.context_prerequisites.remove(&task_id.context_id);
         }
 

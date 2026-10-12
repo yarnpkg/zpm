@@ -4,7 +4,7 @@ use base64::Engine;
 use tokio::sync::{mpsc, oneshot};
 use zpm_primitives::Ident;
 use zpm_tasks::{parse as parse_taskfile, Task, TaskId, TaskName};
-use zpm_utils::{Path, ToFileString};
+use zpm_utils::{FromFileString, Path, ToFileString};
 
 use super::{
     coordinator_commands::{
@@ -71,6 +71,8 @@ async fn run_daemon_internal(
         = project.config.settings.daemon_max_closed_tasks.value;
     let default_warmup_period
         = project.config.settings.daemon_default_warmup_period.value;
+    let task_concurrency
+        = project.config.settings.task_concurrency.value;
 
     let (command_tx, command_rx)
         = mpsc::unbounded_channel::<CoordinatorCommand>();
@@ -112,6 +114,7 @@ async fn run_daemon_internal(
             output_buffer_max_lines,
             max_closed_tasks,
             default_warmup_period,
+            task_concurrency,
             file_notify_tx,
             taskfile_notify_tx,
             project_cwd_for_loop,
@@ -178,6 +181,7 @@ async fn run_coordinator_loop(
     output_buffer_max_lines: usize,
     max_closed_tasks: usize,
     default_warmup_period: Duration,
+    task_concurrency: usize,
     file_notify_tx: mpsc::UnboundedSender<notify::Event>,
     taskfile_notify_tx: mpsc::UnboundedSender<notify::Event>,
     project_cwd: String,
@@ -210,7 +214,7 @@ async fn run_coordinator_loop(
             break;
         }
 
-        drain_ready_tasks(&mut state, &mut executor_pool);
+        drain_ready_tasks(&mut state, &mut executor_pool, task_concurrency);
     }
 }
 
@@ -218,12 +222,12 @@ async fn run_coordinator_loop(
 /// enough when tasks reach a terminal state synchronously (script-less tasks,
 /// cancellations): their dependents only become ready on the next pass, and
 /// no further command would come in to trigger it.
-fn drain_ready_tasks(state: &mut CoordinatorState, executor_pool: &mut ExecutorPool) {
+fn drain_ready_tasks(state: &mut CoordinatorState, executor_pool: &mut ExecutorPool, task_concurrency: usize) {
     loop {
         let closed_before
             = state.closed_tasks_counter;
 
-        process_ready_tasks(state, executor_pool);
+        process_ready_tasks(state, executor_pool, task_concurrency);
 
         if state.closed_tasks_counter == closed_before {
             break;
@@ -302,14 +306,10 @@ async fn handle_command(
             workspace,
             context_id,
             only,
-            concurrency,
+            caller_task_id,
             subscription_id,
             response_tx,
         } => {
-            if let (Some(ctx), Some(limit)) = (context_id.as_ref(), concurrency) {
-                state.graph.concurrency_limits.insert(ctx.clone(), limit.max(1));
-            }
-
             let result = execute_push_tasks(
                 &tasks,
                 parent_task_id.as_deref(),
@@ -319,6 +319,17 @@ async fn handle_command(
                 state,
                 project,
             );
+
+            // A task running a nested `yarn tasks run` waits for it; it
+            // releases its concurrency slot to the tasks it pushed until the
+            // context completes (see `close_task`).
+            if let (Some(ctx), Some(caller)) = (context_id.as_ref(), caller_task_id.as_deref()) {
+                if let Ok(caller) = ContextualTaskId::from_file_string(caller) {
+                    if state.contexts.is_active(ctx) {
+                        state.graph.context_callers.insert(ctx.clone(), caller);
+                    }
+                }
+            }
 
             // Add tasks to subscription BEFORE sending the response to avoid race
             // where TaskStarted is processed before the subscription filter is set
@@ -626,7 +637,7 @@ async fn handle_command(
     false
 }
 
-fn process_ready_tasks(state: &mut CoordinatorState, executor_pool: &mut ExecutorPool) {
+fn process_ready_tasks(state: &mut CoordinatorState, executor_pool: &mut ExecutorPool, task_concurrency: usize) {
     let running: HashSet<_>
         = executor_pool.running_tasks().cloned().collect();
 
@@ -642,7 +653,7 @@ fn process_ready_tasks(state: &mut CoordinatorState, executor_pool: &mut Executo
 
     // Find ready tasks
     let ready_ids
-        = dependencies::find_ready_tasks(&state.graph, &running);
+        = dependencies::find_ready_tasks(&state.graph, &running, task_concurrency);
 
     let ready_tasks: Vec<_> = ready_ids
         .into_iter()
@@ -689,7 +700,7 @@ fn execute_push_tasks(
 
     // Regular (non long-lived) top-level targets are resolved together as a
     // single graph so that a task shared by many targets (e.g. a common
-    // `^build`) is only scheduled once and resolution happens only once.
+    // `*:build`) is only scheduled once and resolution happens only once.
     let mut batch: Vec<(TaskId, Vec<String>)>
         = vec![];
 
@@ -1020,7 +1031,7 @@ fn initialize_taskfile_watcher(watcher: &mut TaskfileWatcher, project: &Project)
         let task_file_path = workspace.taskfile_path();
 
         // Always watch the default taskfile path, even if it doesn't exist
-        // yet, and the root taskfile, whose `@workspaces` defaults apply to
+        // yet, and the root taskfile, whose `@defaultTask` defaults apply to
         // every other workspace
         let mut sources = vec![task_file_path];
 
@@ -1133,7 +1144,7 @@ fn reload_taskfile(
     );
 
     // Re-register source files (includes may have changed). Non-root
-    // workspaces always watch the root taskfile, since `@workspaces`
+    // workspaces always watch the root taskfile, since `@defaultTask`
     // defaults may be added to it at any time.
     let mut sources = vec![task_file_path];
     if workspace.rel_path != Path::new() {

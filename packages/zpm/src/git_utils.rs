@@ -345,16 +345,10 @@ pub struct ChangesetRange {
 }
 
 impl ChangesetRange {
-    pub fn since(base: Option<&str>) -> Self {
-        Self {
-            base: base.map(|base| base.to_string()),
-            head: None,
-        }
-    }
-
     /// Fill the unset bounds from `YARN_CHANGESET_BASE`/`YARN_CHANGESET_HEAD`
     /// (falling back to turbo's `TURBO_SCM_BASE`/`TURBO_SCM_HEAD` to ease
-    /// migrations).
+    /// migrations). Bounds set explicitly (`--since <ref>`, `--head <ref>`)
+    /// take precedence.
     pub fn with_env_defaults(mut self) -> Self {
         let read = |names: [&str; 2]| names.iter()
             .find_map(|name| std::env::var(name).ok().filter(|value| !value.is_empty()));

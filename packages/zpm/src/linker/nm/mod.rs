@@ -1,7 +1,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use zpm_primitives::{VersionFilter, Ident, Locator, Reference};
-use zpm_sync::{SyncItem, SyncTemplate, SyncTree};
+use zpm_sync::{PreserveExtra, SyncItem, SyncTemplate, SyncTree};
 use zpm_utils::{FromFileString, IoResultExt, Path, ToHumanString};
 
 use crate::{
@@ -511,6 +511,7 @@ fn generate_workspace_node_modules(
                                 inner_path: package_directory.relative_to(&archive_path),
                             }),
                             assume_up_to_date,
+                            preserve_extra: PreserveExtra::None,
                         })?;
                     }
 

@@ -36,6 +36,9 @@ pub enum Error {
     #[error("Generic internal error: Please replace this error with a more specific one")]
     ReplaceMe,
 
+    #[error("No workspace selected; use -A,--all, --from, --since, or --recursive")]
+    MissingWorkspaceSelection,
+
     #[error("Unsupported code path")]
     Unsupported,
 

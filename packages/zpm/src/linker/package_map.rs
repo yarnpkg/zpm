@@ -81,7 +81,8 @@ pub struct NodeModulesPackageMapBuilder<'a> {
     package_locations_by_node_modules_path: BTreeMap<Path, BTreeMap<String, Path>>,
 }
 
-pub struct PnpmPackageMapBuilder {
+pub struct PnpmPackageMapBuilder<'a> {
+    install: &'a Install,
     base_path: Path,
     top_level_locator: Locator,
     package_map_type: NodePackageMapType,
@@ -217,9 +218,10 @@ impl<'a> NodeModulesPackageMapBuilder<'a> {
     }
 }
 
-impl PnpmPackageMapBuilder {
-    pub fn new(project: &Project) -> Self {
+impl<'a> PnpmPackageMapBuilder<'a> {
+    pub fn new(project: &Project, install: &'a Install) -> Self {
         Self {
+            install,
             base_path: project.nm_path(),
             top_level_locator: project.root_workspace().locator(),
             package_map_type: project.config.settings.node_package_map_type.value,
@@ -269,13 +271,23 @@ impl PnpmPackageMapBuilder {
             = BTreeMap::new();
 
         let mut package_map_nodes
-            = self.package_map_nodes_by_locator.values().collect::<Vec<_>>();
+            = self.package_map_nodes_by_locator.iter().collect::<Vec<_>>();
 
-        package_map_nodes.sort_by_key(|package_map_node| {
+        package_map_nodes.sort_by_key(|(_, package_map_node)| {
             get_package_id(&self.base_path, &package_map_node.package_location)
         });
 
-        for package_map_node in package_map_nodes {
+        for (locator, package_map_node) in package_map_nodes {
+            // Same bookkeeping as the nm builder: lets the next install keep
+            // store folders materialized from the exact same archive.
+            let physical_locator
+                = locator.physical_locator();
+
+            let checksum = self.install.lockfile.entries
+                .get(&physical_locator)
+                .and_then(|entry| entry.checksum.clone())
+                .or_else(|| self.install.install_state.cache_checksums.get(&physical_locator).cloned());
+
             let dependencies = match self.package_map_type {
                 NodePackageMapType::Standard => package_map_node.dependencies.clone(),
                 NodePackageMapType::Loose => {
@@ -290,8 +302,8 @@ impl PnpmPackageMapBuilder {
             packages.insert(get_package_id(&self.base_path, &package_map_node.package_location), PackageMapPackage {
                 url: get_relative_url(&self.base_path, &package_map_node.package_location),
                 dependencies: serialize_pnpm_dependencies(&dependencies, &package_ids_by_locator)?,
-                locator: None,
-                checksum: None,
+                locator: Some(locator.clone()),
+                checksum,
             });
         }
 

@@ -1,5 +1,5 @@
 import {ppath, xfs, PortablePath} from '@yarnpkg/fslib';
-import {execFileSync}            from 'child_process';
+import {execFileSync}             from 'child_process';
 
 // a <- b <- c ; d independent
 const affectedEnv = (cb: (args: {path: PortablePath, run: any, git: (...args: Array<string>) => string}) => Promise<void>) => makeTemporaryMonorepoEnv({
@@ -30,6 +30,9 @@ const affectedEnv = (cb: (args: {path: PortablePath, run: any, git: (...args: Ar
 const npathOf = (path: PortablePath) => require(`@yarnpkg/fslib`).npath.fromPortablePath(path);
 
 const names = (stdout: string) => stdout.trim().split(`\n`).filter(Boolean).map(line => JSON.parse(line).name).sort();
+
+// Workspace names printed by `foreach exec node -p "require('./package.json').name"`
+const printedNames = (stdout: string) => stdout.trim().split(`\n`).filter(line => line.startsWith(`pkg-`)).sort();
 
 describe(`Commands`, () => {
   describe(`workspaces list --since (affected detection)`, () => {
@@ -146,6 +149,54 @@ describe(`Commands`, () => {
 
         const {stdout: yarnVars} = await run(`workspaces`, `list`, `--since`, `-R`, `--json`, {env: {YARN_CHANGESET_BASE: base}});
         expect(names(yarnVars)).toEqual([`pkg-d`]);
+      }),
+    );
+
+    test(
+      `--since / --head should take precedence over the environment variables`,
+      affectedEnv(async ({path, run, git}) => {
+        const base = git(`rev-parse`, `HEAD`);
+
+        await xfs.writeFilePromise(ppath.join(path, `packages/pkg-b/index.js` as PortablePath), `// change\n`);
+        git(`add`, `-A`);
+        git(`commit`, `-q`, `-m`, `change b`);
+        const middle = git(`rev-parse`, `HEAD`);
+
+        await xfs.writeFilePromise(ppath.join(path, `packages/pkg-d/index.js` as PortablePath), `// change\n`);
+        git(`add`, `-A`);
+        git(`commit`, `-q`, `-m`, `change d`);
+
+        const env = {YARN_CHANGESET_BASE: middle, YARN_CHANGESET_HEAD: middle, TURBO_SCM_BASE: middle, TURBO_SCM_HEAD: middle};
+
+        const {stdout: fromEnv} = await run(`workspaces`, `list`, `--since`, `--json`, {env});
+        expect(names(fromEnv)).toEqual([]);
+
+        const {stdout: explicitBase} = await run(`workspaces`, `list`, `--since=${base}`, `--json`, {env});
+        expect(names(explicitBase)).toEqual([`pkg-b`]);
+
+        const {stdout: explicitBoth} = await run(`workspaces`, `list`, `--since=${base}`, `--head=HEAD`, `--json`, {env});
+        expect(names(explicitBoth)).toEqual([`pkg-b`, `pkg-d`]);
+
+        const {stdout: foreachOutput} = await run(`workspaces`, `foreach`, `--since=${base}`, `--head=HEAD`, `exec`, `node`, `-p`, `require('./package.json').name`, {env});
+        expect(printedNames(foreachOutput)).toEqual([`pkg-b`, `pkg-d`]);
+      }),
+    );
+
+    test(
+      `foreach --head should compare two refs, ignoring the working tree`,
+      affectedEnv(async ({path, run, git}) => {
+        const base = git(`rev-parse`, `HEAD`);
+
+        await xfs.writeFilePromise(ppath.join(path, `packages/pkg-b/index.js` as PortablePath), `// change\n`);
+        git(`add`, `-A`);
+        git(`commit`, `-q`, `-m`, `change b`);
+        const head = git(`rev-parse`, `HEAD`);
+
+        // Uncommitted change that must be ignored when --head is set
+        await xfs.writeFilePromise(ppath.join(path, `packages/pkg-d/index.js` as PortablePath), `// change\n`);
+
+        const {stdout} = await run(`workspaces`, `foreach`, `--since=${base}`, `--head=${head}`, `--recursive`, `exec`, `node`, `-p`, `require('./package.json').name`);
+        expect(printedNames(stdout)).toEqual([`pkg-b`, `pkg-c`]);
       }),
     );
 
