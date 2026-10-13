@@ -1,3 +1,4 @@
+use sha2::Digest;
 use zpm_primitives::{Locator, PypiRegistryReference};
 use zpm_utils::ToFileString;
 
@@ -36,6 +37,34 @@ async fn resolve_artifact_url(context: &InstallContext<'_>, params: &PypiRegistr
             )))?;
 
     Ok(file.url.clone())
+}
+
+/// The sha256 the index advertises for an artifact, either through the
+/// URL fragment (PEP 503) or the `hashes` field of the listing (PEP 691).
+/// Locators of platform variants embed the URL, so the listing is looked up
+/// (from its on-disk cache when available) to find the file again.
+async fn expected_sha256(context: &InstallContext<'_>, params: &PypiRegistryReference, artifact_url: &str) -> Result<Option<String>, Error> {
+    let fragment_hash
+        = artifact_url.split_once('#')
+            .and_then(|(_, fragment)| fragment.strip_prefix("sha256="));
+
+    if let Some(hash) = fragment_hash {
+        return Ok(Some(hash.to_ascii_lowercase()));
+    }
+
+    let index_project
+        = fetch_project(context, &params.ident, Some(&params.version)).await?;
+
+    let download_url
+        = artifact_url.split('#').next().unwrap();
+
+    let hash
+        = version_files(&index_project, &params.ident, &params.version)?.iter()
+            .find(|file| file.url_without_fragment() == download_url)
+            .and_then(|file| file.sha256.as_ref())
+            .map(|hash| hash.to_ascii_lowercase());
+
+    Ok(hash)
 }
 
 /// The cache extension of an artifact. Zip source distributions get their
@@ -110,11 +139,23 @@ pub async fn fetch_locator<'a>(context: &InstallContext<'a>, locator: &Locator, 
 
     let cached_blob
         = package_cache.ensure_blob(locator.clone(), ext, || async {
+            let expected_sha256
+                = expected_sha256(context, params, &artifact_url).await?;
+
             let (_, bytes)
                 = project.http_client.get(&download_url)?
                     .header("authorization", authorization.as_deref())
                     .send_bytes()
                     .await?;
+
+            if let Some(expected_sha256) = expected_sha256 {
+                let actual_sha256
+                    = hex::encode(sha2::Sha256::digest(&bytes));
+
+                if actual_sha256 != expected_sha256 {
+                    return Err(Error::ChecksumMismatch(locator.clone()));
+                }
+            }
 
             Ok(bytes.to_vec())
         }).await?.into_info();

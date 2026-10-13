@@ -7,8 +7,8 @@
 //! 1. create a venv with the island's interpreter (`python -m venv`, which
 //!    bootstraps pip through `ensurepip`, so no network access to fetch pip);
 //! 2. install the `build-system.requires` with pip, pointed at the same
-//!    index Yarn uses (credentials passed through the URL, never through
-//!    the backend's environment);
+//!    index Yarn uses (credentials passed through pip's environment, never
+//!    through its arguments or the backend's environment);
 //! 3. call the backend's `build_wheel` hook through a small driver script.
 //!
 //! The produced wheel is cached in `<globalFolder>/pypi-built`, keyed by
@@ -157,17 +157,20 @@ fn pip_index_url(project: &Project, locator: &Locator) -> String {
 fn extract_sdist(archive: &Path, destination: &Path) -> Result<Path, Error> {
     destination.fs_create_dir_all()?;
 
-    let mut command
-        = Command::new("tar");
-
-    command.arg("-xzf").arg(archive.to_path_buf()).arg("-C").arg(destination.to_path_buf());
+    let bytes
+        = archive.fs_read()?;
 
     if archive.to_file_string().ends_with(".src.zip") {
-        command = Command::new("unzip");
-        command.arg("-q").arg(archive.to_path_buf()).arg("-d").arg(destination.to_path_buf());
-    }
+        let entries
+            = zpm_formats::zip::entries_from_zip(&bytes)?;
 
-    run(&mut command, "extract the source distribution")?;
+        zpm_formats::entries_to_disk(&entries, destination)?;
+    } else {
+        let tar
+            = zpm_formats::tar::unpack_tgz(&bytes)?;
+
+        zpm_formats::tar::extract_tar_to_disk(&tar, destination)?;
+    }
 
     // sdists contain a single top-level `<name>-<version>/` folder
     let entries
@@ -218,9 +221,12 @@ pub fn build_wheel_from_source(project: &Project, interpreter: &Interpreter, loc
                 return Ok(());
             }
 
+            // The index URL may hold credentials; the environment keeps them
+            // out of the process list (and away from the build backend,
+            // which runs in a separate process)
             run(Command::new(python.to_path_buf())
-                .args(["-m", "pip", "install", "--quiet", "--disable-pip-version-check", "--no-input", "--index-url"])
-                .arg(&index_url)
+                .args(["-m", "pip", "install", "--quiet", "--disable-pip-version-check", "--no-input"])
+                .env("PIP_INDEX_URL", &index_url)
                 .args(requirements), "install the build dependencies")?;
 
             Ok(())

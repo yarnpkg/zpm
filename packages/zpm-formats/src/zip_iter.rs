@@ -71,6 +71,12 @@ impl<'a> ZipIterator<'a> {
         let name
             = Path::try_from(name_str)?;
 
+        // Absolute paths and `..` segments would let the archive write
+        // outside of the folder it's extracted into
+        if !name.is_forward() {
+            return Err(Error::InvalidZipFile(format!("Entry path escapes the archive: {}", name_str)));
+        }
+
         let data_size
             = central_directory_record.header.compressed_size.get() as usize;
         let data
@@ -155,5 +161,17 @@ mod tests {
         tarball.extend(std::iter::repeat(0xff).take(4096));
 
         assert!(crate::zip::entries_from_zip(&tarball).is_err());
+    }
+
+    #[test]
+    fn test_escaping_entry_is_an_error() {
+        use crate::zip::ToZip;
+
+        for name in ["/etc/passwd", "../outside", "pkg/../../outside"] {
+            let entries
+                = vec![crate::Entry::new_file(zpm_utils::Path::try_from(name).unwrap(), std::borrow::Cow::Borrowed(b"data"))];
+
+            assert!(crate::zip::entries_from_zip(&entries.to_zip()).is_err(), "{} should be rejected", name);
+        }
     }
 }

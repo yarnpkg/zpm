@@ -272,12 +272,11 @@ async fn download_managed(config: &Configuration, http_client: &HttpClient, requ
     let _ = tmp.fs_rm();
     tmp.fs_create_dir_all()?;
 
-    let archive_path
-        = tmp.with_join_str("python.tar.gz");
+    // The distribution relies on symlinks (`bin/python3 -> python3.12`)
+    let tar
+        = zpm_formats::tar::unpack_tgz(&bytes)?;
 
-    archive_path.fs_write(&bytes)?;
-
-    extract_tar_preserving_links(&archive_path, &tmp)?;
+    zpm_formats::tar::extract_tar_to_disk(&tar, &tmp)?;
 
     let extracted
         = tmp.with_join_str("python");
@@ -296,26 +295,6 @@ async fn download_managed(config: &Configuration, http_client: &HttpClient, requ
         executable,
         version,
     })
-}
-
-/// Extracts the build with the system `tar`, which preserves the symlinks
-/// and permissions of the distribution (our own extractor only handles the
-/// regular files package archives contain).
-fn extract_tar_preserving_links(archive: &Path, destination: &Path) -> Result<(), Error> {
-    let status
-        = Command::new("tar")
-            .arg("-xzf")
-            .arg(archive.to_path_buf())
-            .arg("-C")
-            .arg(destination.to_path_buf())
-            .status()
-            .map_err(|err| Error::InvalidResolution(format!("Failed to run tar: {}", err)))?;
-
-    if !status.success() {
-        return Err(Error::InvalidResolution("Failed to extract the Python build".to_string()));
-    }
-
-    Ok(())
 }
 
 type InterpreterCell = Arc<OnceCell<Interpreter>>;

@@ -154,9 +154,64 @@ async function buildPypiWheel(filename: string): Promise<Buffer | null> {
   return buildZipFromEntries(entries);
 }
 
-async function serveDynamicPypiWheel(request: IncomingMessage, response: ServerResponse) {
+// Source distributions are generated on the fly too: the source tree from
+// the fixture folder of the same name, under the `<name>-<version>/` folder
+// sdists use, with a PKG-INFO file generated from PYPI_FIXTURES.
+async function buildPypiSdist(filename: string): Promise<Buffer | null> {
+  const fixture = findPypiFixtureFile(filename);
+  if (fixture === null)
+    return null;
+
+  const sourceDir = ppath.join(pypiRepositoryDir, filename as Filename);
+  if (!await xfs.existsPromise(sourceDir))
+    return null;
+
+  const {name, version, release} = fixture;
+  const root = filename.replace(/\.tar\.gz$/, ``);
+
+  const entries = await collectWheelEntries(sourceDir);
+  entries.push({name: `PKG-INFO` as PortablePath, data: Buffer.from(generatePypiMetadata(name, version, release)), mode: 0o644});
+  entries.sort((a, b) => a.name.localeCompare(b.name));
+
+  const tar = tarStream.pack();
+  for (const entry of entries)
+    tar.entry({name: `${root}/${entry.name}`, mode: entry.mode & 0o777, mtime: ZIP_FIXED_DATE}, entry.data);
+  tar.finalize();
+
+  const chunks: Array<Buffer> = [];
+  await new Promise<void>((resolve, reject) => {
+    tar.on(`data`, (chunk: Buffer) => chunks.push(chunk));
+    tar.on(`end`, resolve);
+    tar.on(`error`, reject);
+  });
+
+  return zlib.gzipSync(Buffer.concat(chunks));
+}
+
+async function buildPypiArtifact(filename: string): Promise<Buffer | null> {
+  return filename.endsWith(`.tar.gz`)
+    ? buildPypiSdist(filename)
+    : buildPypiWheel(filename);
+}
+
+// The hash of a fixture file, as the index advertises it; null for files
+// the fixture server doesn't know how to produce
+async function getPypiFileSha256(file: PypiFixtureDistribution): Promise<string | null> {
+  let data = await buildPypiArtifact(file.filename);
+
+  if (data === null) {
+    const staticPath = ppath.join(npath.toPortablePath(require(`pkg-tests-fixtures`)), file.path.replace(/^\//, ``) as PortablePath);
+    if (await xfs.existsPromise(staticPath) && (await xfs.statPromise(staticPath)).isFile()) {
+      data = await xfs.readFilePromise(staticPath);
+    }
+  }
+
+  return data !== null ? crypto.createHash(`sha256`).update(data).digest(`hex`) : null;
+}
+
+async function serveDynamicPypiArtifact(request: IncomingMessage, response: ServerResponse) {
   const pathname = new URL(request.url ?? `/`, `http://localhost`).pathname;
-  const match = pathname.match(/^(\/auth)?\/repositories\/pypi\/([^/]+\.whl)(\.metadata)?$/);
+  const match = pathname.match(/^(\/auth)?\/repositories\/pypi\/([^/]+\.(?:whl|tar\.gz))(\.metadata)?$/);
 
   if (match === null)
     return false;
@@ -183,18 +238,18 @@ async function serveDynamicPypiWheel(request: IncomingMessage, response: ServerR
     return true;
   }
 
-  const wheel = await buildPypiWheel(wheelFileName);
-  if (wheel === null)
+  const artifact = await buildPypiArtifact(wheelFileName);
+  if (artifact === null)
     return false;
 
   pypiWheelRequests.push(wheelFileName);
 
   response.writeHead(200, {
     [`Content-Type`]: `application/octet-stream`,
-    [`Content-Length`]: wheel.length.toString(),
+    [`Content-Length`]: artifact.length.toString(),
   });
 
-  response.end(wheel);
+  response.end(artifact);
 
   return true;
 }
@@ -440,6 +495,8 @@ type PypiFixtureDistribution = {
   uploadTime: string;
   requiresPython?: string;
   yanked?: boolean;
+  // Overrides the sha256 advertised by the index (defaults to the real one)
+  sha256?: string;
 };
 
 export const PYPI_AUTH_TOKEN = `pypi-secret-token`;
@@ -709,6 +766,28 @@ const PYPI_FIXTURES: Record<string, Record<string, PypiFixtureRelease>> = {
         packagetype: `bdist_wheel`,
         path: `/repositories/pypi/pypi_entry_points-1.0.0-py3-none-any.whl`,
         uploadTime: `2024-07-01T00:00:00Z`,
+      }],
+    },
+  },
+  [`pypi-sdist-only`]: {
+    [`1.0.0`]: {
+      requiresDist: [`pypi-no-deps (>=1.0.0)`],
+      files: [{
+        filename: `pypi_sdist_only-1.0.0.tar.gz`,
+        packagetype: `sdist`,
+        path: `/repositories/pypi/pypi_sdist_only-1.0.0.tar.gz`,
+        uploadTime: `2024-01-01T00:00:00Z`,
+      }],
+    },
+  },
+  [`pypi-bad-hash`]: {
+    [`1.0.0`]: {
+      files: [{
+        filename: `pypi_bad_hash-1.0.0-py3-none-any.whl`,
+        packagetype: `bdist_wheel`,
+        path: `/repositories/pypi/pypi_bad_hash-1.0.0-py3-none-any.whl`,
+        uploadTime: `2024-01-01T00:00:00Z`,
+        sha256: `0000000000000000000000000000000000000000000000000000000000000000`,
       }],
     },
   },
@@ -1064,14 +1143,15 @@ export const startPackageServer = ({type}: {type: keyof typeof packageServerUrls
       const authPrefix = parsedRequest.flavor === `simple-auth` ? `/auth` : ``;
       const withMetadata = parsedRequest.flavor !== `simple-nometa`;
 
-      const files = Object.values(project).flatMap(release => release.files.map(file => ({
+      const files = await Promise.all(Object.values(project).flatMap(release => release.files.map(async file => ({
         filename: file.filename,
         url: `${serverUrl}${authPrefix}${file.path}`,
         requiresPython: file.requiresPython ?? null,
         uploadTime: file.uploadTime,
         yanked: file.yanked ?? false,
         metadata: withMetadata && file.packagetype === `bdist_wheel`,
-      })));
+        sha256: file.sha256 ?? await getPypiFileSha256(file),
+      }))));
 
       const accept = request.headers.accept ?? ``;
 
@@ -1083,7 +1163,7 @@ export const startPackageServer = ({type}: {type: keyof typeof packageServerUrls
           files: files.map(file => ({
             filename: file.filename,
             url: file.url,
-            hashes: {},
+            hashes: file.sha256 ? {sha256: file.sha256} : {},
             [`requires-python`]: file.requiresPython,
             [`upload-time`]: file.uploadTime,
             yanked: file.yanked,
@@ -1096,7 +1176,8 @@ export const startPackageServer = ({type}: {type: keyof typeof packageServerUrls
       const escape = (value: string) => value.replace(/&/g, `&amp;`).replace(/</g, `&lt;`).replace(/>/g, `&gt;`).replace(/"/g, `&quot;`);
 
       const anchors = files.map(file => {
-        const attributes = [`href="${escape(file.url)}"`];
+        const href = file.sha256 ? `${file.url}#sha256=${file.sha256}` : file.url;
+        const attributes = [`href="${escape(href)}"`];
         if (file.requiresPython)
           attributes.push(`data-requires-python="${escape(file.requiresPython)}"`);
         if (file.yanked)
@@ -1251,7 +1332,7 @@ export const startPackageServer = ({type}: {type: keyof typeof packageServerUrls
     },
 
     async [RequestType.Repository](parsedRequest, request, response) {
-      if (await serveDynamicPypiWheel(request, response))
+      if (await serveDynamicPypiArtifact(request, response))
         return;
 
       staticServer(request as any, response as any, finalhandler(request, response));
