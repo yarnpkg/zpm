@@ -396,7 +396,7 @@ pub async fn link_project_pnpm<'a>(project: &'a Project, install: &'a Install) -
         = collect_hoistable_packages(tree, &public_hoist_patterns, &locations_by_package);
 
     // Create symlinks for hoisted packages in the store's shared node_modules
-    // This is at node_modules/.pnpm/node_modules/<package-name>
+    // This is at node_modules/.yarn/store/node_modules/<package-name>
     for (ident, locator) in &hoisted_packages {
         let package_location = locations_by_package
             .get(*locator)
@@ -464,13 +464,13 @@ pub async fn link_project_pnpm<'a>(project: &'a Project, install: &'a Install) -
 
             package_map_builder.register_dependency(locator, dep_name, dep_locator)?;
 
-            // node_modules/.pnpm/@types-no-deps-npm-1.0.0-xyz/node_modules/@types/no-deps
+            // node_modules/.yarn/store/@types-no-deps-npm-1.0.0-xyz/node_modules/@types/no-deps
             let dep_rel_location
                 = locations_by_package
                     .get(dep_locator)
                     .expect("Failed to find dependency location; it should have been registered a little earlier");
 
-            // /path/to/project/node_modules/.pnpm/@types-no-deps-npm-1.0.0-xyz/node_modules/@types/no-deps
+            // /path/to/project/node_modules/.yarn/store/@types-no-deps-npm-1.0.0-xyz/node_modules/@types/no-deps
             let dep_abs_path
                 = project.project_cwd
                     .with_join(dep_rel_location);

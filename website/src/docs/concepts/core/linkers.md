@@ -39,7 +39,7 @@ Yarn Plug'n'Play has been the default installation strategy in Yarn since 2019, 
 
 ## `nodeLinker: pnpm`
 
-Under this mode, a flat virtual store is generated in `node_modules/.pnpm` containing one folder for each dependency in the project. Each dependency folder is populated with hardlinks obtained from Yarn's content-addressable store (by default under `~/.yarn/zpm/index`). Finally, symlinks to the relevant folders from the virtual store are placed into the `node_modules` folders.
+Under this mode, a flat virtual store is generated in `node_modules/.yarn/store` containing one folder for each dependency in the project. Each dependency folder is populated with hardlinks obtained from Yarn's content-addressable store (by default under `~/.yarn/zpm/index`). Finally, symlinks to the relevant folders from the virtual store are placed into the `node_modules` folders.
 
 <div class="[&_table]:table-fixed [&_th]:w-[50%]">
 
