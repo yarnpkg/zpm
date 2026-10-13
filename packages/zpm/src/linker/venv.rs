@@ -19,12 +19,12 @@
 //! venvs don't cost N times the disk. A venv is only rebuilt when its
 //! content changes: `.venv/.yarn-state` stores a hash of what it contains.
 
-use std::{collections::{BTreeMap, BTreeSet}, os::unix::fs::PermissionsExt};
+use std::collections::{BTreeMap, BTreeSet};
 
 use rayon::prelude::*;
 
 use zpm_primitives::{Ident, Locator, Range, Reference};
-use zpm_utils::{Hash64, Path, ToFileString, ToHumanString};
+use zpm_utils::{FromFileString, Hash64, Path, ToFileString, ToHumanString};
 
 use crate::{
     build::BuildRequests,
@@ -266,7 +266,7 @@ fn ensure_unpacked(project: &Project, interpreter: &Interpreter, locator: &Locat
         let mode
             = if entry.mode & 0o111 != 0 { 0o755 } else { 0o644 };
 
-        target.fs_set_permissions(std::fs::Permissions::from_mode(mode))?;
+        target.fs_set_mode(mode)?;
     }
 
     tmp_path.with_join_str(".complete").fs_write([])?;
@@ -423,8 +423,8 @@ fn write_venv_skeleton(venv: &Path, interpreter: &Interpreter) -> Result<(), Err
     python.fs_symlink(&interpreter.executable)?;
 
     for alias in [format!("python{}", interpreter.version.major), format!("python{}.{}", interpreter.version.major, interpreter.version.minor)] {
-        std::os::unix::fs::symlink("python", bin.with_join_str(&alias).to_path_buf())
-            .map_err(zpm_utils::PathError::from)?;
+        bin.with_join_str(&alias)
+            .fs_symlink(&Path::from_file_string("python")?)?;
     }
 
     let activate
@@ -468,7 +468,7 @@ fn write_console_script(venv: &Path, name: &str, module: &str, object: &str) -> 
     }
 
     script.fs_write(content)?;
-    script.fs_set_permissions(std::fs::Permissions::from_mode(0o755))?;
+    script.fs_set_mode(0o755)?;
 
     Ok(())
 }

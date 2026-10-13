@@ -1,5 +1,5 @@
 import {PortablePath, ppath, xfs} from '@yarnpkg/fslib';
-import {tests, yarn} from 'pkg-tests-core';
+import {tests, yarn}              from 'pkg-tests-core';
 
 async function sitePackagesHas(path: PortablePath, workspace: string, file: string) {
   const lib = ppath.join(path, `${workspace}/.venv/lib` as PortablePath);
