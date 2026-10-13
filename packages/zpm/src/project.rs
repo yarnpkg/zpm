@@ -2,7 +2,7 @@ use std::{collections::{BTreeMap, BTreeSet, HashSet}, io::ErrorKind, sync::{Arc,
 
 use colored::Colorize;
 use globset::{GlobBuilder, GlobSetBuilder};
-use zpm_config::{Configuration, ConfigurationContext, IslandLinker, Source};
+use zpm_config::{Configuration, ConfigurationContext, IslandLinker, Settings, Source};
 use zpm_macro_enum::zpm_enum;
 use zpm_parsers::JsonDocument;
 use zpm_primitives::{Descriptor, Ident, Locator, Range, Reference, WorkspaceIdentReference, WorkspaceMagicRange, WorkspacePathReference};
@@ -131,19 +131,6 @@ pub struct RunInstallOptions {
     pub inline_builds: bool,
     pub force: bool,
 }
-
-/// Settings that never influence the installed tree (see `install_config_hash`)
-const INSTALL_IRRELEVANT_SETTINGS: &[&str] = &[
-    "changesetBaseRefs",
-    "daemonDefaultWarmupPeriod",
-    "daemonMaxClosedTasks",
-    "daemonOutputBufferMaxLines",
-    "enableImmutableInstalls",
-    "enableProgressBars",
-    "enableTimers",
-    "immutablePatterns",
-    "lazyInstallMode",
-];
 
 pub struct Project {
     pub project_cwd: Path,
@@ -1115,12 +1102,13 @@ impl Project {
             = serde_json::to_value(&self.config.settings)
                 .expect("configuration settings should always be serializable");
 
-        // Settings that only validate an install or shape the output can't
-        // change what gets installed. Hashing them would make every
-        // `--immutable` install (which forces enableImmutableInstalls)
-        // invalidate the next lazy install.
+        // Settings marked with `"affectsInstall": false` in the schema only
+        // validate an install or shape the output, so they can't change
+        // what gets installed. Hashing them would make every `--immutable`
+        // install (which forces enableImmutableInstalls) invalidate the
+        // next lazy install.
         if let Some(settings) = settings.as_object_mut() {
-            for key in INSTALL_IRRELEVANT_SETTINGS {
+            for key in Settings::install_insensitive_setting_names() {
                 settings.remove(*key);
             }
         }
