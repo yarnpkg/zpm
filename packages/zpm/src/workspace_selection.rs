@@ -148,12 +148,16 @@ impl<'a> WorkspaceSelection<'a> {
                     .map(|w| (w.name.clone(), self.followed_dependencies.of(w)))
                     .collect();
 
-            if self.follows_dependencies() {
-                selection.extend(traverse(&seeds, &dependency_map));
-            }
-
+            // Dependents first, so that dependencies are then followed from
+            // the dependents too (`--follow-dependents --follow-dependencies`
+            // gives the full closure needed to build every consumer, like
+            // pnpm's `...{pkg}...`).
             if self.follows_dependents() {
                 selection.extend(traverse(&seeds, &invert(&dependency_map)));
+            }
+
+            if self.follows_dependencies() {
+                selection = traverse(&selection, &dependency_map);
             }
         }
 

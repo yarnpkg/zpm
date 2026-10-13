@@ -50,6 +50,10 @@ pub enum Limit {
 ///
 /// By default commands run sequentially. Use `-p,--parallel` to run them concurrently, and `--topological` to respect workspace dependency order.
 ///
+/// When both `--follow-dependents` and `--follow-dependencies` are set, the dependents are added first and the dependencies are then
+/// followed from the whole resulting set, so the selection contains everything needed to build each dependent (equivalent to pnpm's
+/// `--filter '...{pkg}...'`).
+///
 #[cli::command(proxy)]
 #[cli::path("workspaces", "foreach")]
 #[cli::category("Workspace commands")]

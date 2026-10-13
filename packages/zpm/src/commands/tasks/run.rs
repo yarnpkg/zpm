@@ -32,7 +32,9 @@ use crate::workspace_selection::{FollowedDependencies, WorkspaceSelection};
 ///   (or `TURBO_SCM_BASE` / `TURBO_SCM_HEAD`).
 ///
 /// - `--follow-dependencies` adds the transitive workspace dependencies of the
-///   selection, and `--follow-dependents` adds its dependents. `--recursive`
+///   selection, and `--follow-dependents` adds its dependents. When both are
+///   set, dependencies are followed from the dependents too (pnpm's
+///   `--filter '...{pkg}...'`). `--recursive`
 ///   follows dependents when combined with `--since` (so `--since --recursive`
 ///   selects all the affected workspaces), and dependencies otherwise.
 ///   `--followed-dependencies` restricts the traversal to `prod` or `dev`
