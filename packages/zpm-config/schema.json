@@ -17,10 +17,19 @@
     "changesetBaseRefs": {
       "type": "array",
       "description": "The list of git refs to use as base for changeset detection. Defaults to ['main', 'master'] if not set.",
+      "affectsInstall": false,
       "items": {
         "type": "string"
       },
       "default": ["main", "master"]
+    },
+    "changesetGlobalFiles": {
+      "type": "array",
+      "description": "Glob patterns (relative to the project root) of files whose change marks every workspace as changed during changeset detection (similar to turbo's globalDependencies).",
+      "items": {
+        "type": "string"
+      },
+      "default": []
     },
     "cloneConcurrency": {
       "type": "usize",
@@ -34,17 +43,25 @@
     "daemonOutputBufferMaxLines": {
       "type": "usize",
       "description": "Maximum number of output lines to keep in memory per task in the daemon",
+      "affectsInstall": false,
       "default": 1000
     },
     "daemonMaxClosedTasks": {
       "type": "usize",
       "description": "Maximum number of completed/failed tasks whose output buffers are kept in memory by the daemon",
+      "affectsInstall": false,
       "default": 100
     },
     "daemonDefaultWarmupPeriod": {
       "type": "std::time::Duration",
       "description": "Default warm-up period for long-lived tasks in the daemon. After a long-lived task starts, dependents are unblocked once this period elapses.",
+      "affectsInstall": false,
       "default": "1s"
+    },
+    "taskConcurrency": {
+      "type": "usize",
+      "description": "Maximum number of task processes the daemon runs at the same time, across all `yarn tasks run` invocations. Long-lived tasks don't count toward the limit. Defaults to the number of CPUs.",
+      "default": "crate::default_task_concurrency()"
     },
     "defaultSemverRangePrefix": {
       "type": "zpm_semver::RangeKind",
@@ -99,11 +116,13 @@
     "enableImmutableInstalls": {
       "type": "boolean",
       "description": "Whether to report errors when a package would be added or removed from the cache",
+      "affectsInstall": false,
       "default": false
     },
     "immutablePatterns": {
       "type": "array",
       "description": "List of glob patterns whose checksum must not change during an --immutable install",
+      "affectsInstall": false,
       "items": {
         "type": "zpm_utils::Glob"
       }
@@ -121,6 +140,7 @@
     "enableProgressBars": {
       "type": "boolean",
       "description": "Whether to show progress bars in the output",
+      "affectsInstall": false,
       "default": "zpm_utils::is_terminal()"
     },
     "enableScripts": {
@@ -136,6 +156,7 @@
     "enableTimers": {
       "type": "boolean",
       "description": "Whether to show timers in the output",
+      "affectsInstall": false,
       "default": true
     },
     "enableTransparentWorkspaces": {
@@ -231,6 +252,7 @@
     "lazyInstallMode": {
       "type": "crate::LazyInstallMode",
       "description": "Whether lazy installs should install only the active workspace and its dependencies or the entire project",
+      "affectsInstall": false,
       "default": "all"
     },
     "networkSettings": {
@@ -299,7 +321,7 @@
     },
     "winLinkType": {
       "type": "crate::WinLinkType",
-      "description": "On Windows, choose between true symlinks and NTFS junctions for node_modules; a no-op on every other platform",
+      "description": "On Windows, choose between true symlinks and NTFS junctions for node_modules (symlinks fall back to junctions when the user lacks the privilege to create them, which requires Developer Mode); a no-op on every other platform",
       "default": "symlinks"
     },
     "npmAlwaysAuth": {
@@ -387,8 +409,51 @@
     },
     "pypiRegistryServer": {
       "type": "string",
-      "description": "The URL of the default PyPI registry server",
-      "default": "https://pypi.org"
+      "description": "The URL of the default PyPI index. Must point to a PEP 503 / PEP 691 Simple API root (for example https://pypi.org/simple/); https://pypi.org is accepted as an alias for https://pypi.org/simple/.",
+      "default": "https://pypi.org/simple/"
+    },
+    "pythonVersion": {
+      "type": "string",
+      "description": "The Python version (`3.12` or `3.12.11`) used to resolve PyPI packages and to provision the interpreter of venv islands",
+      "default": "3.12"
+    },
+    "pythonDownloads": {
+      "type": "boolean",
+      "description": "Whether Yarn may download a managed CPython build (python-build-standalone) when no matching interpreter is found on the system",
+      "default": true
+    },
+    "pythonPreference": {
+      "type": "crate::PythonPreference",
+      "description": "Whether to prefer the managed CPython builds ('managed') or interpreters found on the PATH ('system')",
+      "default": "managed"
+    },
+    "pythonDownloadMirror": {
+      "type": "string",
+      "description": "The base URL of the python-build-standalone releases",
+      "default": "https://github.com/astral-sh/python-build-standalone/releases/download"
+    },
+    "pypiAuthToken": {
+      "type": ["zpm_utils::Secret<String>", "null"],
+      "description": "The token sent as a Bearer token when querying PyPI indexes"
+    },
+    "pypiAuthIdent": {
+      "type": ["zpm_utils::Secret<String>", "null"],
+      "description": "The `username:password` pair sent as Basic credentials when querying PyPI indexes"
+    },
+    "pypiMinimalAgeGate": {
+      "type": "std::time::Duration",
+      "description": "Minimum age of a PyPI release file (based on its upload time) to be considered for installation. Files whose index doesn't report an upload time are never filtered.",
+      "default": "0s"
+    },
+    "pypiMacosTarget": {
+      "type": "string",
+      "description": "The macOS version used to select macOS wheels (wheels requiring a newer macOS are ignored)",
+      "default": "14.0"
+    },
+    "pypiManylinuxTarget": {
+      "type": "string",
+      "description": "The glibc version used to select manylinux wheels (wheels requiring a newer glibc are ignored)",
+      "default": "2.34"
     },
     "npmScopes": {
       "type": "object",
@@ -445,7 +510,19 @@
           },
           "pypiRegistryServer": {
             "type": ["string", "null"],
-            "description": "The URL of the PyPI registry server to use for matching packages"
+            "description": "The URL of the PyPI index to use for matching packages"
+          },
+          "pypiMinimalAgeGate": {
+            "type": ["std::time::Duration", "null"],
+            "description": "Minimum age of a PyPI release file to be considered for matching packages"
+          },
+          "pypiAuthToken": {
+            "type": ["zpm_utils::Secret<String>", "null"],
+            "description": "The Bearer token to use for PyPI authentication for matching packages"
+          },
+          "pypiAuthIdent": {
+            "type": ["zpm_utils::Secret<String>", "null"],
+            "description": "The `username:password` pair to use for PyPI authentication for matching packages"
           },
           "npmMinimalAgeGate": {
             "type": ["std::time::Duration", "null"],
@@ -484,6 +561,18 @@
           "npmMinimalAgeGate": {
             "type": ["std::time::Duration", "null"],
             "description": "Minimum age of an npm package version to be considered from matching sources"
+          },
+          "pypiMinimalAgeGate": {
+            "type": ["std::time::Duration", "null"],
+            "description": "Minimum age of a PyPI release file to be considered from matching indexes"
+          },
+          "pypiAuthToken": {
+            "type": ["zpm_utils::Secret<String>", "null"],
+            "description": "The Bearer token to use for PyPI authentication with matching indexes"
+          },
+          "pypiAuthIdent": {
+            "type": ["zpm_utils::Secret<String>", "null"],
+            "description": "The `username:password` pair to use for PyPI authentication with matching indexes"
           },
           "npmAlwaysAuth": {
             "type": ["boolean", "null"],
@@ -600,7 +689,7 @@
     "pnpmStoreFolder": {
       "type": "string",
       "description": "The folder to use for the Pnpm store",
-      "default": "node_modules/.pnpm"
+      "default": "node_modules/.yarn/store"
     },
     "preferDeferredVersions": {
       "type": "boolean",
@@ -670,6 +759,21 @@
           "linker": {
             "type": "crate::IslandLinker",
             "description": "The linker to use for workspaces in this island. Supported values are 'node-modules' and 'venv'."
+          },
+          "pythonVersion": {
+            "type": ["string", "null"],
+            "description": "The Python version used by this island (overrides the global pythonVersion setting)"
+          },
+          "pypiSeedLockfile": {
+            "type": ["string", "null"],
+            "description": "Path (relative to the project root) of a uv.lock whose versions are preferred when the island has no entry in yarn.lock yet. Used by `yarn import uv` so migrating doesn't upgrade anything."
+          },
+          "pypiConstraints": {
+            "type": "array",
+            "description": "PEP 508 requirements restricting the versions the island may select for a package, without adding the package to the island (equivalent to uv's constraint-dependencies)",
+            "items": {
+              "type": "string"
+            }
           }
         }
       }

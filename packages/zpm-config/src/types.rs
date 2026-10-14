@@ -172,6 +172,16 @@ pub enum IslandLinker {
 
 #[zpm_enum(error = ConfigurationError, or_else = |s| Err(ConfigurationError::EnumError(s.to_string())))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PythonPreference {
+    #[literal("managed")]
+    Managed,
+
+    #[literal("system")]
+    System,
+}
+
+#[zpm_enum(error = ConfigurationError, or_else = |s| Err(ConfigurationError::EnumError(s.to_string())))]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PnpFallbackMode {
     #[literal("none")]
     None,
@@ -240,6 +250,15 @@ pub enum WinLinkType {
 
     #[literal("junctions")]
     Junctions,
+}
+
+impl From<WinLinkType> for zpm_utils::LinkType {
+    fn from(value: WinLinkType) -> Self {
+        match value {
+            WinLinkType::Symlinks => zpm_utils::LinkType::Symlink,
+            WinLinkType::Junctions => zpm_utils::LinkType::Junction,
+        }
+    }
 }
 
 #[zpm_enum(error = ConfigurationError, or_else = |s| Err(ConfigurationError::EnumError(s.to_string())))]

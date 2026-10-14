@@ -1,11 +1,11 @@
-use std::{os::unix::process::ExitStatusExt, process::ExitStatus};
+use std::process::ExitStatus;
 
 use indexmap::IndexMap;
 use zpm_parsers::JsonDocument;
-use zpm_utils::Path;
+use zpm_utils::{exit_status_from_code, Path};
 use clipanion::cli;
 
-use crate::{commands::tasks::run_silent_dependencies::TaskRunSilentDependencies, error::Error, project, script::ScriptEnvironment};
+use crate::{commands::tasks::run::run_silent_dependencies, error::Error, project, script::ScriptEnvironment};
 use super::tasks as task_run;
 
 /// List scripts from the current workspace
@@ -33,7 +33,7 @@ impl RunList {
             .lazy_install().await?;
 
         list_scripts(&project, self.json)?;
-        Ok(ExitStatus::from_raw(0))
+        Ok(exit_status_from_code(0))
     }
 }
 
@@ -195,7 +195,7 @@ impl Run {
                         Error::BinaryNotFound(name)
                     })
                 } else {
-                    Ok(ExitStatus::from_raw(0))
+                    Ok(exit_status_from_code(0))
                 }
             } else {
                 Err(maybe_binary.unwrap_err())
@@ -228,10 +228,7 @@ impl Run {
 
             Err(Error::ScriptNotFound(_)) | Err(Error::GlobalScriptNotFound(_)) => {
                 if task_run::task_exists(&project, name) {
-                    let task_run_silent_dependencies
-                        = TaskRunSilentDependencies::new(&self.cli_environment, name.to_string(), self.args.clone());
-
-                    return task_run_silent_dependencies.execute().await;
+                    return run_silent_dependencies(name, &self.args).await;
                 }
 
                 execute_binary(true).await

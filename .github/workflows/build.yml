@@ -28,6 +28,9 @@ jobs:
             os: ubuntu-latest
           - target: aarch64-apple-darwin
             os: macos-latest
+          - target: x86_64-pc-windows-msvc
+            os: windows-latest
+            ext: .exe
           - target: wasm32-browserpod-linux-musl
             os: ubuntu-latest
 
@@ -66,8 +69,8 @@ jobs:
         with:
           name: yarn-${{matrix.target}}
           path: |
-            target/${{matrix.target}}/release-lto-nodebug/yarn-bin
-            target/${{matrix.target}}/release-lto-nodebug/yarn
+            target/${{matrix.target}}/release-lto-nodebug/yarn-bin${{matrix.ext}}
+            target/${{matrix.target}}/release-lto-nodebug/yarn${{matrix.ext}}
             target/${{matrix.target}}/release-lto-nodebug/LICENSE.md
 
       - name: Upload Browserpod artifacts
@@ -88,14 +91,22 @@ jobs:
 
   test:
     strategy:
+      # The test jobs only generate reports; one platform shouldn't prevent
+      # the others from producing theirs
+      fail-fast: false
       matrix:
         include:
           - target: x86_64-unknown-linux-musl
             os: ubuntu-latest
+          - target: x86_64-pc-windows-msvc
+            os: windows-latest
+            ext: .exe
+            timeout: 60
 
     name: "Testing ${{matrix.target}}"
     needs: [build]
     runs-on: ${{matrix.os}}
+    timeout-minutes: ${{matrix.timeout || 360}}
 
     steps:
       - name: Checkout the repo
@@ -112,17 +123,22 @@ jobs:
       - name: Prepare Node
         uses: ./.github/actions/prepare-node
         with:
-          link: artifacts/yarn-bin
-          switch: artifacts/yarn
+          link: artifacts/yarn-bin${{matrix.ext}}
+          switch: artifacts/yarn${{matrix.ext}}
 
       - name: Generate the test report
+        # Windows runners default to PowerShell
+        shell: bash
         run: |
-          chmod +x artifacts/{yarn,yarn-bin}
+          chmod +x artifacts/{yarn,yarn-bin}${{matrix.ext}}
 
-          export TEST_BINARY=$(pwd)/artifacts/yarn-bin
-          export TEST_SWITCH_BINARY=$(pwd)/artifacts/yarn
+          # Git Bash reports POSIX paths, but the tests need native ones
+          root=$(pwd -W 2>/dev/null || pwd)
 
-          yarn ./tests/acceptance-tests jest --json --outputFile=$(pwd)/report.json || true
+          export TEST_BINARY=$root/artifacts/yarn-bin${{matrix.ext}}
+          export TEST_SWITCH_BINARY=$root/artifacts/yarn${{matrix.ext}}
+
+          yarn ./tests/acceptance-tests jest --json --outputFile=$root/report.json || true
 
       - name: Upload test report
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7

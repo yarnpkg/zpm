@@ -1,5 +1,15 @@
-import {ppath, xfs}  from '@yarnpkg/fslib';
-import {tests, yarn} from 'pkg-tests-core';
+import {PortablePath, ppath, xfs} from '@yarnpkg/fslib';
+import {tests, yarn}              from 'pkg-tests-core';
+
+const {testIf} = tests;
+
+async function sitePackagesHas(path: PortablePath, workspace: string, file: string) {
+  const lib = ppath.join(path, `${workspace}/.venv/lib` as PortablePath);
+  for (const entry of await xfs.readdirPromise(lib))
+    if (await xfs.existsPromise(ppath.join(lib, entry, `site-packages`, file as PortablePath)))
+      return true;
+  return false;
+}
 
 describe(`Protocols`, () => {
   describe(`pypi:`, () => {
@@ -15,7 +25,7 @@ describe(`Protocols`, () => {
           const registryUrl = await tests.startPackageServer();
 
           await yarn.writeConfiguration(path, {
-            pypiRegistryServer: registryUrl,
+            pypiRegistryServer: `${registryUrl}/simple/`,
           });
 
           await run(`install`);
@@ -47,7 +57,7 @@ describe(`Protocols`, () => {
           const registryUrl = await tests.startPackageServer();
 
           await yarn.writeConfiguration(path, {
-            pypiRegistryServer: registryUrl,
+            pypiRegistryServer: `${registryUrl}/simple/`,
           });
 
           await run(`install`);
@@ -74,7 +84,7 @@ describe(`Protocols`, () => {
           await yarn.writeConfiguration(path, {
             packageRules: [{
               ecosystemFilter: `pypi`,
-              pypiRegistryServer: registryUrl,
+              pypiRegistryServer: `${registryUrl}/simple/`,
             }],
           });
 
@@ -100,7 +110,7 @@ describe(`Protocols`, () => {
           const registryUrl = await tests.startPackageServer();
 
           await yarn.writeConfiguration(path, {
-            pypiRegistryServer: registryUrl,
+            pypiRegistryServer: `${registryUrl}/simple/`,
           });
 
           await run(`install`);
@@ -127,7 +137,7 @@ describe(`Protocols`, () => {
           const registryUrl = await tests.startPackageServer();
 
           await yarn.writeConfiguration(path, {
-            pypiRegistryServer: registryUrl,
+            pypiRegistryServer: `${registryUrl}/simple/`,
           });
 
           await run(`install`);
@@ -168,7 +178,7 @@ describe(`Protocols`, () => {
           const registryUrl = await tests.startPackageServer();
 
           await yarn.writeConfiguration(path, {
-            pypiRegistryServer: registryUrl,
+            pypiRegistryServer: `${registryUrl}/simple/`,
           });
 
           await run(`install`);
@@ -194,7 +204,7 @@ describe(`Protocols`, () => {
           const registryUrl = await tests.startPackageServer();
 
           await yarn.writeConfiguration(path, {
-            pypiRegistryServer: registryUrl,
+            pypiRegistryServer: `${registryUrl}/simple/`,
           });
 
           await run(`install`);
@@ -220,7 +230,7 @@ describe(`Protocols`, () => {
           const registryUrl = await tests.startPackageServer();
 
           await yarn.writeConfiguration(path, {
-            pypiRegistryServer: registryUrl,
+            pypiRegistryServer: `${registryUrl}/simple/`,
           });
 
           await run(`install`);
@@ -257,7 +267,7 @@ describe(`Protocols`, () => {
           const registryUrl = await tests.startPackageServer();
 
           await yarn.writeConfiguration(path, {
-            pypiRegistryServer: registryUrl,
+            pypiRegistryServer: `${registryUrl}/simple/`,
           });
 
           await run(`install`);
@@ -283,7 +293,7 @@ describe(`Protocols`, () => {
           const registryUrl = await tests.startPackageServer();
 
           await yarn.writeConfiguration(path, {
-            pypiRegistryServer: registryUrl,
+            pypiRegistryServer: `${registryUrl}/simple/`,
           });
 
           await run(`install`);
@@ -297,7 +307,8 @@ describe(`Protocols`, () => {
       ),
     );
 
-    test(
+    testIf(
+      `venvLinker`,
       `it should resolve PyPI extras through venv islands`,
       makeTemporaryMonorepoEnv(
         {
@@ -316,7 +327,7 @@ describe(`Protocols`, () => {
           const registryUrl = await tests.startPackageServer();
 
           await yarn.writeConfiguration(path, {
-            pypiRegistryServer: registryUrl,
+            pypiRegistryServer: `${registryUrl}/simple/`,
             unstableIslands: {
               main: {
                 workspaces: [`island-ws`],
@@ -327,7 +338,7 @@ describe(`Protocols`, () => {
 
           await run(`install`);
 
-          await expect(xfs.existsPromise(ppath.join(path, `packages/island-ws/.venv/lib/site-packages/pypi-no-deps/pypi_no_deps/__init__.py` as any))).resolves.toEqual(true);
+          await expect(sitePackagesHas(path, `packages/island-ws`, `pypi_no_deps/__init__.py`)).resolves.toEqual(true);
         },
       ),
     );
@@ -351,7 +362,7 @@ describe(`Protocols`, () => {
           const registryUrl = await tests.startPackageServer();
 
           await yarn.writeConfiguration(path, {
-            pypiRegistryServer: registryUrl,
+            pypiRegistryServer: `${registryUrl}/simple/`,
             unstableIslands: {
               main: {
                 workspaces: [`island-ws`],
@@ -365,7 +376,8 @@ describe(`Protocols`, () => {
       ),
     );
 
-    test(
+    testIf(
+      `venvLinker`,
       `it should keep base dependencies when a deeper transitive dependency later requests PyPI extras`,
       makeTemporaryMonorepoEnv(
         {
@@ -385,7 +397,7 @@ describe(`Protocols`, () => {
           const registryUrl = await tests.startPackageServer();
 
           await yarn.writeConfiguration(path, {
-            pypiRegistryServer: registryUrl,
+            pypiRegistryServer: `${registryUrl}/simple/`,
             unstableIslands: {
               main: {
                 workspaces: [`island-ws`],
@@ -396,8 +408,8 @@ describe(`Protocols`, () => {
 
           await run(`install`);
 
-          await expect(xfs.existsPromise(ppath.join(path, `packages/island-ws/.venv/lib/site-packages/pypi-entry-points/pypi_entry_points/__init__.py` as any))).resolves.toEqual(true);
-          await expect(xfs.existsPromise(ppath.join(path, `packages/island-ws/.venv/lib/site-packages/pypi-no-deps/pypi_no_deps/__init__.py` as any))).resolves.toEqual(true);
+          await expect(sitePackagesHas(path, `packages/island-ws`, `pypi_entry_points/__init__.py`)).resolves.toEqual(true);
+          await expect(sitePackagesHas(path, `packages/island-ws`, `pypi_no_deps/__init__.py`)).resolves.toEqual(true);
         },
       ),
     );
@@ -414,7 +426,7 @@ describe(`Protocols`, () => {
           const registryUrl = await tests.startPackageServer();
 
           await yarn.writeConfiguration(path, {
-            pypiRegistryServer: registryUrl,
+            pypiRegistryServer: `${registryUrl}/simple/`,
           });
 
           for (let i = 0; i < 2; i++) {

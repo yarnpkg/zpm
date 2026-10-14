@@ -67,7 +67,7 @@ impl SetVersionFromSources {
         println!();
 
         let bundle_path
-            = target.with_join_str("target/release/yarn-bin");
+            = target.with_join_str(format!("target/release/yarn-bin{}", std::env::consts::EXE_SUFFIX));
 
         if !bundle_path.fs_exists() {
             run_build(&target).await?;
@@ -82,7 +82,7 @@ impl SetVersionFromSources {
         let mut env
             = ScriptEnvironment::new()?;
 
-        run_command(&mut env, "yarn", &["switch", "link", bundle_path.as_str()]).await?;
+        run_command(&mut env, "yarn", &["switch", "link", &bundle_path.to_native_string()]).await?;
 
         Ok(())
     }

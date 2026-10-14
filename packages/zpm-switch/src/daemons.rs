@@ -49,16 +49,26 @@ pub fn register_daemon(entry: &DaemonEntry) -> Result<(), Error> {
         = JsonDocument::to_string(entry)?;
 
     daemon_path.fs_write_atomic(move |tmp_path| {
-        use std::os::unix::fs::OpenOptionsExt;
         use std::io::Write;
 
+        let mut options
+            = std::fs::OpenOptions::new();
+
+        options
+            .write(true)
+            .create(true)
+            .truncate(true);
+
+        // The file contains the daemon's auth token. On Windows, the home
+        // directory is already restricted to its owner by its ACLs.
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            options.mode(0o600);
+        }
+
         let mut file
-            = std::fs::OpenOptions::new()
-                .write(true)
-                .create(true)
-                .truncate(true)
-                .mode(0o600)
-                .open(tmp_path.to_path_buf())?;
+            = options.open(tmp_path.to_path_buf())?;
 
         file.write_all(data.as_bytes())?;
 
@@ -128,20 +138,7 @@ pub fn is_process_alive(pid: u32) -> bool {
 
     #[cfg(windows)]
     {
-        use std::ptr::null_mut;
-        unsafe {
-            let handle = winapi::um::processthreadsapi::OpenProcess(
-                winapi::um::winnt::PROCESS_QUERY_LIMITED_INFORMATION,
-                0,
-                pid,
-            );
-            if handle.is_null() {
-                false
-            } else {
-                winapi::um::handleapi::CloseHandle(handle);
-                true
-            }
-        }
+        zpm_utils::windows_is_process_alive(pid)
     }
 
     #[cfg(not(any(unix, windows)))]
@@ -158,21 +155,7 @@ pub fn kill_process(pid: u32) -> bool {
 
     #[cfg(windows)]
     {
-        use std::ptr::null_mut;
-        unsafe {
-            let handle = winapi::um::processthreadsapi::OpenProcess(
-                winapi::um::winnt::PROCESS_TERMINATE,
-                0,
-                pid,
-            );
-            if handle.is_null() {
-                false
-            } else {
-                let result = winapi::um::processthreadsapi::TerminateProcess(handle, 1) != 0;
-                winapi::um::handleapi::CloseHandle(handle);
-                result
-            }
-        }
+        zpm_utils::windows_kill_process_tree(pid)
     }
 
     #[cfg(not(any(unix, windows)))]
@@ -227,8 +210,9 @@ pub fn kill_daemon_gracefully(pid: u32) -> bool {
 
     #[cfg(windows)]
     {
-        // On Windows, just use TerminateProcess (no graceful shutdown)
-        kill_process(pid)
+        // Windows has no equivalent to SIGTERM for console processes, so we
+        // directly terminate the daemon along with the tasks it spawned.
+        zpm_utils::windows_kill_process_tree(pid) || !is_process_alive(pid)
     }
 
     #[cfg(not(any(unix, windows)))]

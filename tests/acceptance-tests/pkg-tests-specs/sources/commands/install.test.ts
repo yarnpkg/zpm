@@ -1323,7 +1323,7 @@ describe(`Commands`, () => {
 
           await run(`install`, {
             env: {
-              YARN_ENABLE_TIMERS: `true`,
+              YARN_PNP_FALLBACK_MODE: `all`,
             },
           });
 

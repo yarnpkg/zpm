@@ -7,7 +7,12 @@ pub fn kill_process_group(pid: u32) {
     }
 }
 
-#[cfg(not(unix))]
+#[cfg(windows)]
+pub fn kill_process_group(pid: u32) {
+    zpm_utils::windows_kill_process_tree(pid);
+}
+
+#[cfg(not(any(unix, windows)))]
 pub fn kill_process_group(_pid: u32) {
     unimplemented!("daemon platform operations are not supported on this OS")
 }
@@ -21,7 +26,12 @@ pub fn kill_process(pid: u32) {
     }
 }
 
-#[cfg(not(unix))]
+#[cfg(windows)]
+pub fn kill_process(pid: u32) {
+    zpm_utils::windows_kill_process_tree(pid);
+}
+
+#[cfg(not(any(unix, windows)))]
 pub fn kill_process(_pid: u32) {
     unimplemented!("daemon platform operations are not supported on this OS")
 }
@@ -32,7 +42,12 @@ pub fn is_process_alive(pid: u32) -> bool {
     unsafe { libc::kill(pid as i32, 0) == 0 }
 }
 
-#[cfg(not(unix))]
+#[cfg(windows)]
+pub fn is_process_alive(pid: u32) -> bool {
+    zpm_utils::windows_is_process_alive(pid)
+}
+
+#[cfg(not(any(unix, windows)))]
 pub fn is_process_alive(_pid: u32) -> bool {
     unimplemented!("daemon platform operations are not supported on this OS")
 }

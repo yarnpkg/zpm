@@ -28,6 +28,13 @@ impl Daemon {
     pub async fn execute(&self) -> Result<(), Error> {
         let project
             = Arc::new(Project::new(None).await?);
+
+        // Windows doesn't let users remove a folder that's the working directory
+        // of a running process; the daemon must not prevent the project from
+        // being deleted (which is also what makes it shut down).
+        #[cfg(windows)]
+        zpm_utils::Path::temp_root_dir()?.sys_set_current_dir()?;
+
         run_daemon(project, self.port, self.auth_token.clone()).await
     }
 }

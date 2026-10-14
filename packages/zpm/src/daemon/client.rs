@@ -1,7 +1,7 @@
 use std::{collections::HashMap, process::Stdio, sync::{atomic::{AtomicBool, AtomicU64, Ordering}, Arc}, time::Duration};
 
 use futures::{SinkExt, stream::StreamExt};
-use tokio::{io::AsyncBufReadExt, sync::{mpsc, oneshot, Mutex}, task::AbortHandle};
+use tokio::{sync::{mpsc, oneshot, Mutex}, task::AbortHandle};
 use tokio_tungstenite::{MaybeTlsStream, WebSocketStream, tungstenite::Message};
 use zpm_switch::YARNSW_PATH_ENV;
 use zpm_utils::{Path, ToFileString};
@@ -23,6 +23,15 @@ use crate::{
 
 type PendingRequests = Arc<Mutex<HashMap<u64, oneshot::Sender<DaemonResponse>>>>;
 
+
+/// Scheduling options attached to a push request
+#[derive(Debug, Clone, Default)]
+pub struct PushTasksOptions {
+    /// Skip cross-workspace dependencies outside of the pushed workspaces
+    pub only: bool,
+    /// Task running the command that pushes the tasks (nested `yarn tasks run`)
+    pub caller_task_id: Option<String>,
+}
 
 /// Result of pushing tasks to the daemon
 pub struct PushTasksResult {
@@ -367,6 +376,7 @@ impl DaemonClient {
             SubscriptionScope::None,
             SubscriptionScope::None,
             context_id,
+            PushTasksOptions::default(),
         )
         .await
     }
@@ -379,6 +389,7 @@ impl DaemonClient {
         output_subscription: SubscriptionScope,
         status_subscription: SubscriptionScope,
         context_id: Option<String>,
+        options: PushTasksOptions,
     ) -> Result<PushTasksResult, Error> {
         let request
             = DaemonRequest::PushTasks {
@@ -388,6 +399,8 @@ impl DaemonClient {
                 output_subscription,
                 status_subscription,
                 context_id,
+                only: options.only.then_some(true),
+                caller_task_id: options.caller_task_id,
             };
 
         match self.send_request(request).await? {
@@ -493,7 +506,7 @@ async fn start_daemon(project_root: &Path) -> Result<String, Error> {
                 let current_dir
                     = current_exe.dirname().ok_or(())?;
                 let sibling_switch
-                    = current_dir.with_join_str("yarn");
+                    = current_dir.with_join_str(format!("yarn{}", std::env::consts::EXE_SUFFIX));
 
                 if sibling_switch.fs_exists() {
                     Ok(sibling_switch.to_file_string())
@@ -509,8 +522,9 @@ async fn start_daemon(project_root: &Path) -> Result<String, Error> {
     cmd.args(["switch", "daemon", "--open"])
         .current_dir(project_root.to_path_buf())
         .stdout(Stdio::piped())
-        .stderr(Stdio::null())
-        .stdin(Stdio::null());
+        .stderr(Stdio::piped())
+        .stdin(Stdio::null())
+        .kill_on_drop(true);
 
     if std::env::var("YARNSW_DEFAULT").is_err() {
         if let Ok(current_exe) = Path::current_exe() {
@@ -518,28 +532,41 @@ async fn start_daemon(project_root: &Path) -> Result<String, Error> {
         }
     }
 
-    let mut child
-        = cmd
-            .spawn()
+    let output
+        = tokio::time::timeout(Duration::from_secs(10), cmd.output())
+            .await
+            .map_err(|_| Error::IpcError("Timeout waiting for daemon to start".to_string()))?
             .map_err(|e| Error::IpcError(format!("Failed to start daemon: {}", e)))?;
 
     let stdout
-        = child
-            .stdout
-            .take()
-            .ok_or_else(|| Error::IpcError("Failed to capture daemon stdout".to_string()))?;
+        = String::from_utf8_lossy(&output.stdout);
 
-    let mut reader
-        = tokio::io::BufReader::new(stdout).lines();
+    if !output.status.success() {
+        let stderr
+            = String::from_utf8_lossy(&output.stderr);
+
+        let message
+            = [stdout.trim(), stderr.trim()]
+                .into_iter()
+                .filter(|message| !message.is_empty())
+                .collect::<Vec<_>>()
+                .join("\n");
+
+        let message
+            = if message.is_empty() {
+                output.status.to_string()
+            } else {
+                message.strip_prefix("Error: ").unwrap_or(&message).to_string()
+            };
+
+        return Err(Error::IpcError(format!("Failed to start daemon: {}", message)));
+    }
 
     let url
-        = tokio::time::timeout(Duration::from_secs(10), reader.next_line())
-            .await
-            .map_err(|_| Error::IpcError("Timeout waiting for daemon URL".to_string()))?
-            .map_err(|e| Error::IpcError(e.to_string()))?
+        = stdout
+            .lines()
+            .next()
             .ok_or_else(|| Error::IpcError("Daemon closed without printing URL".to_string()))?;
-
-    let _ = child.wait().await;
 
     Ok(url.trim().to_string())
 }

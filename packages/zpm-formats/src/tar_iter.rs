@@ -5,6 +5,20 @@ use zpm_utils::Path;
 
 use crate::{Entry, Error};
 
+/// An archive member, as returned by [`TarIterator::next_record`].
+#[derive(Debug, PartialEq, Eq)]
+pub enum TarRecord<'a> {
+    File(Entry<'a>),
+
+    /// The target is kept as stored in the archive (relative to the link's
+    /// folder, or absolute); it's up to the caller to decide whether it's
+    /// acceptable.
+    Symlink {name: Path, target: String},
+
+    /// The target is the path of another member of the archive.
+    Hardlink {name: Path, target: Path},
+}
+
 pub struct TarIterator<'a> {
     buffer: &'a [u8],
     offset: usize,
@@ -43,7 +57,9 @@ impl<'a> TarIterator<'a> {
         Ok(headers)
     }
 
-    fn parse_entry_at(&mut self, offset: usize, size: usize, pax_headers: &HashMap<String, String>) -> Result<Entry<'a>, Error> {
+    /// The name of the entry whose header starts at `offset`, with the PAX
+    /// and UStar extensions applied.
+    fn parse_name_at(&self, offset: usize, pax_headers: &HashMap<String, String>) -> Result<Path, Error> {
         // First try to get the name from PAX headers
         let name = if let Some(pax_path) = pax_headers.get("path") {
             pax_path.clone()
@@ -78,8 +94,27 @@ impl<'a> TarIterator<'a> {
             return Err(Error::InvalidTarFilePath("empty filename".to_string()));
         }
 
-        let name = clean_name(&name)?
-            .ok_or_else(|| Error::InvalidTarFilePath(name.to_string()))?;
+        clean_name(&name)?
+            .ok_or_else(|| Error::InvalidTarFilePath(name.to_string()))
+    }
+
+    /// The target of the link whose header starts at `offset`, as stored in
+    /// the archive (PAX `linkpath`, or the `linkname` field).
+    fn parse_link_target_at(&self, offset: usize, pax_headers: &HashMap<String, String>) -> Result<String, Error> {
+        if let Some(pax_target) = pax_headers.get("linkpath") {
+            return Ok(pax_target.clone());
+        }
+
+        let target_slice = self.buffer.get(offset + 157..offset + 257)
+            .map(trim_zero)
+            .ok_or(Error::InvalidTarFile)?;
+
+        Ok(std::str::from_utf8(target_slice)?.to_string())
+    }
+
+    fn parse_entry_at(&self, offset: usize, size: usize, pax_headers: &HashMap<String, String>) -> Result<Entry<'a>, Error> {
+        let name
+            = self.parse_name_at(offset, pax_headers)?;
 
         let mode = self.buffer.get(offset + 100..offset + 108)
             .map(|raw| from_oct(&raw) as u32)
@@ -98,7 +133,10 @@ impl<'a> TarIterator<'a> {
         })
     }
 
-    fn next_impl(&mut self) -> Result<Option<Entry<'a>>, Error> {
+    /// Returns the next file or link of the archive. Unlike the `Iterator`
+    /// implementation (which only yields regular files, as package archives
+    /// don't need anything else), links are reported too.
+    pub fn next_record(&mut self) -> Result<Option<TarRecord<'a>>, Error> {
         let mut pax_headers
             = HashMap::new();
 
@@ -115,30 +153,42 @@ impl<'a> TarIterator<'a> {
                     .map(|raw| from_oct(&raw) as usize)
                     .ok_or(Error::InvalidTarFile)?;
 
+            let type_flag
+                = *self.buffer.get(offset + 156)
+                    .ok_or(Error::InvalidTarFile)?;
+
             // round up to the next multiple of 512
             self.offset += 512 + ((size + 511) / 512) * 512;
 
-            let type_flag
-                = self.buffer[offset + 156];
-
-            match type_flag {
+            let record = match type_flag {
                 // Regular file
                 b'0' | 0 => {
-                    match self.parse_entry_at(offset, size, &pax_headers) {
-                        Ok(entry) => {
-                            return Ok(Some(entry));
-                        },
+                    self.parse_entry_at(offset, size, &pax_headers)
+                        .map(TarRecord::File)
+                },
 
-                        Err(Error::InvalidTarFilePath(_)) => {
-                            // Skip invalid entries (like empty filenames)
-                            pax_headers.clear();
-                            continue;
-                        },
+                // Hardlink to a file stored earlier in the archive
+                b'1' => {
+                    self.parse_name_at(offset, &pax_headers).and_then(|name| {
+                        let target
+                            = self.parse_link_target_at(offset, &pax_headers)?;
 
-                        Err(e) => {
-                            return Err(e)
-                        },
-                    }
+                        let target
+                            = clean_name(&target)?
+                                .ok_or_else(|| Error::InvalidTarFilePath(target.to_string()))?;
+
+                        Ok(TarRecord::Hardlink {name, target})
+                    })
+                },
+
+                // Symlink
+                b'2' => {
+                    self.parse_name_at(offset, &pax_headers).and_then(|name| {
+                        let target
+                            = self.parse_link_target_at(offset, &pax_headers)?;
+
+                        Ok(TarRecord::Symlink {name, target})
+                    })
                 },
 
                 // PAX extended header for next file
@@ -168,11 +218,38 @@ impl<'a> TarIterator<'a> {
                 },
 
                 _ => {
-                    // Other types (directories, symlinks, etc.) - skip
-                    // Continue to next entry
+                    // Other types (directories, devices, etc.) - skip
+                    pax_headers.clear();
+                    continue;
+                },
+            };
+
+            match record {
+                Ok(record) => {
+                    return Ok(Some(record));
+                },
+
+                Err(Error::InvalidTarFilePath(_)) => {
+                    // Skip invalid entries (like empty filenames)
+                    pax_headers.clear();
+                    continue;
+                },
+
+                Err(e) => {
+                    return Err(e)
                 },
             }
         }
+    }
+
+    fn next_impl(&mut self) -> Result<Option<Entry<'a>>, Error> {
+        while let Some(record) = self.next_record()? {
+            if let TarRecord::File(entry) = record {
+                return Ok(Some(entry));
+            }
+        }
+
+        Ok(None)
     }
 }
 

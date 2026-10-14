@@ -1,3 +1,7 @@
+// Shell profiles are only updated on Unix; on Windows, the installer adds the
+// bin directory to the user PATH instead.
+#![cfg(unix)]
+
 use assert_cmd::prelude::*; // Add methods on commands
 use zpm_utils::{Path, ToFileString}; // Used for writing assertions
 use std::process::Command; // Run programs

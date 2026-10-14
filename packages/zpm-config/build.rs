@@ -108,6 +108,9 @@ struct Field {
     /// Set on array fields that also accept a single item, which then gets
     /// treated as a list of one (`supportedArchitectures`, for instance).
     one_or_many: Option<bool>,
+    /// Settings default to contributing to the install config hash; they
+    /// can only opt out if changing them can't affect what gets installed.
+    affects_install: Option<bool>,
     property_aliases: Option<BTreeMap<String, Vec<String>>>,
     properties: Option<BTreeMap<String, Field>>,
     additional_keys: Option<Box<Field>>,
@@ -121,6 +124,9 @@ impl Field {
             = self.get_type();
 
         if let InternalTypeKind::Struct(name) = &type_.kind {
+            let is_root
+                = name == &generator.root_name;
+
             let fields
                 = generator.ensure_struct(name);
 
@@ -159,6 +165,10 @@ impl Field {
                             => "|| panic!(\"No default value available\")".to_string(),
                     };
 
+                    if field.affects_install.is_some() && !is_root {
+                        panic!("Field {} can't set affectsInstall; only top-level settings can", name);
+                    }
+
                     fields.push(GeneratorField {
                         name: name.to_string(),
                         description: field.description.clone().unwrap_or_else(|| panic!("Field {} must have a description", name)),
@@ -166,6 +176,7 @@ impl Field {
                         aliases: field_aliases,
                         default: field_default,
                         one_or_many: field.one_or_many.unwrap_or(false),
+                        affects_install: field.affects_install.unwrap_or(true),
                     });
                 }
 
@@ -263,6 +274,7 @@ struct GeneratorField {
     aliases: Vec<String>,
     default: String,
     one_or_many: bool,
+    affects_install: bool,
 }
 
 struct Generator {
@@ -520,6 +532,18 @@ impl Generator {
             writeln!(writer, "        vec![").unwrap();
 
             for field in fields {
+                let name = &field.name;
+                writeln!(writer, "            \"{name}\",").unwrap();
+            }
+
+            writeln!(writer, "        ]").unwrap();
+            writeln!(writer, "    }}").unwrap();
+            writeln!(writer).unwrap();
+            writeln!(writer, "    /// Settings that opted out of the install config hash via `affectsInstall`").unwrap();
+            writeln!(writer, "    pub fn install_insensitive_setting_names() -> &'static [&'static str] {{").unwrap();
+            writeln!(writer, "        &[").unwrap();
+
+            for field in fields.iter().filter(|field| !field.affects_install) {
                 let name = &field.name;
                 writeln!(writer, "            \"{name}\",").unwrap();
             }

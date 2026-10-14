@@ -2,7 +2,7 @@ import {PortablePath, npath, xfs} from '@yarnpkg/fslib';
 import {yarn}                     from 'pkg-tests-core';
 
 const {
-  tests: {getPackageArchivePath, getPackageHttpArchivePath, getPackageDirectoryPath},
+  tests: {getPackageArchivePath, getPackageHttpArchivePath, getPackageDirectoryPath, testIf},
 } = require(`pkg-tests-core`);
 
 async function configureVenvIsland(path: PortablePath, workspaces: Array<string>) {
@@ -16,6 +16,13 @@ async function configureVenvIsland(path: PortablePath, workspaces: Array<string>
   });
 }
 
+// Real virtualenvs use lib/python3.X/site-packages
+async function getSitePackages(venvPath: string) {
+  const lib = npath.toPortablePath(`${venvPath}/lib`);
+  const [pythonDir] = (await xfs.readdirPromise(lib)).filter(entry => entry.startsWith(`python`));
+  return `${venvPath}/lib/${pythonDir}/site-packages`;
+}
+
 async function runPythonJson(run: any, cwd: PortablePath, script: string) {
   const {stdout} = await run(`python`, `-c`, script, {cwd});
   return JSON.parse(stdout.trim());
@@ -23,8 +30,9 @@ async function runPythonJson(run: any, cwd: PortablePath, script: string) {
 
 describe(`Features`, () => {
   describe(`Venv linker`, () => {
-    test(
-      `it should configure VIRTUAL_ENV and PYTHONPATH when using yarn python from a venv island workspace`,
+    testIf(
+      `venvLinker`,
+      `it should configure VIRTUAL_ENV when using yarn python from a venv island workspace`,
       makeTemporaryMonorepoEnv(
         {
           workspaces: [`packages/*`],
@@ -54,8 +62,8 @@ describe(`Features`, () => {
             `import json, os, sys`,
             `print(json.dumps({`,
             `  "virtual_env": os.environ.get("VIRTUAL_ENV"),`,
-            `  "pythonpath": os.environ.get("PYTHONPATH"),`,
-            `  "has_site_packages": any(p.endswith("/.venv/lib/site-packages") for p in sys.path),`,
+            `  "prefix": sys.prefix,`,
+            `  "has_site_packages": any(p.endswith("/site-packages") and "/.venv/lib/" in p for p in sys.path),`,
             `}))`,
           ].join(`\n`);
 
@@ -68,20 +76,21 @@ describe(`Features`, () => {
 
           const data = JSON.parse(stdout.trim()) as {
             virtual_env: string | null;
-            pythonpath: string | null;
+            prefix: string;
             has_site_packages: boolean;
           };
 
+          // A real venv: the interpreter runs from it, no PYTHONPATH needed
           expect(data.virtual_env).toContain(`/packages/island-ws/.venv`);
-          expect(data.pythonpath).toContain(`/packages/island-ws/.venv/lib/site-packages`);
+          expect(data.prefix).toContain(`/packages/island-ws/.venv`);
           expect(data.has_site_packages).toBe(true);
 
           const {stdout: versionStdout} = await run(
             `python`,
             `-c`,
             [
-              `import json, os, pathlib`,
-              `manifest = pathlib.Path(os.environ["VIRTUAL_ENV"]) / "lib" / "site-packages" / "no-deps" / "package.json"`,
+              `import json, os, pathlib, sysconfig`,
+              `manifest = pathlib.Path(sysconfig.get_paths()["purelib"]) / "no-deps" / "package.json"`,
               `print(json.loads(manifest.read_text())["version"])`,
             ].join(`\n`),
             {cwd: `${path}/packages/island-ws` as PortablePath},
@@ -108,7 +117,8 @@ describe(`Features`, () => {
       ),
     );
 
-    test(
+    testIf(
+      `venvLinker`,
       `it should install island dependencies inside a workspace venv`,
       makeTemporaryMonorepoEnv(
         {
@@ -128,8 +138,9 @@ describe(`Features`, () => {
 
           await run(`install`);
 
-          const directPackageJsonPath = npath.toPortablePath(`${path}/packages/workspace-a/.venv/lib/site-packages/one-fixed-dep/package.json`);
-          const transitivePackageJsonPath = npath.toPortablePath(`${path}/packages/workspace-a/.venv/lib/site-packages/no-deps/package.json`);
+          const sitePackages = await getSitePackages(`${path}/packages/workspace-a/.venv`);
+          const directPackageJsonPath = npath.toPortablePath(`${sitePackages}/one-fixed-dep/package.json`);
+          const transitivePackageJsonPath = npath.toPortablePath(`${sitePackages}/no-deps/package.json`);
 
           await expect(xfs.existsPromise(directPackageJsonPath)).resolves.toBe(true);
           await expect(xfs.existsPromise(transitivePackageJsonPath)).resolves.toBe(true);
@@ -143,7 +154,8 @@ describe(`Features`, () => {
       ),
     );
 
-    test(
+    testIf(
+      `venvLinker`,
       `it should allow mixing a venv island with regular PnP workspaces`,
       makeTemporaryMonorepoEnv(
         {
@@ -170,7 +182,7 @@ describe(`Features`, () => {
 
           await run(`install`);
 
-          const islandPackageJsonPath = npath.toPortablePath(`${path}/packages/island-ws/.venv/lib/site-packages/no-deps/package.json`);
+          const islandPackageJsonPath = npath.toPortablePath(`${await getSitePackages(`${path}/packages/island-ws/.venv`)}/no-deps/package.json`);
           const islandManifest = await xfs.readJsonPromise(islandPackageJsonPath) as Record<string, string>;
 
           expect(islandManifest.version).toBe(`1.0.0`);
@@ -190,7 +202,8 @@ describe(`Features`, () => {
     );
 
     describe(`Python basic parity`, () => {
-      test(
+      testIf(
+        `venvLinker`,
         `it should correctly install a single dependency that contains no sub-dependencies`,
         makeTemporaryMonorepoEnv(
           {
@@ -220,7 +233,8 @@ describe(`Features`, () => {
         ),
       );
 
-      test(
+      testIf(
+        `venvLinker`,
         `it should correctly install a dependency that itself contains a fixed dependency`,
         makeTemporaryMonorepoEnv(
           {
@@ -256,7 +270,8 @@ describe(`Features`, () => {
         ),
       );
 
-      test(
+      testIf(
+        `venvLinker`,
         `it should correctly install a dependency that itself contains a range dependency`,
         makeTemporaryMonorepoEnv(
           {
@@ -292,7 +307,8 @@ describe(`Features`, () => {
         ),
       );
 
-      test(
+      testIf(
+        `venvLinker`,
         `it should install from archives on the filesystem`,
         makeTemporaryMonorepoEnv(
           {
@@ -322,7 +338,8 @@ describe(`Features`, () => {
         ),
       );
 
-      test(
+      testIf(
+        `venvLinker`,
         `it should install the dependencies of any dependency fetched from the filesystem`,
         makeTemporaryMonorepoEnv(
           {
@@ -358,7 +375,8 @@ describe(`Features`, () => {
         ),
       );
 
-      test(
+      testIf(
+        `venvLinker`,
         `it should install from files on the internet`,
         makeTemporaryMonorepoEnv(
           {
@@ -388,7 +406,8 @@ describe(`Features`, () => {
         ),
       );
 
-      test(
+      testIf(
+        `venvLinker`,
         `it should install the dependencies of any dependency fetched from the internet`,
         makeTemporaryMonorepoEnv(
           {
@@ -424,7 +443,8 @@ describe(`Features`, () => {
         ),
       );
 
-      test(
+      testIf(
+        `venvLinker`,
         `it should install from local directories`,
         makeTemporaryMonorepoEnv(
           {
@@ -454,7 +474,8 @@ describe(`Features`, () => {
         ),
       );
 
-      test(
+      testIf(
+        `venvLinker`,
         `it should install the dependencies of any dependency fetched from a local directory`,
         makeTemporaryMonorepoEnv(
           {
@@ -490,7 +511,8 @@ describe(`Features`, () => {
         ),
       );
 
-      test(
+      testIf(
+        `venvLinker`,
         `it should correctly create resolution mounting points when using the link protocol`,
         makeTemporaryMonorepoEnv(
           {

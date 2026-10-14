@@ -36,6 +36,9 @@ pub enum Error {
     #[error("Generic internal error: Please replace this error with a more specific one")]
     ReplaceMe,
 
+    #[error("No workspace selected; use -A,--all, --from, --since, or --recursive")]
+    MissingWorkspaceSelection,
+
     #[error("Unsupported code path")]
     Unsupported,
 
@@ -433,6 +436,9 @@ pub enum Error {
     #[error("Binary failed to spawn: {error} ({}, in {})", DataType::Code.colorize(name), path.to_print_string())]
     SpawnFailed { name: String, path: Path, error: Arc<Box<dyn std::error::Error + Send + Sync>> },
 
+    #[error("Running scripts on Windows requires bash; install Git for Windows (https://gitforwindows.org) or add a bash executable to your PATH")]
+    ScriptShellNotFound,
+
     #[error("The project at {} must be trusted before Yarn can run install scripts; run {} to trust it.", .0.to_print_string(), DataType::Code.colorize(&format!("yarn switch trust --set true {}", .0.to_print_string())))]
     ProjectTrustRequired(Path),
 
@@ -523,7 +529,7 @@ pub enum Error {
     #[error("Unmatched hunk")]
     UnmatchedHunk(usize),
 
-    #[error("Invalid resolution")]
+    #[error("Invalid resolution: {0}")]
     InvalidResolution(String),
 
     #[error("Bad resolution")]

@@ -1,4 +1,4 @@
-use std::{path::PathBuf, process::ExitCode};
+use std::process::ExitCode;
 
 use zpm_primitives::Ident;
 use clipanion::{cli, prelude::*};
@@ -35,7 +35,7 @@ impl Workspace {
         let cwd
             = workspace.path.clone();
 
-        std::env::set_current_dir(PathBuf::from(cwd.as_str()))?;
+        std::env::set_current_dir(cwd.to_path_buf())?;
 
         let env = self.cli_environment.clone().with_argv(self.args.clone());
         Ok(tokio::task::block_in_place(move || {

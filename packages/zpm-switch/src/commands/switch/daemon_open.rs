@@ -135,8 +135,23 @@ impl DaemonOpenCommand {
             binary.env("USERPROFILE", userprofile);
         }
 
-        use std::os::unix::process::CommandExt;
-        binary.process_group(0);
+        #[cfg(unix)]
+        {
+            use std::os::unix::process::CommandExt;
+            binary.process_group(0);
+        }
+
+        // Detach the daemon from the console's Ctrl-C handling, and give it a
+        // hidden console so that the tasks it spawns don't open new windows.
+        #[cfg(windows)]
+        {
+            use std::os::windows::process::CommandExt;
+
+            const CREATE_NEW_PROCESS_GROUP: u32 = 0x00000200;
+            const CREATE_NO_WINDOW: u32 = 0x08000000;
+
+            binary.creation_flags(CREATE_NEW_PROCESS_GROUP | CREATE_NO_WINDOW);
+        }
 
         let mut child
             = binary

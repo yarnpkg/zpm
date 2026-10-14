@@ -1,22 +1,21 @@
-use std::{collections::HashSet, io::Write, os::unix::process::ExitStatusExt, process::ExitStatus, sync::Arc};
+use std::{collections::HashSet, io::Write, process::ExitStatus, sync::Arc};
 
-/// Create an ExitStatus from a logical exit code.
-/// On Unix, `from_raw` expects a wait status where the exit code is in bits 8-15.
-pub fn exit_status_from_code(code: i32) -> ExitStatus {
-    ExitStatus::from_raw(code << 8)
-}
+pub use zpm_utils::exit_status_from_code;
 
 use async_trait::async_trait;
 use uuid::Uuid;
+use zpm_primitives::Ident;
+use zpm_tasks::TaskName;
 use zpm_utils::ToFileString;
 
 use super::helpers::{is_long_lived_task, print_attach_header, print_detach_footer};
 use crate::daemon::{
-    ContextualTaskId, DaemonClient, DaemonNotification, PushTasksResult, StandaloneDaemonHandle,
-    SubscriptionScope, TaskSubscription,
+    ContextualTaskId, DaemonClient, DaemonNotification, PushTasksOptions, PushTasksResult, StandaloneDaemonHandle,
+    SubscriptionScope, TaskSubscription, CURRENT_TASK_ENV_NAME,
 };
 use crate::error::Error;
 use crate::project::Project;
+use crate::workspace_selection::WorkspaceSelection;
 
 pub struct TaskRunConfig {
     pub output_subscription: SubscriptionScope,
@@ -58,7 +57,9 @@ impl TaskRunContext {
     pub fn mark_completed(&mut self, task_id: ContextualTaskId, code: i32) {
         if self.target_task_ids.contains(&task_id) {
             self.completed_tasks.insert(task_id);
-            if code != 0 {
+            // Report the first failure (later cancellations would otherwise
+            // overwrite its exit code)
+            if code != 0 && self.exit_code == 0 {
                 self.exit_code = code;
             }
         }
@@ -99,6 +100,16 @@ pub trait TaskRunHandler: Send {
     }
 
     fn on_ctrl_c(&mut self);
+
+    /// Called when the selection didn't match any task.
+    fn on_nothing_to_run(&mut self) {
+        eprintln!("No task matched the selection");
+    }
+
+    /// Called once all target tasks have completed.
+    fn on_finished(&mut self, ctx: &TaskRunContext) {
+        let _ = ctx;
+    }
 }
 
 pub async fn run_task(
@@ -107,6 +118,62 @@ pub async fn run_task(
     args: &[String],
     standalone: bool,
     verbose_level: u8,
+) -> Result<ExitStatus, Error> {
+    run_tasks(handler, &[name.to_string()], args, &TaskRunOptions {
+        standalone,
+        verbose_level,
+        ..TaskRunOptions::default()
+    }).await
+}
+
+/// Options for `run_tasks`. Without a selection, the tasks run in the
+/// active workspace only.
+#[derive(Default)]
+pub struct TaskRunOptions<'a> {
+    pub selection: Option<WorkspaceSelection<'a>>,
+    pub standalone: bool,
+    pub verbose_level: u8,
+    pub only: bool,
+    pub continue_on_error: bool,
+}
+
+/// Compute the `(workspace, task)` pairs to run: every selected workspace
+/// declaring one of the requested tasks (including through the root
+/// `@defaultTask` defaults).
+async fn select_targets(project: &Project, selection: &WorkspaceSelection<'_>, names: &[String]) -> Result<Vec<(Ident, String)>, Error> {
+    let task_names: Vec<TaskName>
+        = names.iter()
+            .map(|name| TaskName::new(name).map_err(|_| Error::TaskNameParseError(name.clone())))
+            .collect::<Result<_, _>>()?;
+
+    let workspaces
+        = selection.select(project).await?;
+
+    let defaults
+        = project.workspace_task_defaults();
+
+    let mut targets
+        = Vec::new();
+
+    for ident in workspaces {
+        let workspace
+            = project.workspace_by_ident(&ident)?;
+
+        for task_name in &task_names {
+            if project.find_workspace_task(workspace, task_name, &defaults).is_some() {
+                targets.push((ident.clone(), task_name.as_str().to_string()));
+            }
+        }
+    }
+
+    Ok(targets)
+}
+
+pub async fn run_tasks(
+    handler: &mut impl TaskRunHandler,
+    names: &[String],
+    args: &[String],
+    options: &TaskRunOptions<'_>,
 ) -> Result<ExitStatus, Error> {
     let mut project
         = Project::new(None).await?;
@@ -119,12 +186,36 @@ pub async fn run_task(
     let workspace_name
         = workspace.name.to_file_string();
 
+    let task_subscriptions = match &options.selection {
+        None => names.iter().map(|name| TaskSubscription {
+            name: name.clone(),
+            args: args.to_vec(),
+            workspace: None,
+        }).collect::<Vec<_>>(),
+
+        Some(selection) => {
+            let targets
+                = select_targets(&project, selection, names).await?;
+
+            if targets.is_empty() {
+                handler.on_nothing_to_run();
+                return Ok(exit_status_from_code(0));
+            }
+
+            targets.into_iter().map(|(workspace, name)| TaskSubscription {
+                name,
+                args: args.to_vec(),
+                workspace: Some(workspace.to_file_string()),
+            }).collect::<Vec<_>>()
+        },
+    };
+
     let project_cwd
         = project.project_cwd.clone();
 
-    let mut daemon_handle: Option<StandaloneDaemonHandle> = None;
+    let daemon_handle: Option<StandaloneDaemonHandle>;
 
-    let mut client = if standalone {
+    let mut client = if options.standalone {
         let project
             = Arc::new(project);
 
@@ -144,13 +235,21 @@ pub async fn run_task(
     let context_id_for_cancel
         = context_id.clone();
 
-    let task_subscriptions = vec![TaskSubscription {
-        name: name.to_string(),
-        args: args.to_vec(),
-    }];
-
     let config
         = handler.config();
+
+    let name
+        = names.join(" ");
+
+    // Nested runs (`yarn tasks run` from a task script) let the daemon know
+    // which task is waiting on them
+    let push_options = PushTasksOptions {
+        only: options.only,
+        caller_task_id: match options.standalone {
+            true => None,
+            false => std::env::var(CURRENT_TASK_ENV_NAME).ok(),
+        },
+    };
 
     let mut ctx = TaskRunContext {
         result: client
@@ -161,6 +260,7 @@ pub async fn run_task(
                 config.output_subscription,
                 config.status_subscription,
                 Some(context_id),
+                push_options,
             )
             .await?,
         client,
@@ -168,7 +268,7 @@ pub async fn run_task(
         completed_tasks: HashSet::new(),
         exit_code: 0,
         is_first_line: true,
-        verbose_level,
+        verbose_level: options.verbose_level,
     };
 
     if ctx.result.task_ids.is_empty() {
@@ -184,27 +284,51 @@ pub async fn run_task(
 
     handler.on_tasks_pushed(&ctx);
 
+    // Single-task runs keep their historical behavior (only dependents of a
+    // failed task are cancelled); multi-workspace runs default to fail-fast.
+    let fail_fast
+        = !options.continue_on_error && (options.selection.is_some() || names.len() > 1);
+
+    let mut has_cancelled_context
+        = false;
+
     #[cfg(unix)]
     let mut sigint
         = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::interrupt())?;
+
+    // CI runners (and `timeout`) stop jobs with SIGTERM; treat it like an
+    // interrupt that always cancels the run, even for long-lived targets,
+    // so no task process outlives the job.
+    #[cfg(unix)]
+    let mut sigterm
+        = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())?;
+
+    let is_standalone
+        = options.standalone;
 
     loop {
         let notification
             = tokio::select! {
                 biased;
 
-                _ = async {
+                is_sigterm = async {
                     #[cfg(unix)]
                     {
-                        sigint.recv().await;
+                        tokio::select! {
+                            _ = sigint.recv() => false,
+                            _ = sigterm.recv() => true,
+                        }
                     }
 
                     #[cfg(not(unix))]
                     {
                         tokio::signal::ctrl_c().await.ok();
+                        false
                     }
                 } => {
-                    if ctx.has_long_lived_target() {
+                    // Standalone daemons die with this process, so long-lived
+                    // tasks can't be detached from; stop them instead.
+                    if ctx.has_long_lived_target() && !is_standalone && !is_sigterm {
                         handler.on_ctrl_c();
 
                         println!();
@@ -213,7 +337,7 @@ pub async fn run_task(
                             println!();
                         }
 
-                        print_detach_footer(name);
+                        print_detach_footer(&name);
 
                         ctx.client.close();
 
@@ -228,14 +352,27 @@ pub async fn run_task(
 
                         let _ = ctx.client.cancel_context(&context_id_for_cancel).await;
 
+                        // Long-lived tasks live in their own context; stop
+                        // the ones we started (the standalone daemon shutdown
+                        // below kills them anyway).
+                        let long_lived_targets: Vec<ContextualTaskId>
+                            = ctx.target_task_ids.iter()
+                                .filter(|id| is_long_lived_task(id))
+                                .cloned()
+                                .collect();
+
+                        for target in long_lived_targets {
+                            let _ = ctx.client.stop_task(target.task_id.task_name.as_str(), Some(target.task_id.workspace.to_file_string())).await;
+                        }
+
                         ctx.client.close();
 
                         if let Some(mut handle) = daemon_handle {
                             handle.shutdown().await;
                         }
 
-                        // Exit with SIGINT code (130 = 128 + 2)
-                        return Ok(exit_status_from_code(130));
+                        // Exit with the signal code (128 + SIGINT/SIGTERM)
+                        return Ok(exit_status_from_code(if is_sigterm {143} else {130}));
                     }
                 }
                 n = ctx.client.recv_notification() => n?,
@@ -260,6 +397,21 @@ pub async fn run_task(
                 handler
                     .on_task_completed(&mut ctx, &task_id, exit_code, is_target)
                     .await;
+
+                // Turbo semantics: by default the first failure stops the
+                // run (running tasks are killed, pending ones cancelled);
+                // `--continue` lets independent tasks finish.
+                if exit_code != 0 && fail_fast && !has_cancelled_context {
+                    has_cancelled_context = true;
+
+                    // The failing task may be a dependency rather than a
+                    // target; its exit code is still the one to report
+                    if ctx.exit_code == 0 {
+                        ctx.exit_code = exit_code;
+                    }
+
+                    let _ = ctx.client.cancel_context(&context_id_for_cancel).await;
+                }
 
                 ctx.mark_completed(task_id, exit_code);
 
@@ -288,6 +440,8 @@ pub async fn run_task(
             DaemonNotification::FileChanged { .. } => {}
         }
     }
+
+    handler.on_finished(&ctx);
 
     ctx.client.close();
 

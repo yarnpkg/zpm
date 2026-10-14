@@ -1,0 +1,10 @@
+[build-system]
+# An in-tree backend, so that building doesn't need anything from the index
+requires = []
+build-backend = "yarn_test_backend"
+backend-path = ["build_backend"]
+
+[project]
+name = "pypi-sdist-only"
+version = "1.0.0"
+dependencies = ["pypi-no-deps>=1.0.0"]

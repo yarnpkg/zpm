@@ -1,9 +1,11 @@
 import {PortablePath} from '@yarnpkg/fslib';
 import {tests, yarn}  from 'pkg-tests-core';
 
+const {testIf} = tests;
+
 async function configureVenvIsland(path: PortablePath, workspaces: Array<string>) {
   await yarn.writeConfiguration(path, {
-    pypiRegistryServer: await tests.startPackageServer(),
+    pypiRegistryServer: `${await tests.startPackageServer()}/simple/`,
     unstableIslands: {
       main: {
         workspaces,
@@ -14,7 +16,8 @@ async function configureVenvIsland(path: PortablePath, workspaces: Array<string>
 }
 
 describe(`Venv tests`, () => {
-  test(
+  testIf(
+    `venvLinker`,
     `it should make bin entries available from yarn python in venv island workspaces`,
     makeTemporaryMonorepoEnv(
       {

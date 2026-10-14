@@ -16,11 +16,11 @@ function cleanupDaemon(cb: RunFunction): RunFunction {
 
 const getSwitchBinaryPath = () =>
   process.env.TEST_SWITCH_BINARY
-    ?? require.resolve(`${__dirname}/../../../../../../target/release/yarn`);
+    ?? require.resolve(`${__dirname}/../../../../../../target/release/yarn${process.platform === `win32` ? `.exe` : ``}`);
 
 const getYarnBinBinaryPath = () =>
   process.env.TEST_BINARY
-    ?? require.resolve(`${__dirname}/../../../../../../target/release/yarn-bin`);
+    ?? require.resolve(`${__dirname}/../../../../../../target/release/yarn-bin${process.platform === `win32` ? `.exe` : ``}`);
 
 describe(`Commands`, () => {
   describe(`switch proxy`, () => {

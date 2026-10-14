@@ -16,6 +16,8 @@ static PLATFORM_VARIANTS: &[(System, &str, &str)] = &[
     (System::new(Some(Cpu::Aarch64), Some(Os::Linux), None), "linux-arm64", "bin/node"),
     (System::new(Some(Cpu::X86_64), Some(Os::MacOS), None), "darwin-x64", "bin/node"),
     (System::new(Some(Cpu::Aarch64), Some(Os::MacOS), None), "darwin-arm64", "bin/node"),
+    (System::new(Some(Cpu::X86_64), Some(Os::Windows), None), "win-x64", "node.exe"),
+    (System::new(Some(Cpu::Aarch64), Some(Os::Windows), None), "win-arm64", "node.exe"),
 ];
 
 pub async fn resolve_nodejs_version(context: &InstallContext<'_>, range: &zpm_semver::Range) -> Result<Option<zpm_semver::Version>, Error> {
@@ -151,8 +153,12 @@ pub async fn fetch_nodejs_locator<'a>(context: &InstallContext<'a>, locator: &Lo
     let version_str
         = version.to_file_string();
 
+    // The Windows builds are only distributed as zip archives
+    let is_zip_dist
+        = system.os == Some(Os::Windows);
+
     let url
-        = format!("{}/v{}/node-v{}-{}.tar.gz", project.config.settings.node_dist_url.value, version_str, version_str, file_name);
+        = format!("{}/v{}/node-v{}-{}.{}", project.config.settings.node_dist_url.value, version_str, version_str, file_name, if is_zip_dist {"zip"} else {"tar.gz"});
 
     let package_cache = context.package_cache
         .expect("The package cache is required for fetching npm packages");
@@ -178,8 +184,18 @@ pub async fn fetch_nodejs_locator<'a>(context: &InstallContext<'a>, locator: &Lo
                 .send_bytes().await?;
 
         let archive = tokio::task::spawn_blocking(move || -> Result<Vec<u8>, Error> {
-            let tar_data
-                = zpm_formats::tar::unpack_tgz(&bytes)?;
+            let tar_data;
+
+            let dist_entries = match is_zip_dist {
+                true => {
+                    zpm_formats::zip::entries_from_zip(&bytes)?
+                },
+
+                false => {
+                    tar_data = zpm_formats::tar::unpack_tgz(&bytes)?;
+                    zpm_formats::tar::entries_from_tar(&tar_data)?
+                },
+            };
 
             #[derive(Serialize)]
             #[serde(rename_all = "camelCase")]
@@ -208,7 +224,7 @@ pub async fn fetch_nodejs_locator<'a>(context: &InstallContext<'a>, locator: &Lo
                 = JsonDocument::to_string(&manifest)?;
 
             let entries
-                = zpm_formats::tar::entries_from_tar(&tar_data)?
+                = dist_entries
                     .into_iter()
                     .strip_first_segment()
                     .filter(|entry| entry.name.as_str() == bin_file.as_str())

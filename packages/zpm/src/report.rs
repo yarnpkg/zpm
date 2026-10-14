@@ -890,7 +890,12 @@ impl StreamReport {
     }
 
     fn with_content_prefix(&self, mut message: String) -> String {
-        CONTEXT.with(move |context: &RefCell<Option<ReportContext>>| {
+        // Reports can be emitted from tasks that don't carry a context (for
+        // example the island solver, which runs on a blocking thread)
+        let message_fallback
+            = message.clone();
+
+        let result = CONTEXT.try_with(move |context: &RefCell<Option<ReportContext>>| {
             let context
                 = context.borrow();
 
@@ -909,7 +914,9 @@ impl StreamReport {
             message.insert_str(prefix.len(), ": ");
 
             message
-        })
+        });
+
+        result.unwrap_or(message_fallback)
     }
 
     fn line(&self, severity: Severity, message: String) -> bool {

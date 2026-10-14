@@ -8,7 +8,7 @@ use zpm_config::Setting;
 use zpm_git::{GitRange, GitSource, GitTreeish};
 use zpm_primitives::AnonymousSemverRange;
 use zpm_utils::{repeat_until_ok, Path};
-use zpm_utils::FromFileString;
+use zpm_utils::{FromFileString, ToFileString};
 
 use crate::{
     error::Error,
@@ -76,8 +76,10 @@ pub async fn diff_folders(original: &Path, user: &Path) -> Result<String, Error>
             "--no-index",
             "--no-renames",
             "--text",
-            original.as_str(),
-            user.as_str()
+            // Git quotes the paths containing backslashes in its output, which
+            // would prevent us from stripping them below
+            &original.to_file_string(),
+            &user.to_file_string()
         ])
 
         .await?
@@ -352,7 +354,7 @@ async fn git_clone_into(source: &GitSource, commit: &str, clone_dir: &Path, conf
 
         ScriptEnvironment::new()?
             .with_env(make_git_env())
-            .run_exec("git", &["clone", "-c", "core.autocrlf=false", &clone_url, clone_dir.as_str()])
+            .run_exec("git", &["clone", "-c", "core.autocrlf=false", &clone_url, &clone_dir.to_native_string()])
             .await?
             .ok()?;
 

@@ -2098,6 +2098,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "junction"
+version = "2.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "cde48f36530cbd91b65f050101e6c056d6eb743cea2a8f0f19beef69c6742ff8"
+dependencies = [
+ "scopeguard",
+ "windows-sys 0.61.2",
+]
+
+[[package]]
 name = "konst"
 version = "0.2.20"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2685,6 +2695,7 @@ dependencies = [
  "serde",
  "unicode-width",
  "unscanny",
+ "version-ranges",
 ]
 
 [[package]]
@@ -4296,6 +4307,7 @@ dependencies = [
  "indexmap 2.14.0",
  "toml_datetime",
  "toml_parser",
+ "toml_writer",
  "winnow 1.0.1",
 ]
 
@@ -4307,6 +4319,12 @@ checksum = "a2abe9b86193656635d2411dc43050282ca48aa31c2451210f4202550afb7526"
 dependencies = [
  "winnow 1.0.1",
 ]
+
+[[package]]
+name = "toml_writer"
+version = "1.1.2+spec-1.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7d56353a2a665ad0f41a421187180aab746c8c325620617ad883a99a1cbe66d2"
 
 [[package]]
 name = "tower"
@@ -5308,6 +5326,7 @@ dependencies = [
  "opentelemetry_sdk",
  "p256",
  "pep-508",
+ "pep440_rs",
  "pubgrub",
  "rand 0.9.4",
  "rayon",
@@ -5316,6 +5335,7 @@ dependencies = [
  "ring",
  "rkyv",
  "rust-ini",
+ "same-file",
  "serde",
  "serde_json",
  "serde_with",
@@ -5328,6 +5348,7 @@ dependencies = [
  "thiserror 2.0.18",
  "tokio",
  "tokio-tungstenite",
+ "toml_edit",
  "tracing",
  "tracing-opentelemetry",
  "tracing-subscriber",
@@ -5537,6 +5558,7 @@ dependencies = [
  "fundu",
  "hex",
  "indexmap 2.14.0",
+ "junction",
  "libc",
  "num",
  "ouroboros",
@@ -5553,5 +5575,6 @@ dependencies = [
  "tokio",
  "urlencoding",
  "wax",
+ "windows-sys 0.61.2",
  "zpm-macro-enum",
 ]

@@ -11,7 +11,7 @@ mod presentation;
 mod scheduler;
 mod server;
 
-pub use client::{DaemonClient, PushTasksResult, StandaloneDaemonHandle};
+pub use client::{DaemonClient, PushTasksOptions, PushTasksResult, StandaloneDaemonHandle};
 pub use coordinator::run_daemon;
 pub use coordinator_commands::{CommandSender, CoordinatorCommand};
 pub use coordinator_state::SubscriptionId;

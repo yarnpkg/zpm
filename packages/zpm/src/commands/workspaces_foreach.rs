@@ -2,14 +2,13 @@ use std::{collections::{BTreeMap, BTreeSet}, io::{StdoutLock, Write}, process::{
 
 use clipanion::{cli, prelude::*};
 use futures::{StreamExt, stream::FuturesUnordered};
-use itertools::Itertools;
 use tokio::io::{AsyncBufReadExt, BufReader};
 use zpm_macro_enum::zpm_enum;
 use zpm_primitives::Ident;
 use zpm_utils::{DataType, Path, ToFileString, ToHumanString, Unit};
 
 use crate::{
-    algos::scc_tarjan_pearce, commands::{PartialYarnCli, YarnCli}, error::Error, git_utils, project::{Project, Workspace}, workspace_glob::WorkspaceGlob
+    algos::scc_tarjan_pearce, commands::{PartialYarnCli, YarnCli}, error::Error, project::Project, workspace_glob::WorkspaceGlob, workspace_selection::{FollowedDependencies, WorkspaceSelection}
 };
 
 /// An SCC island containing workspaces that can be run together,
@@ -26,19 +25,6 @@ pub struct TopologicalIsland {
 pub enum Selection {
     List(Vec<Ident>),
     Topological(Vec<TopologicalIsland>),
-}
-
-#[zpm_enum]
-#[derive(Debug)]
-pub enum FollowedDependencies {
-    #[literal("all")]
-    All,
-
-    #[literal("dev")]
-    Dev,
-
-    #[literal("prod")]
-    Prod,
 }
 
 #[zpm_enum]
@@ -64,6 +50,10 @@ pub enum Limit {
 ///
 /// By default commands run sequentially. Use `-p,--parallel` to run them concurrently, and `--topological` to respect workspace dependency order.
 ///
+/// When both `--follow-dependents` and `--follow-dependencies` are set, the dependents are added first and the dependencies are then
+/// followed from the whole resulting set, so the selection contains everything needed to build each dependent (equivalent to pnpm's
+/// `--filter '...{pkg}...'`).
+///
 #[cli::command(proxy)]
 #[cli::path("workspaces", "foreach")]
 #[cli::category("Workspace commands")]
@@ -79,6 +69,10 @@ pub struct WorkspacesForeach {
     /// Select workspaces changed since a ref, or since the configured base refs when no ref is provided
     #[cli::option("--since")]
     since: Option<Option<String>>,
+
+    /// Compare against this ref rather than the working tree when used with `--since`
+    #[cli::option("--head")]
+    head: Option<String>,
 
     /// Include workspace dependencies of the selected workspaces
     #[cli::option("--recursive", default = false)]
@@ -202,12 +196,20 @@ impl WorkspacesForeach {
         self.is_parallel && (self.is_interlaced || self.jobs() == 1)
     }
 
-    fn follow_dependencies(&self) -> bool {
-        self.follow_dependencies || (self.recursive && self.since.is_none())
-    }
-
-    fn follow_dependents(&self) -> bool {
-        self.follow_dependents || (self.recursive && self.since.is_some())
+    fn workspace_selection(&self) -> WorkspaceSelection<'_> {
+        WorkspaceSelection {
+            all: self.all,
+            from: &self.from,
+            since: &self.since,
+            head: &self.head,
+            recursive: self.recursive,
+            follow_dependencies: self.follow_dependencies,
+            follow_dependents: self.follow_dependents,
+            followed_dependencies: &self.followed_dependencies,
+            include: &self.include,
+            exclude: &self.exclude,
+            private: self.private,
+        }
     }
 
     fn print_epilogue(&self, project: &Project, start: Instant, task_count: usize) {
@@ -397,41 +399,9 @@ impl WorkspacesForeach {
         });
     }
 
-    async fn select_changed_workspaces(&self, project: &Project, since: Option<&str>) -> Result<BTreeSet<Ident>, Error> {
-        let changed_workspaces
-            = git_utils::fetch_changed_workspaces(&project, since).await?;
-
-        Ok(changed_workspaces.keys().cloned().collect())
-    }
-
     async fn selection(&self, project: &Project, args: Vec<String>) -> Result<Selection, Error> {
-        let mut selection: BTreeSet<Ident> = if self.all {
-            project.workspaces_by_ident.keys().cloned().collect()
-        } else if self.from.len() > 0 {
-            project.workspaces.iter().filter(|w| self.from.iter().any(|f| f.check(w))).map(|w| w.name.clone()).collect()
-        } else if let Some(since) = &self.since {
-            self.select_changed_workspaces(project, since.as_deref()).await?
-        } else if self.follow_dependencies() || self.follow_dependents() {
-            BTreeSet::from_iter([project.active_workspace()?.name.clone()])
-        } else {
-            return Err(Error::ReplaceMe);
-        };
-
-        let dependencies
-            = self.select_dependencies(project, &selection)?;
-        let dependents
-            = self.select_dependents(project, &selection)?;
-
-        selection.extend(dependencies);
-        selection.extend(dependents);
-
-        selection.retain(|ident| {
-            let workspace
-                = project.workspace_by_ident(ident)
-                    .expect("We should only be selecting workspaces, so this should never fail");
-
-            !self.should_exclude(workspace)
-        });
+        let mut selection
+            = self.workspace_selection().select(project).await?;
 
         if let Some((script_name, binaries_only)) = self.script_name(args) {
             selection.retain(|ident| {
@@ -476,7 +446,7 @@ impl WorkspacesForeach {
                     .expect("We should only be selecting workspaces");
 
             // Get dependencies that are also in the selection
-            let deps: BTreeSet<Ident> = self.followed_dependencies(workspace)
+            let deps: BTreeSet<Ident> = self.followed_dependencies.of(workspace)
                 .into_iter()
                 .filter(|dep| selection.contains(dep))
                 .collect();
@@ -541,112 +511,6 @@ impl WorkspacesForeach {
 
         None
     }
-
-    fn should_exclude(&self, workspace: &Workspace) -> bool {
-        if !self.private && workspace.manifest.private == Some(true) {
-            return true;
-        }
-
-        if self.include.len() > 0 {
-            if !self.include.iter().any(|include| include.check(workspace)) {
-                return true;
-            }
-        }
-
-        self.exclude.iter().any(|exclude| {
-            exclude.check(workspace)
-        })
-    }
-
-    fn followed_dependencies(&self, workspace: &Workspace) -> BTreeSet<Ident> {
-        let mut dependencies
-            = BTreeSet::new();
-
-        if matches!(self.followed_dependencies, FollowedDependencies::All | FollowedDependencies::Prod) {
-            for (ident, descriptor) in workspace.manifest.remote.dependencies.iter() {
-                if descriptor.range.is_workspace() {
-                    dependencies.insert(ident.clone());
-                }
-            }
-        }
-
-        if matches!(self.followed_dependencies, FollowedDependencies::All | FollowedDependencies::Dev) {
-            for (ident, descriptor) in workspace.manifest.dev_dependencies.iter() {
-                if descriptor.range.is_workspace() {
-                    dependencies.insert(ident.clone());
-                }
-            }
-        }
-
-        dependencies
-    }
-
-    fn select_dependencies(&self, project: &Project, selection: &BTreeSet<Ident>) -> Result<BTreeSet<Ident>, Error> {
-        if !self.follow_dependencies() {
-            return Ok(BTreeSet::new());
-        }
-
-        let mut seen
-            = selection.clone();
-
-        let mut queue
-            = selection.iter().cloned().collect_vec();
-
-        while let Some(last) = queue.pop() {
-            let workspace
-                = project.workspace_by_ident(&last)?;
-
-            for dependency in self.followed_dependencies(workspace) {
-                if seen.insert(dependency.clone()) {
-                    queue.push(dependency);
-                }
-            }
-        }
-
-        Ok(seen)
-    }
-
-    fn build_dependent_map(&self, project: &Project) -> Result<BTreeMap<Ident, BTreeSet<Ident>>, Error> {
-        if !self.follow_dependents() {
-            return Ok(BTreeMap::new());
-        }
-
-        let mut dependent_map
-            = BTreeMap::new();
-
-        for workspace in project.workspaces.iter() {
-            for dependency in self.followed_dependencies(workspace) {
-                dependent_map.entry(dependency)
-                    .or_insert_with(BTreeSet::new)
-                    .insert(workspace.name.clone());
-            }
-        }
-
-        Ok(dependent_map)
-    }
-
-    fn select_dependents(&self, project: &Project, selection: &BTreeSet<Ident>) -> Result<BTreeSet<Ident>, Error> {
-        let dependent_map
-            = self.build_dependent_map(project)?;
-
-        let mut seen
-            = selection.clone();
-
-        let mut queue
-            = selection.iter().collect_vec();
-
-        while let Some(last) = queue.pop() {
-            if let Some(dependents) = dependent_map.get(&last) {
-                for dependent in dependents {
-                    if seen.insert(dependent.clone()) {
-                        queue.push(dependent);
-                    }
-                }
-            }
-        }
-
-        Ok(seen)
-    }
 }
 
 struct Task {
@@ -664,10 +528,25 @@ struct Task {
 
 impl Task {
     fn write_ln(&mut self, writer: &mut StdoutLock<'_>, str: &str) {
-        if self.verbose_level >= 1 {
-            writeln!(writer, "{}{}", self.prefix, str).unwrap();
+        let result = if self.verbose_level >= 1 {
+            writeln!(writer, "{}{}", self.prefix, str)
         } else {
-            writeln!(writer, "{}", str).unwrap();
+            writeln!(writer, "{}", str)
+        };
+
+        match result {
+            Ok(()) => {},
+
+            // The reader went away (`yarn workspaces foreach ... | head`);
+            // nobody can see the remaining output, so stop like a process
+            // killed by SIGPIPE would, minus the panic.
+            Err(err) if err.kind() == std::io::ErrorKind::BrokenPipe => {
+                std::process::exit(0);
+            },
+
+            Err(err) => {
+                panic!("Failed to write to stdout: {}", err);
+            },
         }
     }
 

@@ -23,6 +23,7 @@ mod dedupe;
 mod dlx;
 mod exec;
 mod explain;
+mod import_uv;
 mod info;
 mod init;
 mod install;
@@ -108,6 +109,7 @@ pub enum YarnCli {
     Dlx(dlx::Dlx),
     Exec(exec::Exec),
     ExplainPeerRequirements(explain::peer_requirements::ExplainPeerRequirements),
+    ImportUv(import_uv::ImportUv),
     Info(info::Info),
     InitWithTemplate(init::InitWithTemplate),
     Init(init::Init),
@@ -128,9 +130,7 @@ pub enum YarnCli {
     TaskHistory(tasks::history::TaskHistory),
     TaskList(tasks::list::TaskList),
     TaskPush(tasks::push::TaskPush),
-    TaskRunInterlaced(tasks::run_interlaced::TaskRunInterlaced),
-    TaskRunBuffered(tasks::run_buffered::TaskRunBuffered),
-    TaskRunSilentDependencies(tasks::run_silent_dependencies::TaskRunSilentDependencies),
+    TaskRun(tasks::run::TaskRun),
     TaskStats(tasks::stats::TaskStats),
     TaskStop(tasks::stop::TaskStop),
     Unlink(unlink::Unlink),

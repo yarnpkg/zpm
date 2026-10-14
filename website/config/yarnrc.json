@@ -47,6 +47,21 @@
         }
       ]
     },
+    "changesetGlobalFiles": {
+      "title": "List of glob patterns whose changes affect every workspace.",
+      "description": "When a file matching one of these patterns (relative to the project root) changed, `yarn workspaces list --since` and `yarn tasks run --affected` consider every workspace as changed, similar to turbo's `globalDependencies`.",
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "default": [],
+      "_examples": [
+        {
+          "description": "Rebuild everything when the Node version or patches change.",
+          "value": [".nvmrc", "patches/**"]
+        }
+      ]
+    },
     "cloneConcurrency": {
       "_package": "@yarnpkg/plugin-git",
       "title": "Amount of `git clone` operations that Yarn will run at the same time.",
@@ -438,15 +453,15 @@
     "pnpmStoreFolder": {
       "_package": "@yarnpkg/plugin-pnpm",
       "title": "Path where the pnpm store will be stored",
-      "description": "By default, the store is stored in the `node_modules/.pnpm` of the project. Sometimes in CI scenario's it is convenient to store this in a different location so it can be cached and reused.",
+      "description": "By default, the store is stored in the `node_modules/.yarn/store` folder of the project. Sometimes in CI scenario's it is convenient to store this in a different location so it can be cached and reused.",
       "type": "string",
       "format": "uri-reference",
-      "default": "node_modules/.pnpm",
+      "default": "node_modules/.yarn/store",
       "examples": [".cache/.pnpm"],
       "_examples": [
         {
           "description": "Use the default virtual store inside node_modules.",
-          "value": "node_modules/.pnpm"
+          "value": "node_modules/.yarn/store"
         },
         {
           "description": "Move the virtual store to a cacheable project folder.",
@@ -1105,6 +1120,22 @@
         }
       ]
     },
+    "taskConcurrency": {
+      "_package": "@yarnpkg/core",
+      "title": "Maximum number of task processes running at the same time.",
+      "description": "The daemon shares this limit between all the `yarn tasks run` invocations it serves. Long-lived tasks and tasks without a script don't count toward it, nor do tasks waiting on a nested `yarn tasks run`. The background daemon reads it when it starts, so it must be restarted for changes to apply. Defaults to the number of CPUs.",
+      "type": "number",
+      "_examples": [
+        {
+          "description": "Run tasks one at a time.",
+          "value": 1
+        },
+        {
+          "description": "Leave some CPUs available for other work.",
+          "value": 4
+        }
+      ]
+    },
     "enableAutoTypes": {
       "_package": "@yarnpkg/plugin-typescript",
       "title": "Define whether Yarn should automatically add @types packages.",
@@ -1246,7 +1277,7 @@
     },
     "pnpmHoistPatterns": {
       "_package": "@yarnpkg/plugin-pnpm",
-      "title": "Package patterns hoisted to node_modules/.pnpm/node_modules.",
+      "title": "Package patterns hoisted to node_modules/.yarn/store/node_modules.",
       "description": "By default all packages are hoisted into the hidden modules directory inside the pnpm virtual store. Use an empty array to disable this hoisting.",
       "type": "array",
       "items": {

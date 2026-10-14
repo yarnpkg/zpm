@@ -3,7 +3,7 @@ use std::process::Command;
 
 use clipanion::cli;
 use zpm_parsers::{Document, JsonDocument};
-use zpm_utils::{DataType, FromFileString, Note, IoResultExt, Path, ToFileString, ToHumanString};
+use zpm_utils::{DataType, FromFileString, Note, IoResultExt, Path, ToFileString, ToHumanString, PATH_LIST_SEPARATOR};
 
 use crate::errors::Error;
 
@@ -44,14 +44,20 @@ impl PostinstallCommand {
         println!(
             "Yarn Switch {} was successfully installed into {}",
             DataType::Code.colorize(self.cli_environment.info.version.as_str()),
-            DataType::Path.colorize(bin_dir.as_str())
+            DataType::Path.colorize(&bin_dir.to_native_string())
         );
 
         let Some(home) = self.home_dir.clone().or_else(|| Path::home_dir().unwrap_or_default()) else {
             return;
         };
 
-        self.update_shell_profiles(&home, &bin_dir);
+        // On Windows the bin directory is added to the user's PATH by the
+        // PowerShell installer, which covers every shell (Git Bash included,
+        // which wouldn't understand a `C:/...` entry in a POSIX profile).
+        if !cfg!(windows) {
+            self.update_shell_profiles(&home, &bin_dir);
+        }
+
         self.install_github_path(&bin_dir);
         self.check_volta_interference(&bin_dir);
     }
@@ -173,7 +179,7 @@ impl PostinstallCommand {
             = Path::from_str(&github_path).unwrap();
 
         let github_path_file_write_result = github_path_file
-            .fs_append_text(format!("{}\n", bin_dir.to_file_string()));
+            .fs_append_text(format!("{}\n", bin_dir.to_native_string()));
 
         if github_path_file_write_result.is_err() {
             Note::Warning(format!("
@@ -199,7 +205,7 @@ impl PostinstallCommand {
 
     fn check_volta_interference(&self, bin_dir: &Path) {
         let path
-            = format!("{}:{}", bin_dir.to_file_string(), std::env::var("PATH").unwrap_or_default());
+            = format!("{}{}{}", bin_dir.to_native_string(), PATH_LIST_SEPARATOR, std::env::var("PATH").unwrap_or_default());
 
         let output = Command::new("node")
             .env("PATH", path)
@@ -220,8 +226,8 @@ impl PostinstallCommand {
         };
 
         let volta_yarn_path = path_output
-            .split(':')
-            .find(|entry| entry.contains("/tools/image/yarn/"));
+            .split(PATH_LIST_SEPARATOR)
+            .find(|entry| entry.replace('\\', "/").contains("/tools/image/yarn/"));
 
         if let Some(volta_yarn_path) = volta_yarn_path {
             Note::Warning(format!("

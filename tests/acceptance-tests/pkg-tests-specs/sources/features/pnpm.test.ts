@@ -39,6 +39,240 @@ describe(`Features`, () => {
       }),
     );
 
+    test(
+      `it should keep unchanged store folders across installs`,
+      makeTemporaryEnv({
+        dependencies: {
+          [`no-deps`]: `1.0.0`,
+          [`one-fixed-dep`]: `1.0.0`,
+        },
+      }, {
+        nodeLinker: `pnpm`,
+      }, async ({path, run}) => {
+        await run(`install`);
+
+        const noDepsPath = ppath.join(path, `node_modules/no-deps/package.json`);
+        const marker = ppath.join(ppath.dirname(await xfs.realpathPromise(noDepsPath)), `marker`);
+
+        // A file Yarn doesn't know about survives only if the folder isn't re-extracted
+        await xfs.writeFilePromise(marker, ``);
+
+        // Changing an unrelated dependency relinks the project
+        await xfs.writeJsonPromise(ppath.join(path, `package.json`), {
+          dependencies: {
+            [`no-deps`]: `1.0.0`,
+            [`one-fixed-dep`]: `2.0.0`,
+          },
+        });
+
+        await run(`install`);
+        expect(xfs.existsSync(marker)).toEqual(true);
+
+        // --force is the escape hatch to heal a damaged store
+        await run(`install`, `--force`);
+        expect(xfs.existsSync(marker)).toEqual(false);
+      }),
+    );
+
+    test(
+      `it should re-extract store folders whose patch changed`,
+      makeTemporaryEnv({
+        dependencies: {
+          [`no-deps`]: `patch:no-deps@npm%3A1.0.0#./my.patch`,
+        },
+      }, {
+        nodeLinker: `pnpm`,
+      }, async ({path, run}) => {
+        const makePatch = (value: string) => [
+          `diff --git a/index.js b/index.js`,
+          `--- a/index.js`,
+          `+++ b/index.js`,
+          `@@ -1,0 +1,1 @@`,
+          `+module.exports.patched = ${JSON.stringify(value)};`,
+          ``,
+        ].join(`\n`);
+
+        await xfs.writeFilePromise(ppath.join(path, `my.patch`), makePatch(`first`));
+        await run(`install`);
+
+        await xfs.writeFilePromise(ppath.join(path, `my.patch`), makePatch(`second`));
+        await run(`install`);
+
+        const content = await xfs.readFilePromise(ppath.join(path, `node_modules/no-deps/index.js`), `utf8`);
+        expect(content).toContain(`"second"`);
+        expect(content).not.toContain(`"first"`);
+      }),
+    );
+
+    test(
+      `it should remove links to dependencies that were removed`,
+      makeTemporaryEnv({
+        dependencies: {
+          [`no-deps`]: `1.0.0`,
+          [`@types/no-deps`]: `1.0.0`,
+        },
+      }, {
+        nodeLinker: `pnpm`,
+      }, async ({path, run}) => {
+        await run(`install`);
+
+        expect(xfs.existsSync(ppath.join(path, `node_modules/no-deps`))).toEqual(true);
+        expect(xfs.existsSync(ppath.join(path, `node_modules/@types/no-deps`))).toEqual(true);
+
+        await xfs.writeJsonPromise(ppath.join(path, `package.json`), {dependencies: {}});
+        await run(`install`);
+
+        expect(xfs.existsSync(ppath.join(path, `node_modules/no-deps`))).toEqual(false);
+        expect(xfs.existsSync(ppath.join(path, `node_modules/@types/no-deps`))).toEqual(false);
+      }),
+    );
+
+    test(
+      `it should update the links of store packages kept across installs`,
+      makeTemporaryEnv({
+        dependencies: {
+          [`one-range-dep`]: `1.0.0`,
+        },
+        resolutions: {
+          [`no-deps`]: `1.0.0`,
+        },
+      }, {
+        nodeLinker: `pnpm`,
+        pnpmHoistPatterns: [],
+      }, async ({path, run, source}) => {
+        await run(`install`);
+
+        const store = ppath.join(path, `node_modules/.yarn/store`);
+        const [entry] = (await xfs.readdirPromise(store)).filter(name => name.startsWith(`one-range-dep-`));
+
+        await expect(source(`require('one-range-dep')`)).resolves.toMatchObject({dependencies: {[`no-deps`]: {version: `1.0.0`}}});
+
+        // one-range-dep keeps its store folder, but its dependency changes
+        await xfs.writeJsonPromise(ppath.join(path, `package.json`), {
+          dependencies: {[`one-range-dep`]: `1.0.0`},
+          resolutions: {[`no-deps`]: `1.1.0`},
+        });
+
+        await run(`install`);
+
+        expect((await xfs.readdirPromise(store)).filter(name => name.startsWith(`one-range-dep-`))).toEqual([entry]);
+        await expect(source(`require('one-range-dep')`)).resolves.toMatchObject({dependencies: {[`no-deps`]: {version: `1.1.0`}}});
+      }),
+    );
+
+    test(
+      `it should remove hoisted links when packages aren't hoisted anymore`,
+      makeTemporaryEnv({
+        dependencies: {
+          [`one-fixed-dep`]: `1.0.0`,
+        },
+      }, {
+        nodeLinker: `pnpm`,
+        pnpmHoistPatterns: [`*`],
+      }, async ({path, run}) => {
+        await run(`install`);
+
+        const hoisted = ppath.join(path, `node_modules/.yarn/store/node_modules`);
+        expect(xfs.existsSync(ppath.join(hoisted, `no-deps`))).toEqual(true);
+
+        await run(`install`, {env: {YARN_PNPM_HOIST_PATTERNS: ``}});
+
+        expect(xfs.existsSync(ppath.join(hoisted, `no-deps`))).toEqual(false);
+      }),
+    );
+
+    test(
+      `it should remove stale bin shims and never prune a store kept under node_modules`,
+      makeTemporaryEnv({
+        dependencies: {
+          [`no-deps`]: `1.0.0`,
+        },
+      }, {
+        nodeLinker: `pnpm`,
+        pnpmStoreFolder: `node_modules/store`,
+      }, async ({path, run, source}) => {
+        await xfs.mkdirPromise(ppath.join(path, `node_modules/.bin`), {recursive: true});
+        await xfs.writeFilePromise(ppath.join(path, `node_modules/.bin/stale`), ``);
+
+        await run(`install`);
+        await run(`install`);
+
+        expect(xfs.existsSync(ppath.join(path, `node_modules/.bin/stale`))).toEqual(false);
+        expect(xfs.existsSync(ppath.join(path, `node_modules/store`))).toEqual(true);
+        await expect(source(`require('no-deps')`)).resolves.toMatchObject({version: `1.0.0`});
+      }),
+    );
+
+    test(
+      `it should never prune a store nested deeper inside node_modules`,
+      makeTemporaryEnv({
+        dependencies: {
+          [`no-deps`]: `1.0.0`,
+        },
+      }, {
+        nodeLinker: `pnpm`,
+        pnpmStoreFolder: `node_modules/nested/store`,
+      }, async ({path, run, source}) => {
+        await run(`install`);
+        await run(`install`);
+
+        expect(xfs.existsSync(ppath.join(path, `node_modules/nested/store`))).toEqual(true);
+        await expect(source(`require('no-deps')`)).resolves.toMatchObject({version: `1.0.0`});
+      }),
+    );
+
+    test(
+      `it should keep unknown dot-entries in node_modules`,
+      makeTemporaryEnv({
+        dependencies: {
+          [`no-deps`]: `1.0.0`,
+        },
+      }, {
+        nodeLinker: `pnpm`,
+      }, async ({path, run}) => {
+        await run(`install`);
+
+        await xfs.mkdirPromise(ppath.join(path, `node_modules/.cache`), {recursive: true});
+        await xfs.writeFilePromise(ppath.join(path, `node_modules/.cache/file`), ``);
+        await xfs.writeFilePromise(ppath.join(path, `node_modules/.yarn/store/.modules.yaml`), ``);
+
+        await xfs.writeJsonPromise(ppath.join(path, `package.json`), {dependencies: {}});
+        await run(`install`);
+
+        expect(xfs.existsSync(ppath.join(path, `node_modules/.cache/file`))).toEqual(true);
+        expect(xfs.existsSync(ppath.join(path, `node_modules/.yarn/store/.modules.yaml`))).toEqual(true);
+      }),
+    );
+
+    test(
+      `it should keep the links of packages depending on their own name across installs`,
+      makeTemporaryEnv({
+        dependencies: {
+          [`self-require-trap`]: `1.0.0`,
+          [`no-deps`]: `1.0.0`,
+        },
+      }, {
+        nodeLinker: `pnpm`,
+      }, async ({path, run, source}) => {
+        await run(`install`);
+
+        // Relinking without re-extracting self-require-trap
+        await xfs.writeJsonPromise(ppath.join(path, `package.json`), {
+          dependencies: {[`self-require-trap`]: `1.0.0`},
+        });
+
+        await run(`install`);
+
+        await expect(source(`require('self-require-trap')`)).resolves.toMatchObject({version: `1.0.0`});
+        await expect(source(`require('self-require-trap/self')`)).resolves.toMatchObject({version: `2.0.0`});
+
+        // Re-extracting it must restore the link nested inside the package
+        await run(`install`, `--force`);
+
+        await expect(source(`require('self-require-trap/self')`)).resolves.toMatchObject({version: `2.0.0`});
+      }),
+    );
+
     testIf(() => process.platform === `win32`,
       `'winLinkType: symlinks' on Windows should use symlinks in node_modules directories`,
       makeTemporaryEnv(
@@ -145,7 +379,7 @@ describe(`Features`, () => {
           await run(`install`);
 
           // The transitive dependency 'no-deps' should be hoisted to the store's node_modules
-          const hoistedPath = npath.toPortablePath(`${path}/node_modules/.pnpm/node_modules/no-deps`);
+          const hoistedPath = npath.toPortablePath(`${path}/node_modules/.yarn/store/node_modules/no-deps`);
           const hoistedStat = await xfs.lstatPromise(hoistedPath);
           expect(hoistedStat.isSymbolicLink()).toBeTruthy();
         },
@@ -168,7 +402,7 @@ describe(`Features`, () => {
           await run(`install`);
 
           // The store's shared node_modules should not exist or be empty
-          const storeNmPath = npath.toPortablePath(`${path}/node_modules/.pnpm/node_modules`);
+          const storeNmPath = npath.toPortablePath(`${path}/node_modules/.yarn/store/node_modules`);
           await expect(xfs.existsPromise(storeNmPath)).resolves.toBeFalsy();
         },
       ),
@@ -191,12 +425,12 @@ describe(`Features`, () => {
           await run(`install`);
 
           // one-fixed-dep should be hoisted
-          const hoistedPath = npath.toPortablePath(`${path}/node_modules/.pnpm/node_modules/one-fixed-dep`);
+          const hoistedPath = npath.toPortablePath(`${path}/node_modules/.yarn/store/node_modules/one-fixed-dep`);
           const hoistedStat = await xfs.lstatPromise(hoistedPath);
           expect(hoistedStat.isSymbolicLink()).toBeTruthy();
 
           // no-deps should NOT be hoisted (doesn't match pattern)
-          const notHoistedPath = npath.toPortablePath(`${path}/node_modules/.pnpm/node_modules/no-deps`);
+          const notHoistedPath = npath.toPortablePath(`${path}/node_modules/.yarn/store/node_modules/no-deps`);
           await expect(xfs.existsPromise(notHoistedPath)).resolves.toBeFalsy();
         },
       ),
@@ -245,6 +479,73 @@ describe(`Features`, () => {
           // no-deps@2.0.0 is a direct dependency, so it should be in root node_modules
           // The public hoist pattern should not override it with the transitive no-deps@1.0.0
           await expect(source(`require('no-deps/package.json').version`)).resolves.toEqual(`2.0.0`);
+        },
+      ),
+    );
+
+    test(
+      `pnpmPublicHoistPatterns should hoist packages that only non-root workspaces depend on`,
+      makeTemporaryMonorepoEnv({
+        workspaces: [`packages/*`],
+      }, {
+        // Declared by a workspace, and
+        // expected at the root by code that doesn't declare it
+        [`packages/lib`]: {name: `lib`, dependencies: {[`no-deps`]: `1.0.0`}},
+      }, async ({path, run}) => {
+        await xfs.writeFilePromise(ppath.join(path, `.yarnrc.yml`), `nodeLinker: pnpm\npnpmPublicHoistPatterns:\n  - no-deps\n`);
+        await run(`install`);
+
+        const hoisted = await xfs.readJsonPromise(ppath.join(path, `node_modules/no-deps/package.json`));
+        expect(hoisted.version).toEqual(`1.0.0`);
+      }),
+    );
+
+    test(
+      `pnpmHoistPatterns should prefer the version closest to the workspaces`,
+      makeTemporaryEnv(
+        {
+          dependencies: {
+            [`no-deps`]: `2.0.0`,
+            [`one-fixed-dep`]: `1.0.0`,
+          },
+        },
+        {
+          nodeLinker: `pnpm`,
+          pnpmHoistPatterns: [`*`],
+        },
+        async ({path, run}) => {
+          await run(`install`);
+
+          // Same as pnpm, which hoists breadth-first: the direct dependency's
+          // version wins over the transitive no-deps@1.0.0, whatever the
+          // locator order
+          const hoisted = await xfs.readJsonPromise(ppath.join(path, `node_modules/.yarn/store/node_modules/no-deps/package.json`));
+          expect(hoisted.version).toEqual(`2.0.0`);
+        },
+      ),
+    );
+
+    test(
+      `it should link every dependency next to a store package, even hoisted ones`,
+      makeTemporaryEnv(
+        {
+          dependencies: {
+            [`one-fixed-dep`]: `1.0.0`,
+          },
+        },
+        {
+          nodeLinker: `pnpm`,
+          pnpmHoistPatterns: [`*`],
+        },
+        async ({path, run}) => {
+          await run(`install`);
+
+          // Tools that crawl the store (bundlers, type corpora) read a
+          // package's dependencies from its own node_modules, as pnpm lays
+          // them out; the hoisted copy isn't a substitute
+          const store = ppath.join(path, `node_modules/.yarn/store`);
+          const entry = (await xfs.readdirPromise(store)).find(name => name.startsWith(`one-fixed-dep-`))!;
+          await expect(xfs.existsPromise(ppath.join(store, entry, `node_modules/no-deps/package.json`))).resolves.toEqual(true);
         },
       ),
     );

@@ -6,14 +6,14 @@ use futures::future::{BoxFuture, FutureExt};
 use futures::stream::{FuturesUnordered, StreamExt};
 use rayon::iter::{IntoParallelIterator, ParallelIterator};
 use zpm_config::PackageExtension;
-use zpm_primitives::{Descriptor, GitRange, Ident, Locator, PatchRange, PeerRange, Range, Reference, RegistrySemverRange, RegistryTagRange, SemverDescriptor, SemverPeerRange, WorkspaceIdentRange};
+use zpm_primitives::{Descriptor, GitRange, Ident, Locator, PatchRange, PeerRange, Range, Reference, RegistrySemverRange, RegistryTagRange, SemverDescriptor, SemverPeerRange, WorkspaceIdentRange, WorkspaceIdentReference};
 use zpm_utils::{DataType, Hash64, IoResultExt, Path, SystemSet, ToHumanString, UrlEncoded};
 use rkyv::Archive;
 use serde::{Deserialize, Serialize};
 use zpm_utils::{FromFileString, ToFileString};
 
 use crate::{
-    build, cache::CompositeCache, constraints::check_constraints, content_flags::ContentFlags, error::Error, fetchers::{PackageData, SyncFetchAttempt, fetch_locator, patch::has_builtin_patch, try_fetch_locator_sync}, graph::WaitMap, http_npm, linker, lockfile::{Lockfile, LockfileCatalogs, LockfileEntry, LockfileMetadata, LockfilePackageExtension, LockfileProject, catalogs_from_config}, manifest::resolutions::{ResolutionSelector, ResolutionsField}, primitives_exts::{InnerDependencyKind, RangeExt}, project::{InstallMode, Project}, report::{self, ReportContext, async_section, current_report, with_context_result}, resolvers::{Resolution, SyncResolutionAttempt, catalog::{catalog_name, lookup_catalog_entry_in}, resolve_descriptor, resolve_locator, try_resolve_descriptor_sync}, tree_resolver::{ResolutionTree, TreeResolver}
+    build, cache::CompositeCache, constraints::check_constraints, content_flags::ContentFlags, error::Error, fetchers::{PackageData, SyncFetchAttempt, fetch_locator, patch::has_builtin_patch, try_fetch_locator_sync}, graph::WaitMap, http_npm, linker, lockfile::{Lockfile, LockfileCatalogs, LockfileEntry, LockfileMetadata, LockfilePackageExtension, LockfileProject, catalogs_from_config}, manifest::resolutions::{ResolutionSelector, ResolutionsField}, primitives_exts::{InnerDependencyKind, RangeExt}, project::{InstallMode, Project}, report::{self, ReportContext, async_section, current_report, with_context_result}, resolvers::{Resolution, SyncResolutionAttempt, catalog::{catalog_name, lookup_catalog_entry_in}, resolve_descriptor, resolve_locator, try_resolve_descriptor_sync, workspace::resolve_locator_ident}, tree_resolver::{ResolutionTree, TreeResolver}
 };
 
 #[derive(Clone)]
@@ -41,6 +41,11 @@ pub struct InstallContext<'a> {
     /// call `drain` before returning so pending writes aren't dropped
     /// when the runtime shuts down.
     pub background_writes: Option<Arc<http_npm::BackgroundWrites>>,
+    /// The Python version PyPI packages are resolved for; set by islands
+    /// overriding the global `pythonVersion` setting.
+    pub python_version: Option<String>,
+    /// PEP 508 requirements restricting the versions candidates may have.
+    pub pypi_constraints: Vec<String>,
 }
 
 /// What one field of a `packageExtensions` rule did to the packages the
@@ -123,6 +128,8 @@ impl<'a> Default for InstallContext<'a> {
             dependency_overrides: Arc::default(),
             package_extensions: Arc::new(BTreeMap::new()),
             background_writes: None,
+            python_version: None,
+            pypi_constraints: Vec::new(),
         }
     }
 }
@@ -265,6 +272,7 @@ struct InstallMaps {
 /// The work unlocked by resolving a descriptor. Child resolutions and the
 /// package fetch can be scheduled independently.
 struct ResolutionEvent {
+    has_variants: bool,
     children: Vec<Descriptor>,
     locator: Locator,
     is_mock_request: bool,
@@ -334,12 +342,20 @@ async fn resolve_all<'a>(
         };
 
         if let Completed::ResolutionEvent(event) = completed {
-            fetching.push(ensure_fetched(
-                event.locator,
-                event.is_mock_request,
-                ctx,
-                maps,
-            ));
+            // Packages with per-platform variants (PyPI releases shipping
+            // platform wheels) have no artifact of their own; the variants
+            // are fetched instead, as in island resolutions
+            if event.has_variants {
+                let _ = maps.fetch_map.entry(event.locator.clone())
+                    .set(Ok(FetchResult::new(PackageData::Abstract)));
+            } else {
+                fetching.push(ensure_fetched(
+                    event.locator,
+                    event.is_mock_request,
+                    ctx,
+                    maps,
+                ));
+            }
 
             for child in event.children {
                 // Deduplicate at queue insertion time. Checking the OnceCell
@@ -534,8 +550,11 @@ fn enqueue_resolution(
             .cloned()
             .collect();
 
+    let has_variants
+        = !result.resolution.variants.is_empty();
+
     maps.resolution_tx
-        .send(ResolutionEvent {children, locator, is_mock_request})
+        .send(ResolutionEvent {children, locator, is_mock_request, has_variants})
         .expect("resolution receiver cannot close during resolution");
 }
 
@@ -1408,15 +1427,53 @@ impl<'a> InstallManager<'a> {
                     self.result.install_state.island_normalized_resolutions
                         .insert(island_id.clone(), island_result.normalized_resolutions.clone());
 
+                    // Whether the lockfile entries can rebuild this island's
+                    // resolutions exactly (see below)
+                    let mut is_reproducible
+                        = true;
+
                     // Lockfile entries are shared (for checksum tracking etc.)
                     for (locator, resolution) in &island_result.normalized_resolutions {
                         island_locators.push(locator.clone());
-                        self.result.lockfile.entries
+
+                        let entry = self.result.lockfile.entries
                             .entry(locator.clone())
                             .or_insert_with(|| LockfileEntry {
                                 checksum: None,
                                 resolution: resolution.clone(),
                             });
+
+                        // PyPI locators don't encode the Python version, but
+                        // their dependencies are evaluated against the
+                        // island's targets: another island (say, on an older
+                        // Python) may have stored different ones. Rebuilding
+                        // this island from the lockfile would then be wrong.
+                        let same_dependencies
+                            = entry.resolution.dependencies == resolution.dependencies
+                                && entry.resolution.peer_dependencies == resolution.peer_dependencies;
+
+                        if !same_dependencies {
+                            is_reproducible = false;
+                        }
+
+                        // Islands targeting different Python versions list
+                        // different variants for the same release; the
+                        // lockfile keeps all of them, and each island only
+                        // resolves (and selects) its own.
+                        for variant in &resolution.variants {
+                            if !entry.resolution.variants.contains(variant) {
+                                entry.resolution.variants.push(variant.clone());
+                            }
+                        }
+
+                        entry.resolution.variants.sort();
+                    }
+
+                    // Without a hash, the next install solves the island again
+                    // (from its locked versions) instead of rebuilding it
+                    if let (Some(input_hash), true) = (&island_result.input_hash, is_reproducible) {
+                        self.result.lockfile.island_hashes
+                            .insert(island_id.clone(), input_hash.clone());
                     }
 
                     // Store island descriptor→locator in lockfile
@@ -1425,10 +1482,40 @@ impl<'a> InstallManager<'a> {
                 }
 
                 // Fetch all island-resolved packages so package_data is
-                // available for checksum computation and linking.
-                let fetch_futures = island_locators.into_iter().map(|locator| {
-                    ensure_fetched(locator, false, &self.context, &maps)
-                });
+                // available for checksum computation and linking. Packages
+                // with per-platform variants have no artifact of their own,
+                // and variants for other platforms are only mocked.
+                let systems
+                    = self.context.systems.unwrap();
+
+                let mut fetch_futures
+                    = vec![];
+
+                for locator in island_locators {
+                    let resolution
+                        = &self.result.lockfile.entries[&locator].resolution;
+
+                    if !resolution.variants.is_empty() {
+                        let _ = maps.fetch_map.entry(locator.clone())
+                            .set(Ok(FetchResult::new(PackageData::Abstract)));
+
+                        continue;
+                    }
+
+                    let is_mock_request
+                        = !resolution.requirements.validate_any(systems);
+
+                    if resolution.requirements.is_conditional() {
+                        self.result.install_state.conditional_locators.insert(locator.clone());
+
+                        if !resolution.requirements.validate_any(systems) {
+                            self.result.install_state.disabled_locators.insert(locator.clone());
+                        }
+                    }
+
+                    fetch_futures.push(ensure_fetched(locator, is_mock_request, &self.context, &maps));
+                }
+
                 futures::future::join_all(fetch_futures).await;
             } else {
                 greedy_future.await;
@@ -1662,6 +1749,37 @@ impl<'a> InstallManager<'a> {
 
         self.result.lockfile.resolutions = self.result.install_state.descriptor_to_locator.clone();
 
+        // The island workspaces aren't resolved like the other workspaces,
+        // but the lockfile must describe them all the same
+        if let Some(project) = self.context.project {
+            for ident in &island_workspace_idents {
+                let workspace
+                    = project.workspace_by_ident(ident)?;
+
+                let result
+                    = resolve_locator_ident(&self.context, &workspace.locator(), &WorkspaceIdentReference {ident: ident.clone()})?;
+
+                self.result.lockfile.resolutions.insert(workspace.descriptor(), workspace.locator());
+
+                // The islands don't record the descriptors their workspaces use
+                // to depend on other workspaces either
+                for descriptor in result.resolution.dependencies.values() {
+                    if !descriptor.range.is_workspace() {
+                        continue;
+                    }
+
+                    if let Some(dependency) = project.try_workspace_by_descriptor(descriptor)? {
+                        self.result.lockfile.resolutions.insert(descriptor.clone(), dependency.locator());
+                    }
+                }
+
+                self.result.lockfile.entries.insert(workspace.locator(), LockfileEntry {
+                    checksum: None,
+                    resolution: result.original_resolution,
+                });
+            }
+        }
+
         self.result.skip_build = self.context.mode == Some(InstallMode::SkipBuild);
 
         self.result.rule_usage = self.context.rule_usage.clone();
@@ -1798,10 +1916,8 @@ fn normalize_resolution_rec(normalizer: &DependencyNormalizer<'_>, descriptor: &
 
         let resolution_override = candidate_resolutions
             .and_then(|overrides| {
-                overrides.iter().find_map(|(rule, range)| {
-                    rule.apply(&resolution.locator, &resolution.version, descriptor, range)
-                        .map(|replacement_range| (rule, replacement_range))
-                })
+                overrides.iter().find(|(rule, _)| rule.matches(&resolution.locator, &resolution.version, descriptor))
+                    .and_then(|(rule, range)| range.as_ref().map(|range| (rule, range.clone())))
             });
 
         if let Some((rule, replacement_range)) = resolution_override {
@@ -1909,6 +2025,18 @@ static BUILTIN_EXTENSIONS: LazyLock<BTreeMap<SemverDescriptor, PackageExtension>
 
 pub fn normalize_resolutions(context: &InstallContext<'_>, resolution: &Resolution) -> Result<(BTreeMap<Ident, Descriptor>, BTreeMap<Ident, PeerRange>), Error> {
     normalize_resolutions_with(&DependencyNormalizer::from_context(context), resolution)
+}
+
+fn is_removed_dependency(normalizer: &DependencyNormalizer<'_>, resolution: &Resolution, descriptor: &Descriptor) -> bool {
+    let matching = normalizer.dependency_overrides.get_by_ident(&descriptor.ident)
+        .and_then(|rules| rules.iter().find(|(rule, _)| rule.matches(&resolution.locator, &resolution.version, descriptor)));
+    let Some((rule, None)) = matching else {
+        return false;
+    };
+    if let Some(usage) = normalizer.rule_usage {
+        usage.lock().unwrap().dependency_overrides.insert(rule.clone());
+    }
+    true
 }
 
 pub fn normalize_resolutions_with(normalizer: &DependencyNormalizer<'_>, resolution: &Resolution) -> Result<(BTreeMap<Ident, Descriptor>, BTreeMap<Ident, PeerRange>), Error> {
@@ -2020,6 +2148,8 @@ pub fn normalize_resolutions_with(normalizer: &DependencyNormalizer<'_>, resolut
         }
     }
 
+    dependencies.retain(|_, descriptor| !is_removed_dependency(normalizer, resolution, descriptor));
+
     // Some protocols need to know about the package that declares the
     // dependency (for example the `portal:` protocol, which always points
     // to a location relative to the parent package. We mutate the
@@ -2032,6 +2162,12 @@ pub fn normalize_resolutions_with(normalizer: &DependencyNormalizer<'_>, resolut
         normalize_resolution(normalizer, descriptor, resolution, true)?;
     }
 
+    let mut retain_peer = |ident: &Ident, range: &mut PeerRange| {
+        let descriptor = Descriptor::new(ident.clone(), range.to_range());
+        !is_removed_dependency(normalizer, resolution, &descriptor)
+    };
+    peer_dependencies.retain(&mut retain_peer);
+
     for name in peer_dependencies.keys().filter(|ident| ident.scope() != Some("@types")).cloned().collect::<Vec<_>>() {
         let types_ident
             = name.type_ident();
@@ -2043,6 +2179,8 @@ pub fn normalize_resolutions_with(normalizer: &DependencyNormalizer<'_>, resolut
         peer_dependencies.entry(types_ident)
             .or_insert(SemverPeerRange {range: zpm_semver::Range::from_file_string("*").unwrap()}.into());
     }
+
+    peer_dependencies.retain(&mut retain_peer);
 
     Ok((dependencies, peer_dependencies))
 }

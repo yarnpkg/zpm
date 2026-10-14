@@ -96,11 +96,26 @@ impl TreeResolver {
                     = resolution.variants.iter()
                         .map(|variant| &descriptor_to_locators[variant])
                         .map(|locator| &normalized_resolutions[locator])
-                        .find(|resolution| resolution.requirements.validate_system(&system))
-                        .ok_or_else(|| Error::NoMatchingVariantFound(locator.clone()))?;
+                        .find(|resolution| resolution.requirements.validate_system(&system));
 
-                locator = &matching_variant.locator;
-                resolution = &normalized_resolutions[locator];
+                match matching_variant {
+                    Some(matching_variant) => {
+                        locator = &matching_variant.locator;
+                        resolution = &normalized_resolutions[locator];
+                    },
+
+                    // PyPI packages only get variants for the platforms
+                    // they ship artifacts for; one without a variant for
+                    // this system (pywin32 on macOS) is only reached through
+                    // marker-guarded edges that don't apply here. The
+                    // abstract parent stays in the tree so the edges still
+                    // resolve, and the venv linker never installs it.
+                    None if matches!(locator.reference.physical_reference(), Reference::PypiRegistry(_) | Reference::PypiShorthand(_)) => {},
+
+                    None => {
+                        return Err(Error::NoMatchingVariantFound(locator.clone()));
+                    },
+                }
             }
 
             self.resolution_tree.descriptor_to_locator.insert(descriptor.clone(), locator.clone());

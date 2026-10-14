@@ -42,8 +42,12 @@ impl SubscriptionFilter {
 
         let is_explicit_target = self.target_task_ids.contains(task_id);
 
+        // Tasks pushed by this subscriber may run in another context (the
+        // dependencies of a long-lived target run in the long-lived context)
+        let is_known_task = self.all_task_ids.contains(task_id);
+
         if let Some(ref ctx) = self.context_id {
-            if !is_explicit_target && task_id.context_id != *ctx {
+            if !is_known_task && task_id.context_id != *ctx {
                 return false;
             }
         }
@@ -52,7 +56,7 @@ impl SubscriptionFilter {
             SubscriptionScope::None => false,
             SubscriptionScope::TargetOnly => is_explicit_target,
             SubscriptionScope::FullTree => {
-                if is_explicit_target {
+                if is_known_task {
                     return true;
                 }
                 match &self.context_id {

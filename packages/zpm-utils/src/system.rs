@@ -36,16 +36,23 @@ const OS: Os = Os::MacOS;
 #[cfg(target_os = "windows")]
 const OS: Os = Os::Windows;
 
-#[cfg(target_env = "gnu")]
+#[cfg(all(target_os = "linux", target_env = "gnu"))]
 const LIBC: Option<Libc> = Some(Libc::Glibc);
 
 #[cfg(target_env = "musl")]
 const LIBC: Option<Libc> = Some(Libc::Musl);
 
-#[cfg(target_env = "")]
+#[cfg(not(any(all(target_os = "linux", target_env = "gnu"), target_env = "musl")))]
 const LIBC: Option<Libc> = None;
 
 fn detect_libc() -> Option<Libc> {
+    // The libc requirement only makes sense on Linux; on Windows `/usr/bin/ldd`
+    // would resolve against the current drive and could pick up a Git Bash or
+    // Cygwin installation.
+    if cfg!(windows) {
+        return LIBC;
+    }
+
     let ldd_contents
         = Path::from_str(LDD_PATH).unwrap()
             .fs_read_text_prealloc()
@@ -248,6 +255,34 @@ pub struct Requirements {
 }
 
 impl Requirements {
+    /// Widens the requirements to also accept the systems the other
+    /// requirements accept. Only exact for requirements differing on a
+    /// single field (which is what a multi-platform artifact produces, like
+    /// a macOS universal2 wheel covering both arm64 and x64).
+    pub fn extend(&mut self, other: &Requirements) {
+        fn union<T: Clone + PartialEq>(target: &mut Vec<T>, source: &[T]) {
+            // An empty list accepts everything; it can't be widened
+            if target.is_empty() {
+                return;
+            }
+
+            if source.is_empty() {
+                target.clear();
+                return;
+            }
+
+            for value in source {
+                if !target.contains(value) {
+                    target.push(value.clone());
+                }
+            }
+        }
+
+        union(&mut self.arch, &other.arch);
+        union(&mut self.os, &other.os);
+        union(&mut self.libc, &other.libc);
+    }
+
     pub fn is_conditional(&self) -> bool {
         !self.arch.is_empty() || !self.os.is_empty() || !self.libc.is_empty()
     }
@@ -301,5 +336,22 @@ impl Requirements {
         is_field_valid(&self.arch, &set.arch)
             && is_field_valid(&self.os, &set.os)
             && is_field_valid(&self.libc, &set.libc)
+    }
+}
+
+#[cfg(test)]
+mod requirements_tests {
+    use super::*;
+
+    #[test]
+    fn extend_accepts_the_systems_of_both_requirements() {
+        let mut requirements
+            = System::new(Some(Cpu::Aarch64), Some(Os::MacOS), None).to_requirements();
+
+        requirements.extend(&System::new(Some(Cpu::X86_64), Some(Os::MacOS), None).to_requirements());
+
+        assert!(requirements.validate_system(&System::new(Some(Cpu::Aarch64), Some(Os::MacOS), None)));
+        assert!(requirements.validate_system(&System::new(Some(Cpu::X86_64), Some(Os::MacOS), None)));
+        assert!(!requirements.validate_system(&System::new(Some(Cpu::X86_64), Some(Os::Linux), None)));
     }
 }

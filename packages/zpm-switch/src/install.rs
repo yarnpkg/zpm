@@ -176,7 +176,10 @@ pub async fn install_package_manager(package_manager: &VersionPackageManagerRefe
     };
 
     if zpm_semver::Range::from_file_string(">=6.0.0-0").unwrap().check_ignore_rc(&package_manager.version) {
-        return install_native_from_zpm(&version_platform, &Path::from_str("yarn-bin").unwrap()).await;
+        let binary_name
+            = Path::from_str(&format!("yarn-bin{}", std::env::consts::EXE_SUFFIX)).unwrap();
+
+        return install_native_from_zpm(&version_platform, &binary_name).await;
     }
 
     if zpm_semver::Range::from_file_string(">=2.0.0-0").unwrap().check_ignore_rc(&package_manager.version) {

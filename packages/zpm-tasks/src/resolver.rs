@@ -24,6 +24,22 @@ where
     G: Fn(&IdentGlob, &Ident) -> Vec<Ident>,
     D: Fn(&Ident, &Ident) -> bool,
 {
+    resolve_many(std::slice::from_ref(root_task), get_task_file, resolve_ident_glob, is_dependency)
+}
+
+/// Resolve multiple root tasks at once into a single deduplicated graph
+/// (used when running a task across many workspaces).
+pub fn resolve_many<F, G, D>(
+    root_tasks: &[TaskId],
+    get_task_file: F,
+    resolve_ident_glob: G,
+    is_dependency: D,
+) -> Result<ResolvedTasks, Error>
+where
+    F: Fn(&Ident, Option<&str>) -> Option<TaskFile>,
+    G: Fn(&IdentGlob, &Ident) -> Vec<Ident>,
+    D: Fn(&Ident, &Ident) -> bool,
+{
     let load_task_file_with_includes = |workspace: &Ident, task_files_cache: &mut BTreeMap<Ident, TaskFile>| -> Result<(), Error> {
         if task_files_cache.contains_key(workspace) {
             return Ok(());
@@ -57,7 +73,7 @@ where
         Ok(())
     };
 
-    let mut task_data: HashMap<TaskId, Vec<(TaskId, bool)>>
+    let mut task_data: HashMap<TaskId, Vec<(TaskId, bool, usize)>>
         = HashMap::new();
 
     let mut graph: BTreeMap<TaskId, BTreeSet<TaskId>>
@@ -72,7 +88,7 @@ where
     let mut task_files: BTreeMap<Ident, TaskFile>
         = BTreeMap::new();
 
-    to_visit.push(root_task.clone());
+    to_visit.extend(root_tasks.iter().rev().cloned());
 
     while let Some(task_id) = to_visit.pop() {
         if visited.contains(&task_id) {
@@ -97,20 +113,24 @@ where
         let dependencies
             = task.dependencies.clone();
 
-        let mut deps_with_parallel: Vec<(TaskId, bool)>
+        // Each entry is (task, parallel, group). Tasks expanded from a single
+        // glob dependency (such as `*:build`) share a group: they form one
+        // barrier together, since ordering them against each other would
+        // contradict their own dependency edges (and deadlock on diamonds).
+        let mut deps_with_parallel: Vec<(TaskId, bool, usize)>
             = Vec::new();
 
         let mut all_deps: BTreeSet<TaskId>
             = BTreeSet::new();
 
-        for dep in &dependencies {
+        for (group, dep) in dependencies.iter().enumerate() {
             match dep {
                 Dependency::Local { name, parallel } => {
                     let dep_id = TaskId {
                         workspace: task_id.workspace.clone(),
                         task_name: name.clone(),
                     };
-                    deps_with_parallel.push((dep_id.clone(), *parallel));
+                    deps_with_parallel.push((dep_id.clone(), *parallel, group));
                     all_deps.insert(dep_id.clone());
                     if !visited.contains(&dep_id) {
                         to_visit.push(dep_id);
@@ -133,7 +153,7 @@ where
                                     workspace: ws.clone(),
                                     task_name: task_name.clone(),
                                 };
-                                deps_with_parallel.push((dep_id.clone(), *parallel));
+                                deps_with_parallel.push((dep_id.clone(), *parallel, group));
                                 all_deps.insert(dep_id.clone());
                                 if !visited.contains(&dep_id) {
                                     to_visit.push(dep_id);
@@ -225,7 +245,7 @@ where
     Ok(ResolvedTasks { tasks, task_files })
 }
 
-fn build_dependency_phases(deps: Vec<(TaskId, bool)>) -> Vec<Vec<TaskId>> {
+fn build_dependency_phases(deps: Vec<(TaskId, bool, usize)>) -> Vec<Vec<TaskId>> {
     if deps.is_empty() {
         return Vec::new();
     }
@@ -236,7 +256,10 @@ fn build_dependency_phases(deps: Vec<(TaskId, bool)>) -> Vec<Vec<TaskId>> {
     let mut current_parallel_group: Vec<TaskId>
         = Vec::new();
 
-    for (task_id, parallel) in deps {
+    let mut previous_group
+        = None;
+
+    for (task_id, parallel, group) in deps {
         if parallel {
             current_parallel_group.push(task_id);
         } else {
@@ -244,8 +267,21 @@ fn build_dependency_phases(deps: Vec<(TaskId, bool)>) -> Vec<Vec<TaskId>> {
                 phases.push(std::mem::take(&mut current_parallel_group));
             }
 
-            phases.push(vec![task_id]);
+            // Sequential siblings expanded from the same dependency share a
+            // phase rather than being chained in arbitrary (alphabetical) order
+            match phases.last_mut() {
+                Some(last) if previous_group == Some(group) => {
+                    last.push(task_id);
+                },
+
+                _ => {
+                    phases.push(vec![task_id]);
+                },
+            }
         }
+
+        previous_group
+            = Some(group);
     }
 
     if !current_parallel_group.is_empty() {
@@ -594,10 +630,10 @@ mod tests {
 
         // a b& c& d -> phases [[a], [b, c], [d]]
         let deps = vec![
-            (task_id(&ws, "a"), false),
-            (task_id(&ws, "b"), true),
-            (task_id(&ws, "c"), true),
-            (task_id(&ws, "d"), false),
+            (task_id(&ws, "a"), false, 1),
+            (task_id(&ws, "b"), true, 2),
+            (task_id(&ws, "c"), true, 3),
+            (task_id(&ws, "d"), false, 4),
         ];
 
         let phases = build_dependency_phases(deps);
@@ -618,9 +654,9 @@ mod tests {
 
         // a& b& c& -> phases [[a, b, c]]
         let deps = vec![
-            (task_id(&ws, "a"), true),
-            (task_id(&ws, "b"), true),
-            (task_id(&ws, "c"), true),
+            (task_id(&ws, "a"), true, 1),
+            (task_id(&ws, "b"), true, 2),
+            (task_id(&ws, "c"), true, 3),
         ];
 
         let phases = build_dependency_phases(deps);
@@ -637,9 +673,9 @@ mod tests {
 
         // a b c -> phases [[a], [b], [c]]
         let deps = vec![
-            (task_id(&ws, "a"), false),
-            (task_id(&ws, "b"), false),
-            (task_id(&ws, "c"), false),
+            (task_id(&ws, "a"), false, 1),
+            (task_id(&ws, "b"), false, 2),
+            (task_id(&ws, "c"), false, 3),
         ];
 
         let phases = build_dependency_phases(deps);
@@ -649,6 +685,29 @@ mod tests {
             vec![
                 vec![task_id(&ws, "a")],
                 vec![task_id(&ws, "b")],
+                vec![task_id(&ws, "c")],
+            ]
+        );
+    }
+
+    #[test]
+    fn test_dependency_phases_group_sequential_siblings() {
+        let ws = Ident::new("pkg");
+
+        // `*:build` expanding to several workspaces must not chain them
+        // against each other: they share one phase
+        let deps = vec![
+            (task_id(&ws, "a"), false, 1),
+            (task_id(&ws, "b"), false, 1),
+            (task_id(&ws, "c"), false, 2),
+        ];
+
+        let phases = build_dependency_phases(deps);
+
+        assert_eq!(
+            phases,
+            vec![
+                vec![task_id(&ws, "a"), task_id(&ws, "b")],
                 vec![task_id(&ws, "c")],
             ]
         );

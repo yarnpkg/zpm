@@ -9,6 +9,8 @@ sidebar:
 
 Task dependencies allow you to define the execution order of tasks in your project. When running a task, Yarn automatically resolves and executes all required dependencies first, ensuring that prerequisites are met before each task starts.
 
+If you already use Turborepo, see [Migrating from Turbo](/getting-started/migrating-from-turbo) for equivalent task definitions and behavior differences.
+
 ## Defining tasks
 
 Tasks are defined in a `taskfile` at the root of each workspace. Each task has a name, optional dependencies, and a script to execute:
@@ -21,7 +23,60 @@ test: build
   echo "Running tests"
 ```
 
-In this example, running `yarn test` will first execute `build`, then `test`.
+In this example, running `yarn tasks run test` will first execute `build`, then `test`. Use `yarn tasks run <name>` to explicitly run a task: `yarn run <name>` executes a matching `package.json` script first, if one exists.
+
+Task names start with a letter or underscore and can contain letters, digits, underscores, and hyphens. Colons are reserved for `workspace:task` references. A package script with a colon in its name can still be invoked explicitly:
+
+```text
+test-ci:
+  yarn run test:ci "$@"
+```
+
+## Default tasks for workspaces
+
+Annotate a task in the **root taskfile** with `@defaultTask` to supply its definition to every **non-root workspace**:
+
+```text
+# Root taskfile
+@defaultTask
+build: *:build
+```
+
+Each child workspace gets a `build` task, even if it has no taskfile. The `*:build` dependency waits for the `build` tasks of its dependency workspaces. Use `*:build&` to allow those dependency tasks to run in parallel.
+
+An inherited task without commands runs the workspace's matching `package.json` script, when present, forwarding arguments to it. Otherwise, it only waits for its task dependencies.
+
+For example, suppose `app` depends on `bridge`, which depends on `core`. Both `app` and `core` have a `build` script; `bridge` has none. Running `yarn tasks run build` in `app` follows this order:
+
+```text
+core:build   → runs core's build script
+bridge:build → completes without running a command
+app:build    → runs app's build script
+```
+
+The task in `bridge` preserves the dependency chain, so `app` still waits for `core` to build.
+
+A default can also provide commands explicitly. These commands run in each workspace that inherits the task:
+
+```text
+@defaultTask
+check:
+  yarn run typecheck "$@"
+  yarn run lint "$@"
+```
+
+A local task with the same name replaces the **entire default**, including its dependencies and commands. For example:
+
+```text
+# packages/app/taskfile
+build: *:build
+  yarn run build "$@"
+  yarn run generate-manifest
+```
+
+Keep `*:build` in the local definition if it should still wait for dependency builds. An empty local task does not inherit commands or implicitly run a matching package script.
+
+`@defaultTask` definitions are templates for child workspaces; they aren't tasks of the root workspace itself. The annotation supplies definitions and does not start tasks across the project.
 
 ## Sequential dependencies
 

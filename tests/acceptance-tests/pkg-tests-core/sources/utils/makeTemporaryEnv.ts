@@ -1,4 +1,5 @@
 import {npath}     from '@yarnpkg/fslib';
+import {execSync}  from 'child_process';
 import {delimiter} from 'path';
 
 import * as exec   from './exec';
@@ -6,6 +7,16 @@ import * as tests  from './tests';
 
 const {generatePkgDriver} = tests;
 const {execFile} = exec;
+
+// Python tests use the interpreter available on the machine rather than
+// downloading a managed build in every temporary global folder
+const localPythonVersion = (() => {
+  try {
+    return execSync(`python3 -c "import sys; print('%d.%d' % sys.version_info[:2])"`, {encoding: `utf8`}).trim();
+  } catch {
+    return `3.12`;
+  }
+})();
 
 const baseEnv = (nativePath: string, nativeHomePath: string, registryUrl: string, rcEnv: Record<string, any>, env?: Record<string, string | undefined>) => ({
   [`HOME`]: nativeHomePath,
@@ -47,13 +58,18 @@ const baseEnv = (nativePath: string, nativeHomePath: string, registryUrl: string
   [`YARN_ENABLE_SCRIPTS`]: `true`,
   [`YARN_APPROVED_GIT_REPOSITORIES`]: `**`,
   [`YARN_NPM_MINIMAL_AGE_GATE`]: `0`,
+  [`YARN_PYTHON_VERSION`]: localPythonVersion,
+  [`YARN_PYTHON_PREFERENCE`]: `system`,
+  [`YARN_PYTHON_DOWNLOADS`]: `false`,
   ...rcEnv,
   ...env,
 });
 
+const exeSuffix = process.platform === `win32` ? `.exe` : ``;
+
 const getYarnBinaryPath = () => {
   return process.env.TEST_BINARY
-    ?? require.resolve(`${__dirname}/../../../../../target/release/yarn-bin`);
+    ?? require.resolve(`${__dirname}/../../../../../target/release/yarn-bin${exeSuffix}`);
 };
 
 const mte = generatePkgDriver({
@@ -120,7 +136,7 @@ const mte = generatePkgDriver({
       : [];
 
     const switchBinary = process.env.TEST_SWITCH_BINARY
-      ?? require.resolve(`${__dirname}/../../../../../target/release/yarn`);
+      ?? require.resolve(`${__dirname}/../../../../../target/release/yarn${exeSuffix}`);
 
     const yarnBinBinary = getYarnBinaryPath();
 

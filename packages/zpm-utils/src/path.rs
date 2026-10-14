@@ -1,10 +1,73 @@
-use std::{collections::BTreeMap, io::{Read, Write}, os::unix::ffi::OsStrExt, str::{FromStr, Split}, sync::atomic::{AtomicU64, Ordering}, time::SystemTime};
+use std::{collections::BTreeMap, io::{Read, Write}, str::{FromStr, Split}, sync::atomic::{AtomicU64, Ordering}, time::SystemTime};
 
 use rkyv::Archive;
 
-use crate::{diff_data, impl_file_string_from_str, impl_file_string_serialization, path_resolve::resolve_path, DataType, FromFileString, IoResultExt, PathError, PathIterator, ToFileString, ToHumanString};
+use crate::{diff_data, impl_file_string_from_str, impl_file_string_serialization, path_native::{to_native_path, to_portable_path}, path_resolve::resolve_path, DataType, FromFileString, IoResultExt, PathError, PathIterator, ToFileString, ToHumanString};
 
 static ATOMIC_WRITE_NONCE: AtomicU64 = AtomicU64::new(0);
+
+/// How directory links get created on Windows (cf the `winLinkType`
+/// setting); real symlinks are always used on the other platforms.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum LinkType {
+    /// Real symlinks, whose relative targets survive the project being
+    /// moved around. Creating them requires Developer Mode or elevated
+    /// privileges; junctions are used instead when they're unavailable.
+    #[default]
+    Symlink,
+
+    /// NTFS junctions, which don't require any privilege but always point
+    /// to absolute paths.
+    Junction,
+}
+
+/// Set once we know the current user can't create symlinks, so that we
+/// don't keep hitting the same error for every link we create.
+#[cfg(windows)]
+static WINDOWS_SYMLINKS_UNAVAILABLE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Tries to create a directory symlink on Windows; returns false when the
+/// user isn't allowed to create symlinks.
+#[cfg(windows)]
+fn windows_symlink_dir(target: &Path, link: &Path) -> Result<bool, PathError> {
+    const ERROR_PRIVILEGE_NOT_HELD: i32 = 1314;
+
+    if WINDOWS_SYMLINKS_UNAVAILABLE.load(Ordering::Relaxed) {
+        return Ok(false);
+    }
+
+    match std::os::windows::fs::symlink_dir(target.to_path_buf(), link.sys_path()) {
+        Ok(()) => {
+            Ok(true)
+        },
+
+        Err(error) if error.raw_os_error() == Some(ERROR_PRIVILEGE_NOT_HELD) => {
+            WINDOWS_SYMLINKS_UNAVAILABLE.store(true, Ordering::Relaxed);
+            Ok(false)
+        },
+
+        Err(error) => {
+            Err(error.into())
+        },
+    }
+}
+
+/// Whether the file described by the metadata has any of its executable
+/// bits set. Windows doesn't track executability in the file permissions,
+/// so files are never reported as executable there.
+pub fn metadata_is_executable(metadata: &std::fs::Metadata) -> bool {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        metadata.permissions().mode() & 0o111 != 0
+    }
+
+    #[cfg(not(unix))]
+    {
+        let _ = metadata;
+        false
+    }
+}
 
 #[derive(Debug)]
 pub struct SyncEntry {
@@ -40,7 +103,7 @@ impl FromFileString for ExplicitPath {
     type Error = PathError;
 
     fn from_file_string(s: &str) -> Result<Self, Self::Error> {
-        if !s.contains('/') {
+        if !s.contains('/') && !(cfg!(windows) && s.contains('\\')) {
             return Err(PathError::InvalidExplicitPathParameter(s.to_string()));
         }
 
@@ -151,8 +214,12 @@ impl Path {
     }
 
     pub fn home_dir() -> Result<Option<Path>, PathError> {
-        Ok(std::env::var("HOME")
-            .ok()
+        // Same lookup order as Node's os.homedir(): Windows shells such as
+        // Git Bash set HOME, but native ones only set USERPROFILE.
+        let home = std::env::var("HOME").ok()
+            .or_else(|| cfg!(windows).then(|| std::env::var("USERPROFILE").ok()).flatten());
+
+        Ok(home
             .map(|s| Path::try_from(s))
             .transpose()?)
     }
@@ -305,6 +372,13 @@ impl Path {
         let slice
             = &self.path[..slice_len];
 
+        // Windows drive roots (`/C:` in portable form) have no parent; we
+        // don't want to expose `/` as one since it'd resolve to the root
+        // of whatever drive the current directory is on.
+        if cfg!(windows) && self.is_drive_root() {
+            return None;
+        }
+
         if let Some(last_slash) = slice.rfind('/') {
             if last_slash > 0 {
                 return Some(Path::from_str(&slice[..last_slash]).unwrap());
@@ -383,12 +457,60 @@ impl Path {
         self.path.as_str()
     }
 
+    /// The path as native tools expect it; same as `to_file_string` except
+    /// on Windows, where backslashes are used as separators. Prefer this
+    /// form when exposing paths to other programs through env variables.
+    pub fn to_native_string(&self) -> String {
+        #[cfg(windows)]
+        {
+            crate::windows_from_portable(&self.path, '\\').into_owned()
+        }
+
+        #[cfg(not(windows))]
+        {
+            self.path.clone()
+        }
+    }
+
     pub fn to_path_buf(&self) -> std::path::PathBuf {
-        std::path::PathBuf::from(&self.path)
+        #[cfg(windows)]
+        {
+            std::path::PathBuf::from(crate::windows_from_portable(&self.path, '\\').as_ref())
+        }
+
+        #[cfg(not(windows))]
+        {
+            std::path::PathBuf::from(&self.path)
+        }
+    }
+
+    /// The path in a form accepted by the std APIs, without allocating when
+    /// the internal representation already is the native one.
+    #[cfg(not(windows))]
+    fn sys_path(&self) -> &std::path::Path {
+        std::path::Path::new(&self.path)
+    }
+
+    #[cfg(windows)]
+    fn sys_path(&self) -> std::path::PathBuf {
+        self.to_path_buf()
     }
 
     pub fn is_root(&self) -> bool {
         self.path == "/"
+    }
+
+    /// Whether the path is the root of a Windows drive (`/C:` or `/C:/` in
+    /// portable form). Always false on other platforms.
+    pub fn is_drive_root(&self) -> bool {
+        let bytes
+            = self.path.as_bytes();
+
+        cfg!(windows)
+            && (bytes.len() == 3 || (bytes.len() == 4 && bytes[3] == b'/'))
+            && bytes[0] == b'/'
+            && bytes[1].is_ascii_alphabetic()
+            && bytes[2] == b':'
     }
 
     pub fn is_absolute(&self) -> bool {
@@ -425,7 +547,7 @@ impl Path {
     }
 
     pub fn sys_set_current_dir(&self) -> Result<(), PathError> {
-        std::env::set_current_dir(&self.path)?;
+        std::env::set_current_dir(self.sys_path())?;
         Ok(())
     }
 
@@ -439,12 +561,12 @@ impl Path {
     pub unsafe fn sys_set_current_dir_with_pwd(&self) -> Result<(), PathError> {
         self.sys_set_current_dir()?;
         // SAFETY: caller contract guarantees single-threaded startup.
-        unsafe { std::env::set_var("PWD", self.as_str()); }
+        unsafe { std::env::set_var("PWD", self.to_file_string()); }
         Ok(())
     }
 
     pub fn fs_canonicalize(&self) -> Result<Path, PathError> {
-        Ok(Path::try_from(std::fs::canonicalize(&self.path)?)?)
+        Ok(Path::try_from(std::fs::canonicalize(self.sys_path())?)?)
     }
 
     pub fn fs_create_parent(&self) -> Result<&Self, PathError> {
@@ -456,26 +578,43 @@ impl Path {
     }
 
     pub fn fs_create_dir_all(&self) -> Result<&Self, PathError> {
-        std::fs::create_dir_all(&self.path)?;
+        std::fs::create_dir_all(self.sys_path())?;
         Ok(self)
     }
 
     pub fn fs_create_dir(&self) -> Result<&Self, PathError> {
-        std::fs::create_dir(&self.path)?;
+        std::fs::create_dir(self.sys_path())?;
         Ok(self)
     }
 
     pub fn fs_set_permissions(&self, permissions: std::fs::Permissions) -> Result<&Self, PathError> {
-        std::fs::set_permissions(&self.path, permissions)?;
+        std::fs::set_permissions(self.sys_path(), permissions)?;
+        Ok(self)
+    }
+
+    /// Sets the Unix permission bits of the file. Windows has no equivalent
+    /// (executability is derived from the file extension), so this is a
+    /// no-op there.
+    pub fn fs_set_mode(&self, mode: u32) -> Result<&Self, PathError> {
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+
+            std::fs::set_permissions(self.sys_path(), std::fs::Permissions::from_mode(mode))?;
+        }
+
+        #[cfg(not(unix))]
+        let _ = mode;
+
         Ok(self)
     }
 
     pub fn fs_symlink_metadata(&self) -> Result<std::fs::Metadata, PathError> {
-        Ok(std::fs::symlink_metadata(&self.path)?)
+        Ok(std::fs::symlink_metadata(self.sys_path())?)
     }
 
     pub fn fs_metadata(&self) -> Result<std::fs::Metadata, PathError> {
-        Ok(std::fs::metadata(&self.path)?)
+        Ok(std::fs::metadata(self.sys_path())?)
     }
 
     pub fn fs_exists(&self) -> bool {
@@ -655,7 +794,7 @@ impl Path {
         self.fs_append(text.as_ref())
     }
 
-    pub fn fs_sync_dir(&self, mut entries: BTreeMap<Path, SyncEntryKind>) -> Result<&Self, SyncError> {
+    pub fn fs_sync_dir(&self, mut entries: BTreeMap<Path, SyncEntryKind>, link_type: LinkType) -> Result<&Self, SyncError> {
         let first_non_forward_path = entries.keys()
             .find(|path| !path.is_forward());
 
@@ -724,16 +863,16 @@ impl Path {
             let path_abs
                 = self.with_join(&path);
 
-            path_abs.fs_sync_file(kind)?;
+            path_abs.fs_sync_file(kind, link_type)?;
         }
 
         Ok(self)
     }
 
-    pub fn fs_sync_file(&self, kind: SyncEntryKind) -> Result<&Self, PathError> {
+    pub fn fs_sync_file(&self, kind: SyncEntryKind, link_type: LinkType) -> Result<&Self, PathError> {
         match kind {
             SyncEntryKind::Symlink(target)
-                => self.fs_symlink(&target),
+                => self.fs_symlink_with(&target, link_type),
 
             SyncEntryKind::File(data, is_exec)
                 => self.fs_change(&data, is_exec),
@@ -805,6 +944,9 @@ impl Path {
             }
         }
 
+        #[cfg(not(unix))]
+        let _ = is_exec;
+
         Ok(self)
     }
 
@@ -839,6 +981,9 @@ impl Path {
             }
         }
 
+        #[cfg(not(unix))]
+        let _ = is_exec;
+
         Ok(self)
     }
 
@@ -868,6 +1013,8 @@ impl Path {
     pub fn fs_clonefile(&self, new_path: &Path) -> Result<&Self, PathError> {
         #[cfg(target_os = "macos")]
         {
+            use std::os::unix::ffi::OsStrExt;
+
             let source = std::ffi::CString::new(self.to_path_buf().as_os_str().as_bytes())
                 .map_err(|_| std::io::Error::from(std::io::ErrorKind::InvalidInput))?;
             let target = std::ffi::CString::new(new_path.to_path_buf().as_os_str().as_bytes())
@@ -938,27 +1085,110 @@ impl Path {
      */
     pub fn fs_concurrent_move(&self, new_path: &Path) -> Result<&Self, PathError> {
         self.fs_move(new_path)
-            .discard_io_error(|kind| kind == std::io::ErrorKind::DirectoryNotEmpty || kind == std::io::ErrorKind::AlreadyExists)
+            .discard_io_error(|kind| {
+                kind == std::io::ErrorKind::DirectoryNotEmpty
+                    || kind == std::io::ErrorKind::AlreadyExists
+                    // Windows reports an access error when renaming a folder
+                    // onto one that already exists
+                    || (cfg!(windows) && kind == std::io::ErrorKind::PermissionDenied && new_path.fs_is_dir())
+            })
             .map(|_| self)
     }
 
     pub fn fs_rm_file(&self) -> Result<&Self, PathError> {
-        std::fs::remove_file(self.to_path_buf())?;
+        // Directory links (symlinks and junctions) can only be removed
+        // through the directory APIs on Windows.
+        #[cfg(windows)]
+        if self.fs_is_dir_link() {
+            std::fs::remove_dir(self.sys_path())?;
+            return Ok(self);
+        }
+
+        std::fs::remove_file(self.sys_path())?;
         Ok(self)
     }
 
     pub fn fs_rm(&self) -> Result<&Self, PathError> {
         match self.fs_is_real_dir() {
-            true => std::fs::remove_dir_all(self.to_path_buf()),
-            false => std::fs::remove_file(self.to_path_buf()),
-        }?;
+            true => {
+                std::fs::remove_dir_all(self.sys_path())?;
+            },
+
+            false => {
+                self.fs_rm_file()?;
+            },
+        }
 
         Ok(self)
     }
 
+    #[cfg(windows)]
+    fn fs_is_dir_link(&self) -> bool {
+        use std::os::windows::fs::FileTypeExt;
+
+        self.fs_symlink_metadata()
+            .map(|metadata| metadata.file_type().is_symlink_dir())
+            .unwrap_or(false)
+    }
+
+    /// Creates a symlink at this path pointing to `target`, which is
+    /// resolved relative to the symlink's parent directory when relative.
     pub fn fs_symlink(&self, target: &Path) -> Result<&Self, PathError> {
-        std::os::unix::fs::symlink(&target.path, &self.path)?;
+        self.fs_symlink_with(target, LinkType::default())
+    }
+
+    /// Same as `fs_symlink`, but lets the caller pick how directory links
+    /// are created on Windows (see `LinkType`). Since creating symlinks
+    /// requires either Developer Mode or elevated privileges there, we fall
+    /// back to junctions for directories, and to hardlinks (or copies) for
+    /// files, when the system refuses to create them.
+    pub fn fs_symlink_with(&self, target: &Path, link_type: LinkType) -> Result<&Self, PathError> {
+        #[cfg(unix)]
+        {
+            let _ = link_type;
+            std::os::unix::fs::symlink(&target.path, &self.path)?;
+        }
+
+        #[cfg(windows)]
+        {
+            let mut target_abs
+                = self.dirname().unwrap_or_default().with_join(target);
+
+            if !target_abs.is_absolute() {
+                target_abs = Path::current_dir()?.with_join(&target_abs);
+            }
+
+            if target_abs.fs_is_file() {
+                let link_result
+                    = std::os::windows::fs::symlink_file(target.to_path_buf(), self.sys_path())
+                        .or_else(|_| std::fs::hard_link(target_abs.sys_path(), self.sys_path()))
+                        .or_else(|_| std::fs::copy(target_abs.sys_path(), self.sys_path()).map(|_| ()));
+
+                link_result?;
+            } else if link_type == LinkType::Junction || !windows_symlink_dir(target, self)? {
+                junction::create(target_abs.sys_path(), self.sys_path())?;
+            }
+        }
+
         Ok(self)
+    }
+
+    /// Whether this path is a symlink resolving to `target` (which is
+    /// interpreted relative to the symlink's parent directory). On Windows,
+    /// directory links may be junctions whose targets are always absolute,
+    /// so we compare the resolved locations rather than the raw content.
+    pub fn fs_is_symlink_to(&self, target: &Path) -> Result<bool, PathError> {
+        let current_target
+            = self.fs_read_link()?;
+
+        if cfg!(windows) {
+            let parent
+                = self.dirname().unwrap_or_default();
+
+            Ok(parent.with_join(&current_target) == parent.with_join(target))
+        } else {
+            Ok(&current_target == target)
+        }
     }
 
     pub fn fs_read_link(&self) -> Result<Path, PathError> {
@@ -1159,7 +1389,7 @@ impl TryFrom<&std::ffi::OsStr> for Path {
     type Error = PathError;
 
     fn try_from(value: &std::ffi::OsStr) -> Result<Self, Self::Error> {
-        Ok(Path::from_str(std::str::from_utf8(value.as_bytes())?)?)
+        Ok(Path::from_str(value.to_str().ok_or(PathError::InvalidUtf8Path)?)?)
     }
 }
 
@@ -1183,13 +1413,13 @@ impl FromFileString for Path {
     type Error = PathError;
 
     fn from_file_string(s: &str) -> Result<Self, Self::Error> {
-        Ok(Path {path: resolve_path(s)})
+        Ok(Path {path: resolve_path(&to_portable_path(s))})
     }
 }
 
 impl ToFileString for Path {
     fn to_file_string(&self) -> String {
-        self.path.clone()
+        to_native_path(&self.path).into_owned()
     }
 }
 
