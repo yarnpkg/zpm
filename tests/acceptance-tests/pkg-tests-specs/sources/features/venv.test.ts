@@ -2,7 +2,7 @@ import {PortablePath, npath, xfs} from '@yarnpkg/fslib';
 import {yarn}                     from 'pkg-tests-core';
 
 const {
-  tests: {getPackageArchivePath, getPackageHttpArchivePath, getPackageDirectoryPath},
+  tests: {getPackageArchivePath, getPackageHttpArchivePath, getPackageDirectoryPath, testIf},
 } = require(`pkg-tests-core`);
 
 async function configureVenvIsland(path: PortablePath, workspaces: Array<string>) {
@@ -30,7 +30,8 @@ async function runPythonJson(run: any, cwd: PortablePath, script: string) {
 
 describe(`Features`, () => {
   describe(`Venv linker`, () => {
-    test(
+    testIf(
+      `venvLinker`,
       `it should configure VIRTUAL_ENV when using yarn python from a venv island workspace`,
       makeTemporaryMonorepoEnv(
         {
@@ -116,7 +117,8 @@ describe(`Features`, () => {
       ),
     );
 
-    test(
+    testIf(
+      `venvLinker`,
       `it should install island dependencies inside a workspace venv`,
       makeTemporaryMonorepoEnv(
         {
@@ -152,7 +154,8 @@ describe(`Features`, () => {
       ),
     );
 
-    test(
+    testIf(
+      `venvLinker`,
       `it should allow mixing a venv island with regular PnP workspaces`,
       makeTemporaryMonorepoEnv(
         {
@@ -199,7 +202,8 @@ describe(`Features`, () => {
     );
 
     describe(`Python basic parity`, () => {
-      test(
+      testIf(
+        `venvLinker`,
         `it should correctly install a single dependency that contains no sub-dependencies`,
         makeTemporaryMonorepoEnv(
           {
@@ -229,7 +233,8 @@ describe(`Features`, () => {
         ),
       );
 
-      test(
+      testIf(
+        `venvLinker`,
         `it should correctly install a dependency that itself contains a fixed dependency`,
         makeTemporaryMonorepoEnv(
           {
@@ -265,7 +270,8 @@ describe(`Features`, () => {
         ),
       );
 
-      test(
+      testIf(
+        `venvLinker`,
         `it should correctly install a dependency that itself contains a range dependency`,
         makeTemporaryMonorepoEnv(
           {
@@ -301,7 +307,8 @@ describe(`Features`, () => {
         ),
       );
 
-      test(
+      testIf(
+        `venvLinker`,
         `it should install from archives on the filesystem`,
         makeTemporaryMonorepoEnv(
           {
@@ -331,7 +338,8 @@ describe(`Features`, () => {
         ),
       );
 
-      test(
+      testIf(
+        `venvLinker`,
         `it should install the dependencies of any dependency fetched from the filesystem`,
         makeTemporaryMonorepoEnv(
           {
@@ -367,7 +375,8 @@ describe(`Features`, () => {
         ),
       );
 
-      test(
+      testIf(
+        `venvLinker`,
         `it should install from files on the internet`,
         makeTemporaryMonorepoEnv(
           {
@@ -397,7 +406,8 @@ describe(`Features`, () => {
         ),
       );
 
-      test(
+      testIf(
+        `venvLinker`,
         `it should install the dependencies of any dependency fetched from the internet`,
         makeTemporaryMonorepoEnv(
           {
@@ -433,7 +443,8 @@ describe(`Features`, () => {
         ),
       );
 
-      test(
+      testIf(
+        `venvLinker`,
         `it should install from local directories`,
         makeTemporaryMonorepoEnv(
           {
@@ -463,7 +474,8 @@ describe(`Features`, () => {
         ),
       );
 
-      test(
+      testIf(
+        `venvLinker`,
         `it should install the dependencies of any dependency fetched from a local directory`,
         makeTemporaryMonorepoEnv(
           {
@@ -499,7 +511,8 @@ describe(`Features`, () => {
         ),
       );
 
-      test(
+      testIf(
+        `venvLinker`,
         `it should correctly create resolution mounting points when using the link protocol`,
         makeTemporaryMonorepoEnv(
           {

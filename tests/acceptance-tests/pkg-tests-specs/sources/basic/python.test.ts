@@ -1,6 +1,8 @@
 import {PortablePath, ppath, xfs} from '@yarnpkg/fslib';
 import {tests, yarn}              from 'pkg-tests-core';
 
+const {testIf} = tests;
+
 async function sitePackagesHas(path: PortablePath, workspace: string, file: string) {
   const lib = ppath.join(path, `${workspace}/.venv/lib` as PortablePath);
   for (const entry of await xfs.readdirPromise(lib))
@@ -305,7 +307,8 @@ describe(`Protocols`, () => {
       ),
     );
 
-    test(
+    testIf(
+      `venvLinker`,
       `it should resolve PyPI extras through venv islands`,
       makeTemporaryMonorepoEnv(
         {
@@ -373,7 +376,8 @@ describe(`Protocols`, () => {
       ),
     );
 
-    test(
+    testIf(
+      `venvLinker`,
       `it should keep base dependencies when a deeper transitive dependency later requests PyPI extras`,
       makeTemporaryMonorepoEnv(
         {

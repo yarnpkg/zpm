@@ -88,3 +88,4 @@ IDEs only need to be pointed at `<project>/.venv/bin/python`.
 - An island targets a single Python version (`pythonVersion`); uv's lockfiles can fork on `python_version` markers.
 - Git and direct URL sources aren't supported yet; they're reported by the import command.
 - Source distributions are built with pip's build isolation, inside a venv created from the island's interpreter.
+- Venv islands aren't supported on Windows yet (see the [limitations](/protocol/pypi#limitations) of the `pypi:` protocol).

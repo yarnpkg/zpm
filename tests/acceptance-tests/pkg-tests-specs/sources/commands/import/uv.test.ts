@@ -1,6 +1,8 @@
 import {PortablePath, ppath, xfs} from '@yarnpkg/fslib';
 import {tests, yarn}              from 'pkg-tests-core';
 
+const {testIf} = tests;
+
 async function writeProject(path: PortablePath, folder: string, pyproject: string, extra: Record<string, string> = {}) {
   const dir = ppath.join(path, folder as PortablePath);
   await xfs.mkdirpPromise(dir);
@@ -14,7 +16,7 @@ async function writeProject(path: PortablePath, folder: string, pyproject: strin
 
 describe(`Commands`, () => {
   describe(`import uv`, () => {
-    test(`it should install the project's own extras with --all-extras, at the versions uv locked`, makeTemporaryEnv({
+    testIf(`venvLinker`, `it should install the project's own extras with --all-extras, at the versions uv locked`, makeTemporaryEnv({
       name: `root`,
       private: true,
     }, async ({path, run}) => {
@@ -95,7 +97,7 @@ describe(`Commands`, () => {
       expect(worker.dependencies).toMatchObject({[`shared-lib`]: `workspace:^`});
     }));
 
-    test(`it should import uv projects and their local dependencies`, makeTemporaryEnv({
+    testIf(`venvLinker`, `it should import uv projects and their local dependencies`, makeTemporaryEnv({
       name: `root`,
       private: true,
     }, async ({path, run}) => {

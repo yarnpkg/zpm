@@ -271,6 +271,10 @@ export const FEATURE_CHECKS = {
   jsonLockfile: majorCheck(major => major >= 5),
   prologConstraints: majorCheck(major => major <= 4),
   mergeConflictTheirs: majorCheck(major => major >= 5),
+  // The venv linker only creates Unix virtualenvs for now (`bin/`,
+  // `lib/pythonX.Y/site-packages`, symlinked interpreter); see the
+  // "Limitations" section of the pypi protocol documentation
+  venvLinker: process.platform !== `win32`,
 } as const;
 
 // Testing things inside a big-endian container takes forever

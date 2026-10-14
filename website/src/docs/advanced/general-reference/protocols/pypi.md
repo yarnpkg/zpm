@@ -140,3 +140,7 @@ Each workspace of a venv island gets a standard virtual environment in `<workspa
 - local workspaces (the workspace itself, and the workspaces it depends on through `workspace:`) installed in editable mode through a `.pth` file, along with their `[project.scripts]`.
 
 Wheels are unpacked once in the global folder and cloned (copy-on-write, on APFS) or hardlinked into each venv, so many venvs sharing the same packages don't multiply the disk usage. Venvs are only rebuilt when their content changes. `yarn python` and the scripts of venv workspaces run with the venv activated.
+
+## Limitations
+
+- **Windows:** venv islands aren't supported on Windows yet. The venv linker only creates the Unix layout (`bin/`, `lib/python3.X/site-packages`, a symlinked interpreter, shebang console scripts), and doesn't look for `python.exe` when searching for an interpreter. Resolving `pypi:` dependencies outside of venv islands works on every platform, and a lockfile generated on macOS or Linux can still lock Windows wheels through `supportedArchitectures`.

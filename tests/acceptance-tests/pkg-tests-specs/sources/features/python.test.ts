@@ -1,7 +1,7 @@
 import {Filename, PortablePath, ppath, xfs} from '@yarnpkg/fslib';
 import {exec, tests, yarn}                  from 'pkg-tests-core';
 
-const {PYPI_AUTH_TOKEN} = tests;
+const {PYPI_AUTH_TOKEN, testIf} = tests;
 
 async function setupVenvProject(path: PortablePath, config: Record<string, any> = {}) {
   const registryUrl = await tests.startPackageServer();
@@ -136,7 +136,7 @@ describe(`Features`, () => {
       expect(cacheEntries.some(entry => entry.includes(`pypi-entry-points-pypi-1.0.0`))).toEqual(true);
     }));
 
-    test(`it should honor pypiMinimalAgeGate`, makeTemporaryMonorepoEnv({
+    testIf(`venvLinker`, `it should honor pypiMinimalAgeGate`, makeTemporaryMonorepoEnv({
       workspaces: [`app`],
     }, {
       [`app`]: {name: `app`, version: `1.0.0`, dependencies: {[`pypi-age-gated`]: `pypi:*`, [`pypi-yanked`]: `pypi:*`}},
@@ -147,7 +147,7 @@ describe(`Features`, () => {
       await expect(pythonEval(run, path, `import pypi_age_gated, pypi_yanked; print(pypi_age_gated.VALUE, pypi_yanked.VALUE)`)).resolves.toEqual(`1.1.0 1.0.0`);
     }));
 
-    test(`it should backtrack across PyPI versions`, makeTemporaryMonorepoEnv({
+    testIf(`venvLinker`, `it should backtrack across PyPI versions`, makeTemporaryMonorepoEnv({
       workspaces: [`app`],
     }, {
       [`app`]: {name: `app`, version: `1.0.0`, dependencies: {[`pypi-conflict-a`]: `pypi:*`, [`pypi-no-deps`]: `pypi:<1.1`}},
@@ -158,7 +158,7 @@ describe(`Features`, () => {
       await expect(pythonEval(run, path, `import pypi_conflict_a, pypi_no_deps; print(pypi_conflict_a.VALUE, pypi_no_deps.VALUE)`)).resolves.toEqual(`1.0.0 1.0.0`);
     }));
 
-    test(`it should apply the island's overrides to the requirements of local projects`, makeTemporaryMonorepoEnv({
+    testIf(`venvLinker`, `it should apply the island's overrides to the requirements of local projects`, makeTemporaryMonorepoEnv({
       workspaces: [`app`, `lib`],
     }, {
       // A project overriding the range its path dependency declares
@@ -172,7 +172,7 @@ describe(`Features`, () => {
       await expect(pythonEval(run, path, `import pypi_no_deps; print(pypi_no_deps.VALUE)`)).resolves.toEqual(`1.1.0`);
     }));
 
-    test(`it should use the local project when another dependency requires it by version`, makeTemporaryMonorepoEnv({
+    testIf(`venvLinker`, `it should use the local project when another dependency requires it by version`, makeTemporaryMonorepoEnv({
       workspaces: [`app`, `lib`, `plugin`],
     }, {
       // The plugin links the local lib (path
@@ -197,7 +197,7 @@ describe(`Features`, () => {
       await expect(pythonEval(run, path, `import pypi_local_lib; print(pypi_local_lib.VALUE)`)).resolves.toEqual(`local`);
     }));
 
-    test(`it should evaluate markers for the current platform`, makeTemporaryMonorepoEnv({
+    testIf(`venvLinker`, `it should evaluate markers for the current platform`, makeTemporaryMonorepoEnv({
       workspaces: [`app`],
     }, {
       [`app`]: {name: `app`, version: `1.0.0`, dependencies: {[`pypi-marker-deps`]: `pypi:1.0.0`}},
@@ -218,7 +218,7 @@ describe(`Features`, () => {
       expect(result).toEqual(process.platform === `darwin` ? [true, false] : [false, true]);
     }));
 
-    test(`it should install a wheel shared by several platforms on each of them`, makeTemporaryMonorepoEnv({
+    testIf(`venvLinker`, `it should install a wheel shared by several platforms on each of them`, makeTemporaryMonorepoEnv({
       workspaces: [`app`],
     }, {
       [`app`]: {name: `app`, version: `1.0.0`, dependencies: {[`pypi-universal2`]: `pypi:1.0.0`}},
@@ -234,7 +234,7 @@ describe(`Features`, () => {
       await expect(pythonEval(run, path, `import pypi_universal2; print(pypi_universal2.VALUE)`)).resolves.toEqual(`1.0.0`);
     }));
 
-    test(`it should skip packages without artifacts for the current platform when their markers exclude it`, makeTemporaryMonorepoEnv({
+    testIf(`venvLinker`, `it should skip packages without artifacts for the current platform when their markers exclude it`, makeTemporaryMonorepoEnv({
       workspaces: [`app`],
     }, {
       [`app`]: {name: `app`, version: `1.0.0`, dependencies: {[`pypi-windows-dep`]: `pypi:1.0.0`}},
@@ -253,7 +253,7 @@ describe(`Features`, () => {
       expect(result).toEqual([true, true, false]);
     }));
 
-    test(`it should lock platform-specific wheels for every supported architecture but only fetch the current one`, makeTemporaryMonorepoEnv({
+    testIf(`venvLinker`, `it should lock platform-specific wheels for every supported architecture but only fetch the current one`, makeTemporaryMonorepoEnv({
       workspaces: [`app`],
     }, {
       [`app`]: {name: `app`, version: `1.0.0`, dependencies: {[`pypi-platform-specific`]: `pypi:1.0.0`}},
@@ -291,7 +291,7 @@ describe(`Features`, () => {
       expect(currentEntries).toHaveLength(1);
     }));
 
-    test(`it should create a standard virtualenv`, makeTemporaryMonorepoEnv({
+    testIf(`venvLinker`, `it should create a standard virtualenv`, makeTemporaryMonorepoEnv({
       workspaces: [`app`],
     }, {
       [`app`]: {name: `app`, version: `1.0.0`, dependencies: {[`pypi-entry-points`]: `pypi:1.0.0`, [`pypi-no-deps`]: `pypi:1.0.0`}},
@@ -317,7 +317,7 @@ describe(`Features`, () => {
       expect((await xfs.statPromise(ppath.join(venv, `pyvenv.cfg`))).mtimeMs).toEqual(stat.mtimeMs);
     }));
 
-    test(`it should build source distributions into wheels`, makeTemporaryMonorepoEnv({
+    testIf(`venvLinker`, `it should build source distributions into wheels`, makeTemporaryMonorepoEnv({
       workspaces: [`app`],
     }, {
       [`app`]: {name: `app`, version: `1.0.0`, dependencies: {[`pypi-sdist-only`]: `pypi:1.0.0`}},
@@ -344,7 +344,7 @@ describe(`Features`, () => {
       await expect(pythonEval(run, path, `import pypi_sdist_only; print(pypi_sdist_only.BUILT_BY)`)).resolves.toEqual(`yarn-test-backend`);
     }));
 
-    test(`it should install local workspaces as editable`, makeTemporaryMonorepoEnv({
+    testIf(`venvLinker`, `it should install local workspaces as editable`, makeTemporaryMonorepoEnv({
       workspaces: [`app`, `lib`],
     }, {
       [`app`]: {name: `app`, version: `1.0.0`, dependencies: {[`lib`]: `workspace:^`}},
@@ -369,7 +369,7 @@ describe(`Features`, () => {
       const script = await exec.execFile(ppath.join(path, `app/.venv/bin/mylib-cli` as PortablePath), [], {cwd: path} as any);
       expect(script.stdout.trim()).toEqual(`cli v2`);
     }));
-    test(`it should apply workspace resolutions as overrides in their island`, makeTemporaryMonorepoEnv({
+    testIf(`venvLinker`, `it should apply workspace resolutions as overrides in their island`, makeTemporaryMonorepoEnv({
       workspaces: [`app`],
     }, {
       [`app`]: {
@@ -385,7 +385,7 @@ describe(`Features`, () => {
       await expect(pythonEval(run, path, `import pypi_no_deps; print(pypi_no_deps.VALUE)`)).resolves.toEqual(`1.0.0`);
     }));
 
-    test(`it should apply pypiConstraints without adding dependencies`, makeTemporaryMonorepoEnv({
+    testIf(`venvLinker`, `it should apply pypiConstraints without adding dependencies`, makeTemporaryMonorepoEnv({
       workspaces: [`app`],
     }, {
       [`app`]: {name: `app`, version: `1.0.0`, dependencies: {[`pypi-one-dep`]: `pypi:1.0.0`}},
@@ -398,7 +398,7 @@ describe(`Features`, () => {
 
       await expect(pythonEval(run, path, `import importlib.util, pypi_no_deps; print(pypi_no_deps.VALUE, importlib.util.find_spec("pypi_entry_points") is None)`)).resolves.toEqual(`1.0.0 True`);
     }));
-    test(`it should reuse locked islands without querying the index`, makeTemporaryMonorepoEnv({
+    testIf(`venvLinker`, `it should reuse locked islands without querying the index`, makeTemporaryMonorepoEnv({
       workspaces: [`app`],
     }, {
       [`app`]: {name: `app`, version: `1.0.0`, dependencies: {[`pypi-one-dep`]: `pypi:1.0.0`}},
