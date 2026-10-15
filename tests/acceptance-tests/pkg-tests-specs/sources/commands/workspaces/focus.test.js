@@ -279,6 +279,31 @@ describe(`Commands`, () => {
         },
       ),
     );
+
+    test(
+      `should focus a workspace that doesn't depend on the root with the pnpm linker`,
+      makeTemporaryEnv(
+        {
+          private: true,
+          workspaces: [`packages/*`],
+        },
+        {
+          nodeLinker: `pnpm`,
+        },
+        async ({path, run}) => {
+          await setupProject(path);
+
+          await run(`workspaces`, `focus`, `foo`, {
+            cwd: ppath.join(path, `packages/foo`),
+          });
+
+          await expect(xfs.readJsonPromise(ppath.join(path, `packages/foo/node_modules/no-deps/package.json`))).resolves.toMatchObject({
+            name: `no-deps`,
+            version: `1.0.0`,
+          });
+        },
+      ),
+    );
   });
 });
 
