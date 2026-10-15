@@ -488,7 +488,7 @@ impl Project {
             .ok_missing()?;
 
         let contents
-            = JsonDocument::to_string_pretty(lockfile)?;
+            = format!("{}\n", JsonDocument::to_string_pretty(lockfile)?);
 
         // Lockfiles checked out on Windows often use CRLF line endings (Git's
         // default); we preserve them rather than reporting them as changes.
