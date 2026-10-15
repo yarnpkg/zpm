@@ -63,7 +63,7 @@ impl PackageManagerField {
         if self.name == expected_name {
             Ok(self.reference)
         } else {
-            Err(Error::UnsupportedProject(expected_name))
+            Err(Error::UnsupportedProject {field: "packageManager", name: self.name})
         }
     }
 
@@ -71,7 +71,7 @@ impl PackageManagerField {
         if self.name == expected_name {
             Ok(&self.reference)
         } else {
-            Err(Error::UnsupportedProject(expected_name))
+            Err(Error::UnsupportedProject {field: "packageManager", name: self.name.clone()})
         }
     }
 }
@@ -116,6 +116,18 @@ impl_file_string_serialization!(PackageManagerField);
 struct Manifest {
     package_manager: Option<PackageManagerField>,
     package_manager_migration: Option<PackageManagerField>,
+    dev_engines: Option<DevEngines>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct DevEngines {
+    package_manager: Option<DevPackageManager>,
+}
+
+#[derive(Debug, Deserialize)]
+struct DevPackageManager {
+    name: Option<String>,
 }
 
 #[derive(Debug)]
@@ -123,6 +135,7 @@ pub struct FindResult {
     pub detected_root_path: Option<Path>,
     pub detected_package_manager: Option<PackageManagerField>,
     pub detected_package_manager_migration: Option<PackageManagerField>,
+    pub detected_dev_package_manager_name: Option<String>,
 }
 
 const ROOT_FILES: &[&'static str] = &[
@@ -132,7 +145,7 @@ const ROOT_FILES: &[&'static str] = &[
 /// Resolves the detected-root path: prefers `YARNSW_DETECTED_ROOT` when set
 /// (the switch binary stashes it before delegating to a package-manager
 /// version), otherwise walks up from `cwd` looking for the closest manifest
-/// with a `packageManager` field.
+/// with a `packageManager` or `devEngines.packageManager.name` field.
 pub fn resolve_detected_root(cwd: &Path) -> Result<Path, Error> {
     if let Ok(env_root) = std::env::var("YARNSW_DETECTED_ROOT") {
         return Ok(Path::try_from(&env_root)?);
@@ -159,11 +172,16 @@ pub fn find_closest_package_manager(path: &Path) -> Result<FindResult, Error> {
             let parsed_manifest: Manifest = JsonDocument::hydrate_from_str(&manifest)
                 .map_err(|err| Error::FailedToParseManifest(err))?;
 
-            if let Some(package_manager) = parsed_manifest.package_manager {
+            let dev_package_manager_name = parsed_manifest.dev_engines
+                .and_then(|dev_engines| dev_engines.package_manager)
+                .and_then(|package_manager| package_manager.name);
+
+            if parsed_manifest.package_manager.is_some() || dev_package_manager_name.is_some() {
                 return Ok(FindResult {
                     detected_root_path: Some(parent),
-                    detected_package_manager: Some(package_manager),
+                    detected_package_manager: parsed_manifest.package_manager,
                     detected_package_manager_migration: parsed_manifest.package_manager_migration,
+                    detected_dev_package_manager_name: dev_package_manager_name,
                 });
             }
         }
@@ -177,6 +195,7 @@ pub fn find_closest_package_manager(path: &Path) -> Result<FindResult, Error> {
                     detected_root_path: Some(parent),
                     detected_package_manager: None,
                     detected_package_manager_migration: None,
+                    detected_dev_package_manager_name: None,
                 });
             }
         }
@@ -190,5 +209,6 @@ pub fn find_closest_package_manager(path: &Path) -> Result<FindResult, Error> {
         detected_root_path: last_package_folder,
         detected_package_manager: None,
         detected_package_manager_migration: None,
+        detected_dev_package_manager_name: None,
     })
 }
