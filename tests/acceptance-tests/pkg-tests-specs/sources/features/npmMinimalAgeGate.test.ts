@@ -1,3 +1,7 @@
+const {
+  fs: {writeFile},
+} = require(`pkg-tests-core`);
+
 describe(`Features`, () => {
   describe(`npmMinimalAgeGate and npmPreapprovedPackages`, () => {
     describe(`add`, () => {
@@ -142,6 +146,22 @@ describe(`Features`, () => {
       );
     });
     describe(`install`, () => {
+      test(
+        `it should parse numeric npmMinimalAgeGate from .yarnrc.yml`,
+        makeTemporaryEnv({
+          dependencies: {[`release-date`]: `^1.0.0`},
+        }, async ({path, run, source}) => {
+          await writeFile(`${path}/.yarnrc.yml`, `npmMinimalAgeGate: 0\n`);
+
+          await run(`install`);
+
+          await expect(source(`require('release-date/package.json')`)).resolves.toMatchObject({
+            name: `release-date`,
+            version: `1.1.1`,
+          });
+        }),
+      );
+
       test(
         `it should fail when trying to install exact version that is too new`,
         makeTemporaryEnv({
