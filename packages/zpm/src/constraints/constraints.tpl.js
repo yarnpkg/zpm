@@ -1216,6 +1216,7 @@ async function main() {
   const defaultConfig = config?.default ?? config;
   await defaultConfig.constraints?.(context);
   const output = applyEngineReport(FIX);
-  (0, import_fs.writeFileSync)(RESULT_PATH, JSON.stringify(output, null, 2));
+  (0, import_fs.writeFileSync)(RESULT_PATH, `${JSON.stringify(output, null, 2)}
+`);
 }
 main();

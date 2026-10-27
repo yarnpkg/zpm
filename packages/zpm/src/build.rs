@@ -291,7 +291,7 @@ impl BuildState {
             .fs_create_parent()?;
 
         let build_state_text
-            = JsonDocument::to_string(self)?;
+            = format!("{}\n", JsonDocument::to_string(self)?);
 
         build_state_path
             .fs_change(build_state_text, false)?;
