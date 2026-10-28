@@ -446,10 +446,53 @@ pub async fn link_project_pnpm<'a>(project: &'a Project, install: &'a Install) -
         link_trees.register_symlink(&link_abs_path, &package_abs_path)?;
     }
 
+    // A workspace source directory is shared by all virtual contexts. Only add
+    // peer links when every consumed context agrees on the physical target.
+    let mut workspace_peers: BTreeMap<(Path, Ident), Option<Path>> = BTreeMap::new();
+    for (locator, resolution) in &tree.locator_resolutions {
+        if !locator.reference.is_virtual_reference() {
+            continue;
+        }
+        let Some(workspace) = project.try_workspace_by_locator(&locator.physical_locator())? else {
+            continue;
+        };
+        for peer_name in resolution.peer_dependencies.keys() {
+            let target = resolution.dependencies.get(peer_name)
+                .and_then(|descriptor| tree.descriptor_to_locator.get(descriptor))
+                .and_then(|locator| locations_by_package.get(locator))
+                .cloned();
+            workspace_peers.entry((workspace.path.clone(), peer_name.clone()))
+                .and_modify(|existing| {
+                    if *existing != target {
+                        *existing = None;
+                    }
+                })
+                .or_insert(target);
+        }
+    }
+
+    // Existing direct dependencies (including peer fallbacks) take precedence.
+    for (locator, resolution) in &tree.locator_resolutions {
+        let Some(workspace) = project.try_workspace_by_locator(locator)? else {
+            continue;
+        };
+        for (name, descriptor) in &resolution.dependencies {
+            if let Some(candidate) = workspace_peers.get_mut(&(workspace.path.clone(), name.clone())) {
+                let target = tree.descriptor_to_locator.get(descriptor)
+                    .and_then(|locator| locations_by_package.get(locator));
+                if candidate.as_ref() != target {
+                    *candidate = None;
+                }
+            }
+        }
+    }
+
     // Second pass: create symlinks in node_modules directories
     for (locator, resolution) in &tree.locator_resolutions {
         let workspace
             = project.try_workspace_by_locator(locator)?;
+        let physical_workspace
+            = project.try_workspace_by_locator(&locator.physical_locator())?;
 
         let mut has_explicit_self_dependency
             = false;
@@ -478,7 +521,15 @@ pub async fn link_project_pnpm<'a>(project: &'a Project, install: &'a Install) -
                     .with_join(dep_rel_location);
 
             // /path/to/project/node_modules/@types/no-deps
-            let link_abs_path = match workspace {
+            // Leave ambiguous peer contexts at their existing placement rather
+            // than choosing one target for the shared source directory.
+            let peer_workspace = physical_workspace.filter(|workspace| {
+                resolution.peer_dependencies.contains_key(dep_name)
+                    && workspace_peers.get(&(workspace.path.clone(), dep_name.clone()))
+                        .and_then(|target| target.as_ref()) == Some(dep_rel_location)
+            });
+            let dependency_workspace = workspace.or(peer_workspace);
+            let link_abs_path = match dependency_workspace {
                 Some(workspace) => workspace.path.with_join(&dep_name.nm_subdir()),
                 None if dep_name == &locator.ident => store_path.with_join_str(&locator.slug()).with_join(&locator.ident.nm_subdir()).with_join(&dep_name.nm_subdir()),
                 None => store_path.with_join_str(&locator.slug()).with_join(&dep_name.nm_subdir()),
