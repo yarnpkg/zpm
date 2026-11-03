@@ -520,12 +520,43 @@ fn generate_workspace_node_modules(
                         && checksum.is_some();
 
                     if hardlinks_mode {
-                        // Hand off to the CAS extractor; `Any` keeps
-                        // the parent walk from treating the folder as
-                        // extraneous while leaving its contents alone.
-                        workspace_nm_tree.register_entry(child_rel_path, SyncItem::Any)?;
+                        // A `node_modules` left by an earlier install
+                        // that nested packages here must be cleaned up
+                        // too, which `Any` would leave alone.
+                        let hosts_node_modules = has_nested_children
+                            || dest_abs_path.with_join_str("node_modules").fs_read_dir()
+                                .is_ok_and(|mut entries| entries.next().is_some());
 
-                        if !assume_up_to_date {
+                        if hosts_node_modules {
+                            // The extractor owns the package's files; its
+                            // `node_modules` is synced like any other.
+                            workspace_nm_tree.register_entry(child_rel_path.clone(), SyncItem::Folder {
+                                template: None,
+                                assume_up_to_date: false,
+                                preserve_extra: PreserveExtra::All,
+                            })?;
+
+                            let nested_node_modules = if has_nested_children {
+                                SyncItem::Folder {
+                                    template: None,
+                                    assume_up_to_date: false,
+                                    preserve_extra: PreserveExtra::None,
+                                }
+                            } else {
+                                SyncItem::Missing
+                            };
+
+                            workspace_nm_tree.register_entry(child_rel_path.with_join_str("node_modules"), nested_node_modules)?;
+                        } else {
+                            // Hand off to the CAS extractor; `Any` keeps
+                            // the parent walk from treating the folder as
+                            // extraneous while leaving its contents alone.
+                            workspace_nm_tree.register_entry(child_rel_path, SyncItem::Any)?;
+                        }
+
+                        // Syncing `node_modules` also drops whatever the
+                        // archive bundles there, so extract it again.
+                        if !assume_up_to_date || hosts_node_modules {
                             cas_extractions.push((dest_abs_path.clone(), child_node.locator.clone()));
                         }
                     } else if use_clone {

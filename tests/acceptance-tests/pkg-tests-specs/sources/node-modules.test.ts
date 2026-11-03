@@ -1659,6 +1659,52 @@ describe(`Node Modules`, () => {
     ),
   );
 
+  for (const nmMode of [`hardlinks-local`, `hardlinks-global`]) {
+    test(`should install packages nested in other packages in nmMode: ${nmMode}`,
+      makeTemporaryEnv(
+        {
+          dependencies: {
+            [`no-deps`]: `2.0.0`,
+            [`one-fixed-dep`]: `1.0.0`,
+          },
+        },
+        {
+          nodeLinker: `node-modules`,
+          nmMode,
+        },
+        async ({path, run, source}) => {
+          // one-fixed-dep depends on no-deps@1.0.0, which can't be hoisted next to no-deps@2.0.0
+          await run(`install`);
+
+          await expect(xfs.existsPromise(`${path}/node_modules/one-fixed-dep/index.js` as PortablePath)).resolves.toEqual(true);
+          await expect(source(`require('one-fixed-dep')`)).resolves.toMatchObject({
+            dependencies: {[`no-deps`]: {version: `1.0.0`}},
+          });
+
+          await run(`install`);
+
+          await expect(source(`require('one-fixed-dep')`)).resolves.toMatchObject({
+            dependencies: {[`no-deps`]: {version: `1.0.0`}},
+          });
+
+          // Once no-deps@1.0.0 can be hoisted, the nested copy must go
+          await writeJson(ppath.resolve(path, Filename.manifest), {
+            dependencies: {
+              [`one-fixed-dep`]: `1.0.0`,
+            },
+          });
+
+          await run(`install`);
+
+          await expect(xfs.existsPromise(`${path}/node_modules/one-fixed-dep/node_modules` as PortablePath)).resolves.toEqual(false);
+          await expect(source(`require('one-fixed-dep')`)).resolves.toMatchObject({
+            dependencies: {[`no-deps`]: {version: `1.0.0`}},
+          });
+        },
+      ),
+    );
+  }
+
   test(`should give priority to direct workspace dependencies over indirect regular dependencies`,
     // Despite 'one-fixed-dep' and 'has-bin-entries' depend on 'no-deps:1.0.0',
     // the 'no-deps:2.0.0' should be hoisted to the top-level
