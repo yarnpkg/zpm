@@ -373,7 +373,7 @@ pub async fn link_project_pnpm<'a>(project: &'a Project, install: &'a Install) -
                 package_store_path.fs_rm()?;
             }
 
-            linker::helpers::fs_extract_archive_with_cas(package_store_path, package_data, &cas_index_root)?;
+            linker::helpers::fs_extract_archive_with_cas(package_store_path, package_data, &cas_index_root, false)?;
 
             Ok(())
         })
