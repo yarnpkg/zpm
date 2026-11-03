@@ -48,9 +48,14 @@ impl PackageMap {
         // A package that previously hosted nested packages can't be
         // skipped wholesale: the nested folders may have to disappear,
         // and only a template expansion prunes them.
+        !self.hosts_nested_packages(id)
+    }
+
+    /// True when packages were nested inside the folder of `id`.
+    pub(crate) fn hosts_nested_packages(&self, id: &str) -> bool {
         let nested_prefix = format!("{id}/");
 
-        !self.packages
+        self.packages
             .range(nested_prefix.clone()..)
             .next()
             .is_some_and(|(key, _)| key.starts_with(&nested_prefix))

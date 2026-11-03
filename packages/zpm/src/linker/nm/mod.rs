@@ -266,6 +266,12 @@ impl PreviousPackageMap {
 
         self.map.matches_package(&id, locator, checksum)
     }
+
+    fn hosts_nested_packages(&self, abs_path: &Path) -> bool {
+        let id = package_map::get_package_id(&self.base_path, &abs_path.without_trailing_separators());
+
+        self.map.hosts_nested_packages(&id)
+    }
 }
 
 /// Resolves the unpacked store used for clonefile materialization:
@@ -297,7 +303,7 @@ fn generate_workspace_node_modules(
     packages_by_location: &mut BTreeMap<Path, zpm_primitives::Locator>,
     canonical_build_locations: &mut BTreeMap<Locator, Path>,
     force_rebuild_locators: &mut BTreeSet<Locator>,
-    cas_extractions: &mut Vec<(Path, Locator)>,
+    cas_extractions: &mut Vec<(Path, Locator, bool)>,
     clone_extractions: &mut Vec<(Path, Locator)>,
 ) -> Result<(SyncTree<'static>, Path), Error> {
     let mut package_map_builder
@@ -520,13 +526,46 @@ fn generate_workspace_node_modules(
                         && checksum.is_some();
 
                     if hardlinks_mode {
-                        // Hand off to the CAS extractor; `Any` keeps
-                        // the parent walk from treating the folder as
-                        // extraneous while leaving its contents alone.
-                        workspace_nm_tree.register_entry(child_rel_path, SyncItem::Any)?;
+                        // Packages an earlier install nested here have
+                        // to be removed, which `Any` would leave alone.
+                        // Without a map, any `node_modules` counts.
+                        let hosted_nested_packages = !has_nested_children && dest_exists && match previous_map {
+                            Some(previous_map) => previous_map.hosts_nested_packages(&abs_path),
+                            None => dest_abs_path.with_join_str("node_modules").fs_read_dir()
+                                .is_ok_and(|mut entries| entries.next().is_some()),
+                        };
 
+                        if has_nested_children || hosted_nested_packages {
+                            // The extractor owns the package's files; its
+                            // `node_modules` is synced like any other.
+                            workspace_nm_tree.register_entry(child_rel_path.clone(), SyncItem::Folder {
+                                template: None,
+                                assume_up_to_date: false,
+                                preserve_extra: PreserveExtra::All,
+                            })?;
+
+                            let nested_node_modules = if has_nested_children {
+                                SyncItem::Folder {
+                                    template: None,
+                                    assume_up_to_date: false,
+                                    preserve_extra: PreserveExtra::None,
+                                }
+                            } else {
+                                SyncItem::Missing
+                            };
+
+                            workspace_nm_tree.register_entry(child_rel_path.with_join_str("node_modules"), nested_node_modules)?;
+                        } else {
+                            // Hand off to the CAS extractor; `Any` keeps
+                            // the parent walk from treating the folder as
+                            // extraneous while leaving its contents alone.
+                            workspace_nm_tree.register_entry(child_rel_path, SyncItem::Any)?;
+                        }
+
+                        // Nested packages replace whatever the archive
+                        // bundles in `node_modules`, as in classic mode.
                         if !assume_up_to_date {
-                            cas_extractions.push((dest_abs_path.clone(), child_node.locator.clone()));
+                            cas_extractions.push((dest_abs_path.clone(), child_node.locator.clone(), has_nested_children));
                         }
                     } else if use_clone {
                         workspace_nm_tree.register_entry(child_rel_path, SyncItem::Any)?;
@@ -601,7 +640,7 @@ fn run_workspace_trees(
     project: &Project,
     install: &Install,
     workspace_trees: Vec<(SyncTree<'static>, Path)>,
-    cas_extractions: &[(Path, Locator)],
+    cas_extractions: &[(Path, Locator, bool)],
     clone_store: Option<&Path>,
     clone_extractions: &[(Path, Locator)],
 ) -> Result<(), Error> {
@@ -849,7 +888,7 @@ fn nm_mode_transitioned(project: &Project) -> bool {
 fn run_cas_extractions(
     project: &Project,
     install: &Install,
-    cas_extractions: &[(Path, Locator)],
+    cas_extractions: &[(Path, Locator, bool)],
 ) -> Result<(), Error> {
     if cas_extractions.is_empty() {
         return Ok(());
@@ -861,7 +900,7 @@ fn run_cas_extractions(
         zpm_config::NmMode::HardlinksLocal => {
             let local_index = linker::helpers::LocalDedupIndex::new();
 
-            cas_extractions.par_iter().try_for_each(|(dest_abs_path, locator)| {
+            cas_extractions.par_iter().try_for_each(|(dest_abs_path, locator, skip_node_modules)| {
                 let package_data = install.package_data
                     .get(&locator.physical_locator())
                     .unwrap_or_else(|| panic!("Expected package_data for {}", locator.to_print_string()));
@@ -870,6 +909,7 @@ fn run_cas_extractions(
                     dest_abs_path,
                     package_data,
                     &local_index,
+                    *skip_node_modules,
                 ).map(|_| ())
             })?;
         },
@@ -877,12 +917,12 @@ fn run_cas_extractions(
             let index_root = project.config.settings.global_folder.value
                 .with_join_str("index");
 
-            cas_extractions.par_iter().try_for_each(|(dest_abs_path, locator)| {
+            cas_extractions.par_iter().try_for_each(|(dest_abs_path, locator, skip_node_modules)| {
                 let package_data = install.package_data
                     .get(&locator.physical_locator())
                     .unwrap_or_else(|| panic!("Expected package_data for {}", locator.to_print_string()));
 
-                linker::helpers::fs_extract_archive_with_cas(dest_abs_path, package_data, &index_root)
+                linker::helpers::fs_extract_archive_with_cas(dest_abs_path, package_data, &index_root, *skip_node_modules)
                     .map(|_| ())
             })?;
         },
