@@ -1119,7 +1119,7 @@ impl Install {
         }
     }
 
-    pub async fn link_and_build(mut self, project: &mut Project) -> Result<InstallResult, Error> {
+    pub async fn link_and_build(mut self, project: &mut Project, package_cache: &CompositeCache) -> Result<InstallResult, Error> {
         self.report_package_extension_diagnostics(project).await;
 
         if !self.skip_lockfile_update {
@@ -1136,6 +1136,10 @@ impl Install {
                 project.write_lockfile(&self.lockfile)?;
             }
         } else {
+            // Preparation may inspect a different graph from the linked tree.
+            // Only prune its archives when we are about to replace that tree.
+            package_cache.clean().await?;
+
             self.install_state.last_installed_at
                 = project.last_modified_at.as_nanos();
 
@@ -1786,10 +1790,6 @@ impl<'a> InstallManager<'a> {
         self.result.inline_builds = self.context.inline_builds;
 
         self.result.report_peer_diagnostics(self.context.project.unwrap());
-
-        if let Some(cache) = &self.context.package_cache {
-            cache.clean().await?;
-        }
 
         Ok(self.result)
     }
