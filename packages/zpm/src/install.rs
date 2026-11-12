@@ -904,6 +904,9 @@ pub struct InstallState {
     /// coverage then only includes production dependencies.
     pub production: bool,
 
+    /// Whether the complete dependency graph was verified to be deduplicated.
+    pub full_dedupe_complete: bool,
+
     pub install_config_hash: Option<Hash64>,
     pub content_flags: BTreeMap<Locator, ContentFlags>,
     pub resolution_tree: ResolutionTree,
@@ -944,6 +947,7 @@ impl Default for InstallState {
             last_installed_at: 0,
             installed_workspaces: Some(BTreeSet::new()),
             production: false,
+            full_dedupe_complete: false,
             install_config_hash: None,
             content_flags: BTreeMap::new(),
             resolution_tree: ResolutionTree::default(),

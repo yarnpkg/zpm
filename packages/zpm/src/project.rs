@@ -1320,6 +1320,15 @@ impl Project {
     /// to skip installs that are provably no-ops; anything uncertain
     /// falls through to a full install.
     pub fn is_install_up_to_date(&mut self) -> Result<bool, Error> {
+        if !self.is_install_state_current()? {
+            return Ok(false);
+        }
+        Ok(!self.config.settings.enable_auto_dedupe.value
+            || self.install_state.as_ref().is_some_and(|state| state.full_dedupe_complete))
+    }
+
+    /// Check whether the complete installed graph and its artifacts are current.
+    pub(crate) fn is_install_state_current(&mut self) -> Result<bool, Error> {
         match self.import_install_state() {
             Ok(_) => {},
 
@@ -1339,7 +1348,7 @@ impl Project {
 
         // A focused install may have skipped part of the project; an
         // explicit `yarn install` must bring everything up to date.
-        if install_state.installed_workspaces.is_some() {
+        if install_state.installed_workspaces.is_some() || install_state.production {
             return Ok(false);
         }
 
@@ -1348,15 +1357,6 @@ impl Project {
         }
 
         if install_state.install_config_hash.as_ref() != Some(&self.install_config_hash()) {
-            return Ok(false);
-        }
-
-        // Explicit dedupe commands may have checked without changing anything,
-        // or only deduplicated selected patterns. Don't treat such a graph as
-        // current when a full install would still automatically deduplicate it.
-        if self.config.settings.enable_auto_dedupe.value
-            && !crate::dedupe::prepare_highest_dedupe(install_state, &[]).is_empty()
-        {
             return Ok(false);
         }
 
@@ -1677,15 +1677,18 @@ impl Project {
 
             // Use the freshly resolved graph so versions introduced by this
             // install can be reused. Focused installs preserve locked resolutions.
-            if self.config.settings.enable_auto_dedupe.value && !options.skip_auto_dedupe && options.roots.is_none() {
+            if self.config.settings.enable_auto_dedupe.value && !options.skip_auto_dedupe && options.roots.is_none() && !options.prune_dev_dependencies {
                 let dedupe_resolutions
                     = crate::dedupe::prepare_highest_dedupe(&install.install_state, &[]);
 
-                if !dedupe_resolutions.is_empty() {
+                if dedupe_resolutions.is_empty() {
+                    install.install_state.full_dedupe_complete = true;
+                } else {
                     options.enforced_resolutions.extend(dedupe_resolutions.into_iter()
                         .map(|(descriptor, locator)| (descriptor, Some(locator))));
 
                     install = self.prepare_install_from_lockfile(&options, &package_cache, install.lockfile).await?;
+                    install.install_state.full_dedupe_complete = crate::dedupe::prepare_highest_dedupe(&install.install_state, &[]).is_empty();
                 }
             }
 

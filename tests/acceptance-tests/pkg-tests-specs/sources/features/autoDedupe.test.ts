@@ -5,6 +5,15 @@ const {setPackageWhitelist} = tests;
 
 describe(`Features`, () => {
   describe(`enableAutoDedupe`, () => {
+    it(
+      `should skip a repeated install when the graph was already deduplicated`,
+      makeTemporaryEnv({dependencies: {[`no-deps`]: `1.0.0`}}, {enableAutoDedupe: true}, async ({run}) => {
+        await run(`install`);
+        const {stdout} = await run(`install`);
+        expect(stdout).toContain(`All dependencies are up-to-date, nothing to do.`);
+      }),
+    );
+
     for (const command of [[`install`], [`install`, `--silent`], [`install`, `--mode=update-lockfile`], [`run`, `check`], [`node`, `-e`, ``], [`add`, `no-deps@1.1.0`], [`up`, `no-deps@1.1.0`], [`remove`, `one-range-dep-too`]]) {
       it(
         `should dedupe after ${command.join(` `)}`,
@@ -50,6 +59,19 @@ describe(`Features`, () => {
         }),
       );
     }
+
+    it(
+      `should reuse a full explicit dedupe on the next install`,
+      makeTemporaryEnv({}, {enableAutoDedupe: true}, async ({run}) => {
+        await setPackageWhitelist(new Map([[`no-deps`, new Set([`1.0.0`])]]), async () => {
+          await run(`add`, `one-range-dep`, {enableAutoDedupe: false});
+        });
+        await run(`add`, `no-deps@1.1.0`, {enableAutoDedupe: false});
+        await run(`dedupe`);
+        const {stdout} = await run(`install`);
+        expect(stdout).toContain(`All dependencies are up-to-date, nothing to do.`);
+      }),
+    );
 
     it(
       `should preserve explicit dedupe checks and patterns before a full install`,
