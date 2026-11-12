@@ -5,7 +5,13 @@ use indexmap::IndexMap;
 use zpm_primitives::{Descriptor, IdentGlob, Locator};
 use zpm_utils::{tree, AbstractValue, ToFileString};
 
-use crate::{dedupe::prepare_highest_dedupe, error::Error, project::{InstallMode, Project, RunInstallOptions}};
+use crate::{
+    dedupe::prepare_highest_dedupe,
+    install::InstallState,
+    error::Error,
+    project::{InstallMode, Project, RunInstallOptions},
+    report::{StreamReport, StreamReportConfig, with_report_result},
+};
 
 #[derive(Debug, Default)]
 enum DedupeStrategy {
@@ -85,46 +91,55 @@ impl Dedupe {
         let mut project
             = Project::new(None).await?;
 
-        project
-            .lazy_install_with_auto_dedupe(false).await?;
+        let mut options = RunInstallOptions {
+            mode: self.mode,
+            silent_or_error: self.check,
+            reject_lockfile_conflicts: self.check,
+            ..Default::default()
+        };
+        let report = StreamReport::new(StreamReportConfig {
+            include_version: true,
+            silent_or_error: self.check,
+            ..StreamReportConfig::from_config(&project.config)
+        });
 
-        let enforced_resolutions
-            = prepare_highest_dedupe(project.install_state.as_ref().ok_or(Error::InstallStateNotFound)?, &self.patterns);
+        with_report_result(report, async {
+            let package_cache
+                = project.package_cache()?;
+            let mut install
+                = project.prepare_install(&options, &package_cache).await?;
+            let enforced_resolutions
+                = prepare_highest_dedupe(&install.install_state, &self.patterns);
 
-        if self.check {
-            if enforced_resolutions.is_empty() {
-                Ok(ExitCode::SUCCESS)
-            } else {
-                self.report_dedupe_needed(&project, &enforced_resolutions)?;
-                Ok(ExitCode::FAILURE)
+            if self.check {
+                if enforced_resolutions.is_empty() {
+                    return Ok(ExitCode::SUCCESS);
+                }
+
+                self.report_dedupe_needed(&install.install_state, &enforced_resolutions)?;
+                return Ok(ExitCode::FAILURE);
             }
-        } else {
-            project.run_install(RunInstallOptions {
-                enforced_resolutions: enforced_resolutions.into_iter()
-                    .map(|(d, l)| (d, Some(l)))
-                    .collect(),
-                mode: self.mode,
-                skip_auto_dedupe: true,
-                ..Default::default()
-            }).await?;
+
+            if !enforced_resolutions.is_empty() {
+                options.enforced_resolutions = enforced_resolutions.into_iter()
+                    .map(|(descriptor, locator)| (descriptor, Some(locator)))
+                    .collect();
+
+                install = project.prepare_install_from_lockfile(&options, &package_cache, install.lockfile).await?;
+            }
+
+            install.link_and_build(&mut project, &package_cache).await?;
 
             Ok(ExitCode::SUCCESS)
-        }
+        }).await
     }
 
-    fn report_dedupe_needed(&self, project: &Project, enforced_resolutions: &BTreeMap<Descriptor, Locator>) -> Result<(), Error> {
-        let install_state
-            = project.install_state.as_ref()
-                .ok_or(Error::InstallStateNotFound)?;
-
+    fn report_dedupe_needed(&self, install_state: &InstallState, enforced_resolutions: &BTreeMap<Descriptor, Locator>) -> Result<(), Error> {
         if self.json {
             for (descriptor, locator) in enforced_resolutions {
-                let old_resolution
-                    = &install_state.descriptor_to_locator[descriptor];
-
                 let entry = serde_json::json!({
                     "descriptor": descriptor.to_file_string(),
-                    "currentResolution": old_resolution.to_file_string(),
+                    "currentResolution": install_state.descriptor_to_locator[descriptor].to_file_string(),
                     "updatedResolution": locator.to_file_string(),
                 });
 
@@ -141,12 +156,9 @@ impl Dedupe {
             let mut child_children
                 = IndexMap::new();
 
-            let old_resolution
-                = &install_state.descriptor_to_locator[descriptor];
-
             child_children.insert("oldResolution".to_string(), tree::Node {
                 label: Some("Old resolution".to_string()),
-                value: Some(AbstractValue::new(old_resolution.clone())),
+                value: Some(AbstractValue::new(install_state.descriptor_to_locator[descriptor].clone())),
                 children: None,
             });
 
