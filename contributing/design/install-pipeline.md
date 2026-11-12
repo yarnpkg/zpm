@@ -32,6 +32,8 @@ Preparation can populate caches, but does not clean them, link packages, or pers
 
 `Project::run_install` orchestrates normal installs, including optional automatic deduplication. The `dedupe` command orchestrates its own stages: prepare the graph, compute deduplication, then either report `--check` results or prepare the updated graph and finalize it. Check-only behavior and deduplication reports stay in the command rather than becoming install options or results.
 
+`dedupe` can reuse a complete installed graph after checking its freshness, configuration, lockfile timestamp, and artifacts. Focused and production installs are not eligible. Both checks and mutating commands can reuse the graph; explicit install modes still prepare and finalize an install. The installed state's `full_dedupe_complete` marker records a successful full-graph deduplication check and lets subsequent automatic installs skip redundant work.
+
 ## Resolvers
 
 Resolvers are responsible for turning descriptors into locators. They're all located in the [`resolvers`](../../packages/zpm/src/resolvers) directory.

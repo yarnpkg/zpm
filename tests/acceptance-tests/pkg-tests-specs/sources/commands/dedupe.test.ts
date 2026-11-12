@@ -42,6 +42,27 @@ describe(`Commands`, () => {
     );
 
     describe(`installation modes`, () => {
+      for (const enableGlobalCache of [false, true]) {
+        for (const args of [[], [`--check`]]) {
+          it(
+            `should restore a deleted ${enableGlobalCache ? `global` : `local`} cache during dedupe ${args.join(` `)}`,
+            makeTemporaryEnv({dependencies: {[`no-deps`]: `1.0.0`}}, {enableGlobalCache}, async ({path, run}) => {
+              await run(`dedupe`);
+              const cachePath = ppath.join(path, enableGlobalCache ? `.yarn/global/cache` : `.yarn/cache`);
+              const previousCache = await xfs.readdirPromise(cachePath);
+              await xfs.removePromise(cachePath);
+
+              await run(`dedupe`, ...args);
+
+              expect(await xfs.readdirPromise(cachePath)).toEqual(expect.arrayContaining(previousCache));
+              await expect(exec.execFile(process.execPath, [
+                `--require`, npath.fromPortablePath(ppath.join(path, Filename.pnpCjs)), `-p`, `require('no-deps').version`,
+              ], {cwd: path, env: {...process.env, NODE_OPTIONS: ``}})).resolves.toMatchObject({stdout: `1.0.0\n`});
+            }),
+          );
+        }
+      }
+
       for (const args of [[`--check`], [`--mode=update-lockfile`]]) {
         it(
           `should preserve the linked tree's archives with ${args.join(` `)} after a manifest change`,
@@ -94,6 +115,21 @@ describe(`Commands`, () => {
           await run(`add`, `-D`, `no-deps@1.1.0`);
           await run(`workspaces`, `focus`, `--all`, `--production`);
           await expect(run(`dedupe`, `--check`)).rejects.toMatchObject({code: 1});
+        }),
+      );
+
+      it(
+        `should reuse a complete deduplicated installation only without a mode`,
+        makeTemporaryEnv({dependencies: {[`no-deps`]: `1.0.0`}}, async ({path, run}) => {
+          await run(`dedupe`);
+          const pnpPath = ppath.join(path, Filename.pnpCjs);
+          await xfs.writeFilePromise(pnpPath, `corrupted`);
+
+          await run(`dedupe`);
+          expect(await xfs.readFilePromise(pnpPath, `utf8`)).toEqual(`corrupted`);
+
+          await run(`dedupe`, `--mode=skip-build`);
+          expect(await xfs.readFilePromise(pnpPath, `utf8`)).not.toEqual(`corrupted`);
         }),
       );
 

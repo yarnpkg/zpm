@@ -104,28 +104,63 @@ impl Dedupe {
         });
 
         with_report_result(report, async {
+            let can_reuse_install_state = self.mode.is_none()
+                && !project.config.settings.enable_hardened_mode.value
+                && project.is_install_state_current()?;
+
+            if can_reuse_install_state {
+                let state = project.install_state.as_ref().unwrap();
+                if state.full_dedupe_complete {
+                    return Ok(ExitCode::SUCCESS);
+                }
+
+                let enforced_resolutions = prepare_highest_dedupe(state, &self.patterns);
+                if self.check {
+                    if enforced_resolutions.is_empty() {
+                        return Ok(ExitCode::SUCCESS);
+                    }
+                    self.report_dedupe_needed(state, &enforced_resolutions)?;
+                    return Ok(ExitCode::FAILURE);
+                }
+                if enforced_resolutions.is_empty() && !self.patterns.is_empty() {
+                    return Ok(ExitCode::SUCCESS);
+                }
+                options.enforced_resolutions = enforced_resolutions.into_iter()
+                    .map(|(descriptor, locator)| (descriptor, Some(locator)))
+                    .collect();
+            }
+
+            // Check freshness before creating cache directories: recreating a
+            // missing directory would hide the need to restore its archives.
             let package_cache
                 = project.package_cache()?;
             let mut install
                 = project.prepare_install(&options, &package_cache).await?;
-            let enforced_resolutions
-                = prepare_highest_dedupe(&install.install_state, &self.patterns);
 
-            if self.check {
-                if enforced_resolutions.is_empty() {
-                    return Ok(ExitCode::SUCCESS);
+            if !can_reuse_install_state {
+                let enforced_resolutions
+                    = prepare_highest_dedupe(&install.install_state, &self.patterns);
+
+                if self.check {
+                    if enforced_resolutions.is_empty() {
+                        return Ok(ExitCode::SUCCESS);
+                    }
+
+                    self.report_dedupe_needed(&install.install_state, &enforced_resolutions)?;
+                    return Ok(ExitCode::FAILURE);
                 }
 
-                self.report_dedupe_needed(&install.install_state, &enforced_resolutions)?;
-                return Ok(ExitCode::FAILURE);
+                if !enforced_resolutions.is_empty() {
+                    options.enforced_resolutions = enforced_resolutions.into_iter()
+                        .map(|(descriptor, locator)| (descriptor, Some(locator)))
+                        .collect();
+
+                    install = project.prepare_install_from_lockfile(&options, &package_cache, install.lockfile).await?;
+                }
             }
 
-            if !enforced_resolutions.is_empty() {
-                options.enforced_resolutions = enforced_resolutions.into_iter()
-                    .map(|(descriptor, locator)| (descriptor, Some(locator)))
-                    .collect();
-
-                install = project.prepare_install_from_lockfile(&options, &package_cache, install.lockfile).await?;
+            if self.patterns.is_empty() {
+                install.install_state.full_dedupe_complete = prepare_highest_dedupe(&install.install_state, &[]).is_empty();
             }
 
             install.link_and_build(&mut project, &package_cache).await?;
