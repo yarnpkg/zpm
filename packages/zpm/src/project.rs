@@ -128,6 +128,7 @@ pub struct RunInstallOptions {
     /// Temporary installs have no constraints configuration to check.
     pub skip_constraints_check: bool,
     pub skip_auto_dedupe: bool,
+    pub reject_lockfile_conflicts: bool,
     pub json: bool,
     pub inline_builds: bool,
     pub force: bool,
@@ -1540,10 +1541,6 @@ impl Project {
     }
 
     pub async fn lazy_install(&mut self) -> Result<(), Error> {
-        self.lazy_install_with_auto_dedupe(true).await
-    }
-
-    pub(crate) async fn lazy_install_with_auto_dedupe(&mut self, auto_dedupe: bool) -> Result<(), Error> {
         match self.import_install_state() {
             Ok(_) => {},
 
@@ -1629,7 +1626,6 @@ impl Project {
             prune_dev_dependencies: production,
             refresh_lockfile: false,
             silent_or_error: true,
-            skip_auto_dedupe: !auto_dedupe,
             mode: None,
             roots: install_roots,
             ..Default::default()
@@ -1745,6 +1741,9 @@ impl Project {
                 .fs_read_text()?;
 
             if lockfile_content.contains("<<<<<<<") {
+                if options.reject_lockfile_conflicts {
+                    return Err(lockfile.err().unwrap());
+                }
                 if self.config.settings.enable_immutable_installs.value {
                     return Err(Error::ImmutableLockfileAutofix);
                 }

@@ -28,9 +28,9 @@ The install is implemented in three different files:
 - `prepare_install_from_lockfile` resolves and fetches from an in-memory lockfile, allowing callers to apply enforced resolutions without writing an intermediate lockfile.
 - `Install::link_and_build` finalizes the result according to the selected install mode. It writes the lockfile and, when linking is enabled, cleans the package cache and attaches the installed state.
 
-Preparation can populate caches, but does not clean them, link packages, or persist a new installed state. Each resolution drains its background metadata writes before returning, including on failure. Callers own the report and share one package cache across these stages so cache cleanup retains packages accessed by either resolution. Lockfile-only finalization skips cleanup to preserve archives still referenced by the previous linked tree.
+Preparation can populate caches, but does not clean them, link packages, or persist a new installed state. Each resolution drains its background metadata writes before returning, including on failure. Callers own the report and share one package cache across these stages so cache cleanup retains packages accessed by either resolution. Check-only and lockfile-only operations skip cleanup to preserve archives still referenced by the previous linked tree.
 
-`Project::run_install` orchestrates normal installs, including optional automatic deduplication.
+`Project::run_install` orchestrates normal installs, including optional automatic deduplication. The `dedupe` command orchestrates its own stages: prepare the graph, compute deduplication, then either report `--check` results or prepare the updated graph and finalize it. Check-only behavior and deduplication reports stay in the command rather than becoming install options or results.
 
 ## Resolvers
 
