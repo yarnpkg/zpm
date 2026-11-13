@@ -20,6 +20,20 @@ The install is implemented in three different files:
 
 - [`tree_resolver.rs`](../../packages/zpm/src/tree_resolver.rs): Called once the install operations are complete, the tree resolver will traverse the dependency tree and resolve then dedupe all peer dependencies by generating new virtual packages wherever necessary.
 
+## Project orchestration
+
+`Project` exposes preparation separately from finalizing an install:
+
+- `prepare_install` validates the project, loads its lockfile, and resolves and fetches dependencies. It can recover lockfile conflicts using the regular install rules.
+- `prepare_install_from_lockfile` resolves and fetches from an in-memory lockfile, allowing callers to apply enforced resolutions without writing an intermediate lockfile.
+- `Install::link_and_build` finalizes the result according to the selected install mode. It writes the lockfile and, when linking is enabled, cleans the package cache and attaches the installed state.
+
+Preparation can populate caches, but does not clean them, link packages, or persist a new installed state. Each resolution drains its background metadata writes before returning, including on failure. Callers own the report and share one package cache across these stages so cache cleanup retains packages accessed by either resolution. Check-only and lockfile-only operations skip cleanup to preserve archives still referenced by the previous linked tree.
+
+`Project::run_install` orchestrates normal installs, including optional automatic deduplication. The `dedupe` command orchestrates its own stages: prepare the graph, compute deduplication, then either report `--check` results or prepare the updated graph and finalize it. Check-only behavior and deduplication reports stay in the command rather than becoming install options or results.
+
+`dedupe` can reuse a complete installed graph after checking its freshness, configuration, lockfile timestamp, and artifacts. Focused and production installs are not eligible. Both checks and mutating commands can reuse the graph; explicit install modes still prepare and finalize an install. The installed state's `full_dedupe_complete` marker records a successful full-graph deduplication check and lets subsequent automatic installs skip redundant work.
+
 ## Resolvers
 
 Resolvers are responsible for turning descriptors into locators. They're all located in the [`resolvers`](../../packages/zpm/src/resolvers) directory.

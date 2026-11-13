@@ -20,7 +20,7 @@ use crate::{
     git::{GitOperation, detect_git_operation},
     http::HttpClient,
     http_npm,
-    install::{InstallContext, InstallManager, InstallResult, InstallState},
+    install::{Install, InstallContext, InstallManager, InstallResult, InstallState},
     lockfile::{Lockfile, LockfileMetadata, LockfileProject, from_legacy_berry_lockfile, from_pnpm_node_modules},
     manifest::{Manifest, helpers::read_manifest_with_size},
     manifest_finder::CachedManifestFinder,
@@ -128,6 +128,7 @@ pub struct RunInstallOptions {
     /// Temporary installs have no constraints configuration to check.
     pub skip_constraints_check: bool,
     pub skip_auto_dedupe: bool,
+    pub reject_lockfile_conflicts: bool,
     pub json: bool,
     pub inline_builds: bool,
     pub force: bool,
@@ -1319,6 +1320,15 @@ impl Project {
     /// to skip installs that are provably no-ops; anything uncertain
     /// falls through to a full install.
     pub fn is_install_up_to_date(&mut self) -> Result<bool, Error> {
+        if !self.is_install_state_current()? {
+            return Ok(false);
+        }
+        Ok(!self.config.settings.enable_auto_dedupe.value
+            || self.install_state.as_ref().is_some_and(|state| state.full_dedupe_complete))
+    }
+
+    /// Check whether the complete installed graph and its artifacts are current.
+    pub(crate) fn is_install_state_current(&mut self) -> Result<bool, Error> {
         match self.import_install_state() {
             Ok(_) => {},
 
@@ -1338,7 +1348,7 @@ impl Project {
 
         // A focused install may have skipped part of the project; an
         // explicit `yarn install` must bring everything up to date.
-        if install_state.installed_workspaces.is_some() {
+        if install_state.installed_workspaces.is_some() || install_state.production {
             return Ok(false);
         }
 
@@ -1347,15 +1357,6 @@ impl Project {
         }
 
         if install_state.install_config_hash.as_ref() != Some(&self.install_config_hash()) {
-            return Ok(false);
-        }
-
-        // Explicit dedupe commands may have checked without changing anything,
-        // or only deduplicated selected patterns. Don't treat such a graph as
-        // current when a full install would still automatically deduplicate it.
-        if self.config.settings.enable_auto_dedupe.value
-            && !crate::dedupe::prepare_highest_dedupe(install_state, &[]).is_empty()
-        {
             return Ok(false);
         }
 
@@ -1540,10 +1541,6 @@ impl Project {
     }
 
     pub async fn lazy_install(&mut self) -> Result<(), Error> {
-        self.lazy_install_with_auto_dedupe(true).await
-    }
-
-    pub(crate) async fn lazy_install_with_auto_dedupe(&mut self, auto_dedupe: bool) -> Result<(), Error> {
         match self.import_install_state() {
             Ok(_) => {},
 
@@ -1629,7 +1626,6 @@ impl Project {
             prune_dev_dependencies: production,
             refresh_lockfile: false,
             silent_or_error: true,
-            skip_auto_dedupe: !auto_dedupe,
             mode: None,
             roots: install_roots,
             ..Default::default()
@@ -1665,13 +1661,7 @@ impl Project {
         Ok(())
     }
 
-    pub async fn run_install(&mut self, options: RunInstallOptions) -> Result<InstallResult, Error> {
-        // Useful for optimization purposes as we can reuse some information such as content flags.
-        // Discard errors; worst case scenario we just recompute the whole state from scratch.
-        if self.install_state.is_none() {
-            let _ = self.import_install_state();
-        }
-
+    pub async fn run_install(&mut self, mut options: RunInstallOptions) -> Result<InstallResult, Error> {
         let report = StreamReport::new(StreamReportConfig {
             include_version: true,
             json: options.json,
@@ -1679,84 +1669,124 @@ impl Project {
             ..StreamReportConfig::from_config(&self.config)
         });
 
-        let systems
-            = self.config.settings.supported_systems();
-
-        let background_writes
-            = Arc::new(http_npm::BackgroundWrites::new());
-
-        let drain_background_writes
-            = background_writes.clone();
-
-        let install_outcome = with_report_result(report, async {
+        with_report_result(report, async {
             let package_cache
                 = self.package_cache()?;
+            let mut install
+                = self.prepare_install(&options, &package_cache).await?;
 
-            let mut lockfile
-                = self.lockfile();
+            // Use the freshly resolved graph so versions introduced by this
+            // install can be reused. Focused installs preserve locked resolutions.
+            if self.config.settings.enable_auto_dedupe.value && !options.skip_auto_dedupe && options.roots.is_none() && !options.prune_dev_dependencies {
+                let dedupe_resolutions
+                    = crate::dedupe::prepare_highest_dedupe(&install.install_state, &[]);
 
-            async_section("Project validation", async {
-                let report_guard = current_report().await;
-                let Some(report) = report_guard.as_ref() else {
-                    return;
-                };
+                if dedupe_resolutions.is_empty() {
+                    install.install_state.full_dedupe_complete = true;
+                } else {
+                    options.enforced_resolutions.extend(dedupe_resolutions.into_iter()
+                        .map(|(descriptor, locator)| (descriptor, Some(locator))));
 
-                for workspace in self.workspaces.iter().skip(1) {
-                    if workspace.manifest.resolutions.is_empty() {
-                        continue;
-                    }
-
-                    // Island workspaces apply their resolutions to their island
-                    let in_island = self.config.settings.unstable_islands.values()
-                        .any(|island| island.workspaces.iter().any(|glob| glob.value.check(&workspace.name)));
-
-                    if in_island {
-                        continue;
-                    }
-
-                    report.warn(format!(
-                        "{}: Resolutions field will be ignored",
-                        workspace.pretty_name(),
-                    ));
-                }
-            }).await;
-
-            if let Err(Error::LockfileParseError(_)) = lockfile {
-                let lockfile_path
-                    = self.lockfile_path();
-
-                let lockfile_content = lockfile_path
-                    .fs_read_text()?;
-
-                if lockfile_content.contains("<<<<<<<") {
-                    if self.config.settings.enable_immutable_installs.value {
-                        return Err(Error::ImmutableLockfileAutofix);
-                    }
-
-                    let git_operation
-                        = detect_git_operation(&self.project_cwd)
-                            .await?
-                            .unwrap_or(GitOperation::Merge);
-
-                    ScriptEnvironment::new()?
-                        .with_cwd(self.project_cwd.clone())
-                        .run_exec("git", vec!["checkout", git_operation.true_theirs(), &lockfile_path.to_native_string()])
-                        .await?
-                        .ok()
-                        .map_err(|e| Error::LockfileAutofixGitError(e.to_string()))?;
-
-                    lockfile
-                        = self.lockfile();
+                    install = self.prepare_install_from_lockfile(&options, &package_cache, install.lockfile).await?;
+                    install.install_state.full_dedupe_complete = crate::dedupe::prepare_highest_dedupe(&install.install_state, &[]).is_empty();
                 }
             }
 
-            let mut install_context
+            install.link_and_build(self, &package_cache).await
+        }).await
+    }
+
+    /// Validate the project and prepare a resolved dependency graph. Lockfile
+    /// conflict recovery follows regular install behavior, but packages are not
+    /// linked and no installed state is attached. The caller owns the report
+    /// and cache across preparations, and decides whether to finish with
+    /// `link_and_build`.
+    pub(crate) async fn prepare_install(&mut self, options: &RunInstallOptions, package_cache: &CompositeCache) -> Result<Install, Error> {
+        // Reuse information such as content flags when available.
+        if self.install_state.is_none() {
+            let _ = self.import_install_state();
+        }
+
+        let mut lockfile
+            = self.lockfile();
+
+        async_section("Project validation", async {
+            let report_guard = current_report().await;
+            let Some(report) = report_guard.as_ref() else {
+                return;
+            };
+
+            for workspace in self.workspaces.iter().skip(1) {
+                if workspace.manifest.resolutions.is_empty() {
+                    continue;
+                }
+
+                // Island workspaces apply their resolutions to their island
+                let in_island = self.config.settings.unstable_islands.values()
+                    .any(|island| island.workspaces.iter().any(|glob| glob.value.check(&workspace.name)));
+
+                if in_island {
+                    continue;
+                }
+
+                report.warn(format!(
+                    "{}: Resolutions field will be ignored",
+                    workspace.pretty_name(),
+                ));
+            }
+        }).await;
+
+        if let Err(Error::LockfileParseError(_)) = lockfile {
+            let lockfile_path
+                = self.lockfile_path();
+
+            let lockfile_content = lockfile_path
+                .fs_read_text()?;
+
+            if lockfile_content.contains("<<<<<<<") {
+                if options.reject_lockfile_conflicts {
+                    return Err(lockfile.err().unwrap());
+                }
+                if self.config.settings.enable_immutable_installs.value {
+                    return Err(Error::ImmutableLockfileAutofix);
+                }
+
+                let git_operation
+                    = detect_git_operation(&self.project_cwd)
+                        .await?
+                        .unwrap_or(GitOperation::Merge);
+
+                ScriptEnvironment::new()?
+                    .with_cwd(self.project_cwd.clone())
+                    .run_exec("git", vec!["checkout", git_operation.true_theirs(), &lockfile_path.to_native_string()])
+                    .await?
+                    .ok()
+                    .map_err(|e| Error::LockfileAutofixGitError(e.to_string()))?;
+
+                lockfile
+                    = self.lockfile();
+            }
+        }
+
+        self.prepare_install_from_lockfile(options, package_cache, lockfile?).await
+    }
+
+    /// Resolve again from an in-memory lockfile, for example after changing
+    /// enforced resolutions. No installation artifacts are written here.
+    pub(crate) async fn prepare_install_from_lockfile(&self, options: &RunInstallOptions, package_cache: &CompositeCache, lockfile: Lockfile) -> Result<Install, Error> {
+        let systems
+            = self.config.settings.supported_systems();
+        let background_writes
+            = Arc::new(http_npm::BackgroundWrites::new());
+
+        let outcome = async {
+            let install_context
                 = InstallContext::default()
-                    .with_package_cache(Some(&package_cache))
+                    .with_package_cache(Some(package_cache))
                     .with_project(Some(self))
                     .set_check_checksums(options.check_checksums)
                     .set_check_resolutions(options.check_resolutions)
-                    .set_enforced_resolutions(options.enforced_resolutions)
+                    .set_enforced_resolutions(options.enforced_resolutions.clone())
                     .set_prune_dev_dependencies(options.prune_dev_dependencies)
                     .set_refresh_lockfile(options.refresh_lockfile)
                     .set_mode(options.mode)
@@ -1770,47 +1800,23 @@ impl Project {
                     .map(|w| w.descriptor())
                     .collect();
 
-            let make_manager = |context, lockfile| {
-                InstallManager::new()
-                    .with_context(context)
-                    .with_lockfile(lockfile)
-                    .with_previous_state(self.install_state.as_ref())
-                    .with_roots(roots.clone())
-                    .with_installed_workspaces(options.roots.clone())
-                    .with_constraints_check(!options.silent_or_error && !options.skip_constraints_check && self.config.settings.enable_constraints_checks.value && options.roots.is_none())
-                    .with_skip_link_step(options.mode == Some(InstallMode::UpdateLockfile))
-                    .with_skip_lockfile_update(options.roots.is_some())
-                    .with_force(options.force)
-            };
+            InstallManager::new()
+                .with_context(install_context)
+                .with_lockfile(lockfile)
+                .with_previous_state(self.install_state.as_ref())
+                .with_roots(roots)
+                .with_installed_workspaces(options.roots.clone())
+                .with_constraints_check(!options.silent_or_error && !options.skip_constraints_check && self.config.settings.enable_constraints_checks.value && options.roots.is_none())
+                .with_skip_link_step(options.mode == Some(InstallMode::UpdateLockfile))
+                .with_skip_lockfile_update(options.roots.is_some())
+                .with_force(options.force)
+                .resolve_and_fetch().await
+        }.await;
 
-            let mut install = make_manager(install_context.clone(), lockfile?)
-                .resolve_and_fetch().await?;
+        // Drain on success and failure so metadata writes cannot outlive the runtime.
+        background_writes.drain().await;
 
-            // Use the freshly resolved graph so versions introduced by this
-            // install can be reused. Focused installs preserve the lockfile's
-            // resolutions.
-            if self.config.settings.enable_auto_dedupe.value && !options.skip_auto_dedupe && options.roots.is_none() {
-                let dedupe_resolutions = crate::dedupe::prepare_highest_dedupe(&install.install_state, &[]);
-
-                if !dedupe_resolutions.is_empty() {
-                    install_context.enforced_resolutions = dedupe_resolutions.into_iter()
-                        .map(|(descriptor, locator)| (descriptor, Some(locator)))
-                        .collect();
-
-                    install = make_manager(install_context, install.lockfile)
-                        .resolve_and_fetch().await?;
-                }
-            }
-
-            let install_result = install.link_and_build(self).await?;
-
-            Ok(install_result)
-        }).await;
-
-        // Always drain so the cache writes don't outlive the runtime.
-        drain_background_writes.drain().await;
-
-        install_outcome
+        outcome
     }
 
     /// Parse the `@defaultTask` default tasks declared in the root taskfile.
