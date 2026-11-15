@@ -134,6 +134,14 @@
       "type": "boolean",
       "default": false
     },
+    "enableLazyInstalls": {
+      "_package": "@yarnpkg/core",
+      "title": "Define whether Yarn should automatically install dependencies before running commands.",
+      "description": "If false, commands use the existing installation without automatically installing or updating dependencies. Run `yarn install` explicitly when needed. You can also disable lazy installs by setting `YARN_ENABLE_LAZY_INSTALLS=0`, for example in a Renovate environment where you want full control over installation. This setting applies to both `all` and `focused` lazy install modes.",
+      "type": "boolean",
+      "default": true,
+      "examples": [false]
+    },
     "enableMirror": {
       "_package": "@yarnpkg/core",
       "title": "Define whether to mirror local cache entries into the global cache or not.",
