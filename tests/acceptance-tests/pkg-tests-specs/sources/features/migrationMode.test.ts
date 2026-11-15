@@ -1,7 +1,7 @@
 import {Filename, PortablePath, ppath, xfs} from '@yarnpkg/fslib';
 
 const {
-  tests: {setPackageWhitelist},
+  tests: {setPackageWhitelist, testIf},
 } = require(`pkg-tests-core`);
 
 const MIGRATION_LOCKFILE = `.yarn/ignore/migration/yarn.lock` as PortablePath;
@@ -375,12 +375,15 @@ describe(`Features`, () => {
     );
 
     describe(`Yarn Switch`, () => {
+      // These tests run the fake Yarn releases served by the test registry,
+      // which Windows can't execute (see `runnableFakeYarnRelease`)
       const switchManifest = {
         packageManager: `yarn@6.0.0`,
         packageManagerMigration: `yarn@6.1.0`,
       };
 
-      test(
+      testIf(
+        `runnableFakeYarnRelease`,
         `it should run the migration version once the project is linked to it`,
         makeTemporaryEnv(switchManifest, async ({runSwitch}) => {
           await expect(runSwitch(`--version`)).resolves.toMatchObject({
@@ -401,7 +404,8 @@ describe(`Features`, () => {
         }),
       );
 
-      test(
+      testIf(
+        `runnableFakeYarnRelease`,
         `it should run the mainstream version when the migration mode is explicitly disabled`,
         makeTemporaryEnv(switchManifest, async ({runSwitch}) => {
           await runSwitch(`switch`, `link`, `--migration`);
@@ -417,7 +421,8 @@ describe(`Features`, () => {
         }),
       );
 
-      test(
+      testIf(
+        `runnableFakeYarnRelease`,
         `it should unlink the migration once the packageManagerMigration field is removed`,
         makeTemporaryEnv(switchManifest, async ({path, runSwitch}) => {
           await runSwitch(`switch`, `link`, `--migration`);
@@ -441,7 +446,8 @@ describe(`Features`, () => {
         }),
       );
 
-      test(
+      testIf(
+        `runnableFakeYarnRelease`,
         `it should refuse to link a project without a packageManagerMigration field`,
         makeTemporaryEnv({
           packageManager: `yarn@6.0.0`,
