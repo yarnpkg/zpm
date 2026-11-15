@@ -208,9 +208,10 @@
       "description": "Proxy to use when making an HTTP request"
     },
     "httpTimeout": {
-      "type": "u64",
-      "description": "Amount of time to wait in milliseconds before cancelling pending HTTP requests",
-      "default": 60000
+      "type": "std::time::Duration",
+      "unit": "ms",
+      "description": "Amount of time to wait before cancelling pending HTTP requests. Values without unit are in milliseconds, as in Yarn 4.",
+      "default": "1m"
     },
     "httpsCaFilePath": {
       "type": ["zpm_utils::Path", "null"],
@@ -724,9 +725,10 @@
       "default": false
     },
     "slowNetworkTimeout": {
-      "type": "u64",
-      "description": "The timeout in milliseconds to wait for a network request to complete before considering it slow",
-      "default": 5000
+      "type": "std::time::Duration",
+      "unit": "ms",
+      "description": "The time to wait for a network request to complete before considering it slow. Values without unit are in milliseconds.",
+      "default": "5s"
     },
     "supportedArchitectures": {
       "type": "array",

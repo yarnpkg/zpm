@@ -207,10 +207,20 @@
     },
     "httpTimeout": {
       "_package": "@yarnpkg/core",
-      "title": "Amount of time to wait in milliseconds before cancelling pending HTTP requests.",
-      "type": "integer",
-      "default": 60000,
-      "minimum": 0
+      "title": "Amount of time to wait before cancelling pending HTTP requests.",
+      "description": "The duration accepts the `ms`, `s`, `m`, `h`, `d`, and `w` units; values without unit are in milliseconds (as in Yarn 4), so `60000` is one minute.",
+      "type": "string",
+      "default": "1m",
+      "_examples": [
+        {
+          "description": "Give up on requests after thirty seconds.",
+          "value": "30s"
+        },
+        {
+          "description": "Be more patient on slow networks.",
+          "value": "5m"
+        }
+      ]
     },
     "httpsCaFilePath": {
       "_package": "@yarnpkg/core",
@@ -1395,20 +1405,19 @@
     "slowNetworkTimeout": {
       "_package": "@yarnpkg/core",
       "title": "Timeout before a network request is considered slow.",
-      "description": "The value is expressed in milliseconds and controls when Yarn reports a network request as slow.",
-      "type": "integer",
-      "default": 5000,
+      "description": "Controls when Yarn reports a network request as slow. Values without unit are in milliseconds.",
+      "type": "string",
+      "default": "5s",
       "_examples": [
         {
           "description": "Report slow requests after five seconds.",
-          "value": 5000
+          "value": "5s"
         },
         {
           "description": "Use a more patient threshold on slow networks.",
-          "value": 30000
+          "value": "30s"
         }
-      ],
-      "minimum": 0
+      ]
     },
     "unstableIslands": {
       "_package": "@yarnpkg/core",
