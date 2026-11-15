@@ -152,6 +152,8 @@ describe(`Features`, () => {
       `one-range-dep/no-deps`,
       `one-range-dep@1.0.0/no-deps`,
       `one-range-dep@^1.0.0/no-deps`,
+      `one-range-dep@npm:1.0.0/no-deps`,
+      `one-range-dep@npm:^1.0.0/no-deps`,
     ])(
       `it should only override dependencies of the matching parent with %s`,
       resolution => makeTemporaryEnv(
@@ -224,6 +226,112 @@ describe(`Features`, () => {
           });
         },
       ),
+    );
+
+    test.each([
+      `no-deps@npm:1.0.0`,
+      `no-deps@npm:^1.0.0`,
+    ])(
+      `it should accept the npm: prefix that Yarn 4 used to write in descriptor selectors (%s)`,
+      resolution => makeTemporaryEnv(
+        {
+          dependencies: {
+            [`one-fixed-dep`]: `1.0.0`,
+            [`one-range-dep`]: `1.0.0`,
+            [`no-deps`]: `1.1.0`,
+          },
+          resolutions: {
+            [resolution]: `2.0.0`,
+          },
+        },
+        async ({path, run, source}) => {
+          await run(`install`);
+
+          await expect(source(`require('no-deps')`)).resolves.toMatchObject({
+            name: `no-deps`,
+            version: `1.1.0`,
+          });
+
+          // Selectors match the declared range, not the resolved version
+          await expect(source(`require('one-fixed-dep')`)).resolves.toMatchObject({
+            dependencies: {
+              [`no-deps`]: {
+                version: resolution === `no-deps@npm:1.0.0` ? `2.0.0` : `1.0.0`,
+              },
+            },
+          });
+
+          await expect(source(`require('one-range-dep')`)).resolves.toMatchObject({
+            dependencies: {
+              [`no-deps`]: {
+                version: resolution === `no-deps@npm:^1.0.0` ? `2.0.0` : `1.1.0`,
+              },
+            },
+          });
+        },
+      )(),
+    );
+
+    test.each([
+      [`@scoped/no-deps`, `1.0.0`, `@scoped/no-deps@npm:1.0.0`, `2.0.0`, `2.0.0`],
+      [`@scoped/no-deps`, `npm:1.0.0`, `@scoped/no-deps@1.0.0`, `2.0.0`, `2.0.0`],
+      [`@scoped/no-deps`, `npm:1.0.0`, `@scoped/no-deps@npm:1.0.0`, `2.0.0`, `2.0.0`],
+      [`no-deps`, `latest`, `no-deps@latest`, `1.0.0`, `1.0.0`],
+      [`no-deps`, `latest`, `no-deps@npm:latest`, `1.0.0`, `1.0.0`],
+      [`no-deps-alias`, `npm:no-deps@1.0.0`, `no-deps-alias@npm:no-deps@1.0.0`, `npm:no-deps@2.0.0`, `2.0.0`],
+    ])(
+      `it should match %s@%s with the %s selector`,
+      (name, range, resolution, replacement, expectedVersion) => makeTemporaryEnv(
+        {
+          dependencies: {
+            [name]: range,
+          },
+          resolutions: {
+            [resolution]: replacement,
+          },
+        },
+        async ({path, run, source}) => {
+          await run(`install`);
+
+          await expect(source(`require('${name}')`)).resolves.toMatchObject({
+            version: expectedVersion,
+          });
+        },
+      )(),
+    );
+
+    test.each([
+      [`no-deps@workspace:^1.0.0`, `selectors only support semver ranges, dist-tags and 'npm:' aliases (got 'workspace:^1.0.0'); write 'no-deps' to override every version of the package`],
+      [`no-deps@patch:no-deps@npm%3A1.0.0#~/.yarn/patches/no-deps.patch`, `selectors can't reference 'patch:' ranges; use the range the dependency is declared with instead, e.g. 'no-deps@1.0.0'`],
+      [`one-fixed-dep@latest/no-deps`, `the parent range must be a semver range (got 'latest'); write it as 'one-fixed-dep@<semver range>/no-deps', or 'one-fixed-dep/no-deps' to match every version of the parent`],
+      [`a/one-fixed-dep/no-deps`, `'one-fixed-dep/no-deps' isn't a valid package name; selectors are either 'pkg', 'pkg@range', 'parent/pkg', or 'parent@range/pkg' (a single parent level, no nested 'a/b/c' chains)`],
+      [`one-fixed-dep/**/no-deps`, `glob patterns aren't supported (only a leading '**/' is tolerated); reference the packages by name instead, e.g. 'parent/child' or 'child'`],
+    ])(
+      `it should report a helpful error for the unsupported %s selector`,
+      (resolution, message) => makeTemporaryEnv(
+        {
+          dependencies: {
+            [`one-fixed-dep`]: `1.0.0`,
+          },
+          resolutions: {
+            [resolution]: `2.0.0`,
+          },
+        },
+        async ({path, run, source}) => {
+          let error;
+          try {
+            await run(`install`);
+          } catch (caught) {
+            error = caught;
+          }
+
+          expect(error).toBeDefined();
+          expect(error.stdout).toContain(`invalid resolution selector '${resolution}': ${message}`);
+
+          // The error location must point at the offending key, not at its value (line 6 of the manifest)
+          expect(error.stdout).toContain(`at line 6 column`);
+        },
+      )(),
     );
 
     test(
