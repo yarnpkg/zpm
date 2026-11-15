@@ -120,6 +120,61 @@ describe(`Commands`, () => {
     );
 
     test(
+      `it should apply patches to files whose names git quotes`,
+      makeTemporaryEnv({
+        dependencies: {
+          [`special-names`]: `file:./special-names`,
+        },
+      }, async ({path, run, source}) => {
+        // Git quotes the names containing non-ASCII characters (unless
+        // core.quotePath is disabled), double quotes, backslashes, and control
+        // characters. Windows forbids double quotes and control characters in
+        // file names, and backslashes are path separators there. It doesn't
+        // quote the names containing spaces, but follows them with a tab.
+        const names = [`café.js`, `with space.js`];
+        if (process.platform !== `win32`)
+          names.push(`with "quote".js`, `tab\there.js`, `back\\slash.js`);
+
+        const packagePath = ppath.join(path, `special-names`);
+        await xfs.mkdirPromise(packagePath);
+        await xfs.writeJsonPromise(ppath.join(packagePath, Filename.manifest), {name: `special-names`, version: `1.0.0`});
+
+        for (const name of names)
+          await xfs.writeFilePromise(ppath.join(packagePath, name as Filename), `module.exports = 'original';\n`);
+
+        await run(`install`);
+
+        const {stdout} = await run(`patch`, `special-names`, `--json`);
+        const {path: updateFolderN} = JSON.parse(stdout);
+
+        const updateFolder = npath.toPortablePath(updateFolderN);
+
+        for (const name of names)
+          await xfs.writeFilePromise(ppath.join(updateFolder, name as Filename), `module.exports = 'patched';\n`);
+
+        await xfs.writeFilePromise(ppath.join(updateFolder, `new café.js`), `module.exports = 'created';\n`);
+
+        await run(`patch-commit`, `-s`, npath.fromPortablePath(updateFolder));
+
+        const patchFolder = ppath.join(path, `.yarn/patches`);
+        const patchFiles = await xfs.readdirPromise(patchFolder);
+        expect(patchFiles).toHaveLength(1);
+
+        const patch = await xfs.readFilePromise(ppath.join(patchFolder, patchFiles[0]!), `utf8`);
+
+        expect(patch).toContain(`+++ "b/caf\\303\\251.js"`);
+        expect(patch).toContain(`+++ "b/new caf\\303\\251.js"\t`);
+
+        await run(`install`);
+
+        for (const name of names)
+          await expect(source(`require(${JSON.stringify(`special-names/${name}`)})`)).resolves.toEqual(`patched`);
+
+        await expect(source(`require('special-names/new café.js')`)).resolves.toEqual(`created`);
+      }),
+    );
+
+    test(
       `it should replace the patch when calling patch-commit again, not wrap it into another patch layer`,
       makeTemporaryEnv({
         dependencies: {
