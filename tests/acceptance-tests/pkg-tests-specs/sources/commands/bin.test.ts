@@ -1,4 +1,4 @@
-import {npath, ppath, xfs, Filename} from '@yarnpkg/fslib';
+import {npath, ppath, xfs, Filename, PortablePath} from '@yarnpkg/fslib';
 
 const configs = [{
   nodeLinker: `pnp`,
@@ -7,6 +7,12 @@ const configs = [{
 }, {
   nodeLinker: `node-modules`,
 }];
+
+// Yarn prints the native form of paths but keeps forward slashes as separators,
+// including on Windows (`C:/Users/...`)
+const toPrintedPath = (p: PortablePath) => {
+  return npath.fromPortablePath(p).replace(/\\/g, `/`);
+};
 
 const HAS_BIN_ENTRIES_BINARIES = [
   `has-bin-entries`,
@@ -200,7 +206,7 @@ describe(`Commands`, () => {
             }
 
             expect(entries.find(entry => entry.name === `my-package-bin`).path).toEqual(
-              npath.join(npath.fromPortablePath(path), `self-bin.js`),
+              toPrintedPath(ppath.join(path, `self-bin.js`)),
             );
           }),
         );
@@ -218,7 +224,7 @@ describe(`Commands`, () => {
 
             await expect(run(`bin`, `my-package-bin`)).resolves.toMatchObject({
               code: 0,
-              stdout: `${npath.join(npath.fromPortablePath(path), `self-bin.js`)}\n`,
+              stdout: `${toPrintedPath(ppath.join(path, `self-bin.js`))}\n`,
             });
           }),
         );
