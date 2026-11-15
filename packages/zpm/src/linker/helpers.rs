@@ -84,26 +84,31 @@ pub fn fs_remove_nm(nm_path: Path) -> Result<(), Error> {
 }
 
 pub fn fs_extract_archive(destination: &Path, package_data: &PackageData) -> Result<bool, Error> {
-    fs_extract_archive_impl(destination, package_data, ExtractMode::Classic)
+    fs_extract_archive_impl(destination, package_data, ExtractMode::Classic, false)
 }
 
 /// Like [`fs_extract_archive`] but hardlinks each file through a
 /// content-addressed index at `index_root` so identical contents share
 /// one inode across packages and projects. Modified hardlinks are
 /// detected via the mtime stamp and repaired in place.
-pub fn fs_extract_archive_with_cas(destination: &Path, package_data: &PackageData, index_root: &Path) -> Result<bool, Error> {
-    fs_extract_archive_impl(destination, package_data, ExtractMode::Cas { index_root })
+///
+/// `skip_node_modules` leaves out the archive's own `node_modules`, for
+/// a destination whose `node_modules` holds nested packages instead.
+pub fn fs_extract_archive_with_cas(destination: &Path, package_data: &PackageData, index_root: &Path, skip_node_modules: bool) -> Result<bool, Error> {
+    fs_extract_archive_impl(destination, package_data, ExtractMode::Cas { index_root }, skip_node_modules)
 }
 
 /// Project-local dedup with no side-channel index. The first
 /// destination for a given content hash is written normally and
 /// recorded in the index; later destinations hardlink to it.
+/// `skip_node_modules` is as for [`fs_extract_archive_with_cas`].
 pub fn fs_extract_archive_with_local_dedup(
     destination: &Path,
     package_data: &PackageData,
     local_index: &LocalDedupIndex,
+    skip_node_modules: bool,
 ) -> Result<bool, Error> {
-    fs_extract_archive_impl(destination, package_data, ExtractMode::LocalDedup { local_index })
+    fs_extract_archive_impl(destination, package_data, ExtractMode::LocalDedup { local_index }, skip_node_modules)
 }
 
 const DEDUP_SHARDS: usize = 64;
@@ -154,7 +159,7 @@ enum ExtractMode<'a> {
     LocalDedup { local_index: &'a LocalDedupIndex },
 }
 
-fn fs_extract_archive_impl(destination: &Path, package_data: &PackageData, mode: ExtractMode<'_>) -> Result<bool, Error> {
+fn fs_extract_archive_impl(destination: &Path, package_data: &PackageData, mode: ExtractMode<'_>, skip_node_modules: bool) -> Result<bool, Error> {
     let ready_path = destination
         .with_join_str(".ready");
 
@@ -179,6 +184,7 @@ fn fs_extract_archive_impl(destination: &Path, package_data: &PackageData, mode:
         = zpm_formats::zip::entries_from_zip(&package_bytes)?
             .into_iter()
             .strip_path_prefix(&package_subpath)
+            .filter(|entry| !skip_node_modules || entry.name.components().next() != Some("node_modules"))
             .collect::<Vec<_>>();
 
     for entry in entries {
