@@ -447,29 +447,7 @@ impl Generator {
                 let merge_expr
                     = format!("MergeSettings::merge(context, {user_expr}, project.{lc_snake_name}, {default})");
 
-                if struct_name == &self.root_name {
-                    writeln!(writer, "            {lc_snake_name}: {{").unwrap();
-                    writeln!(writer, "                let merged_value").unwrap();
-                    writeln!(writer, "                    = {merge_expr};").unwrap();
-                    writeln!(writer).unwrap();
-                    writeln!(writer, "                let env_value").unwrap();
-                    writeln!(writer, "                    = context.env.get(\"YARN_{}\");", name.to_case(Case::UpperSnake)).unwrap();
-
-                    for alias in &field.aliases {
-                        writeln!(writer, "                let env_value = env_value").unwrap();
-                        writeln!(writer, "                    .or_else(|| context.env.get(\"YARN_{}\"));", alias.to_case(Case::UpperSnake)).unwrap();
-                    }
-
-                    writeln!(writer).unwrap();
-                    writeln!(writer, "                if let Some(env_value) = env_value {{").unwrap();
-                    writeln!(writer, "                    MergeSettings::from_env_string(env_value, Some(merged_value)).unwrap()").unwrap();
-                    writeln!(writer, "                }} else {{").unwrap();
-                    writeln!(writer, "                    merged_value").unwrap();
-                    writeln!(writer, "                }}").unwrap();
-                    writeln!(writer, "            }},").unwrap();
-                } else {
-                    writeln!(writer, "            {lc_snake_name}: {merge_expr},").unwrap();
-                }
+                writeln!(writer, "            {lc_snake_name}: {merge_expr},").unwrap();
             }
 
             writeln!(writer, "        }}").unwrap();
@@ -549,6 +527,49 @@ impl Generator {
             }
 
             writeln!(writer, "        ]").unwrap();
+            writeln!(writer, "    }}").unwrap();
+            writeln!(writer).unwrap();
+            writeln!(writer, "    /// Overrides the merged settings with the values from the `YARN_*` environment variables").unwrap();
+            writeln!(writer, "    fn apply_env_overrides(self, context: &ConfigurationContext) -> Result<Self, ConfigurationError> {{").unwrap();
+            writeln!(writer, "        let Self {{").unwrap();
+
+            for field in fields {
+                writeln!(writer, "            {},", field.name.to_case(Case::Snake)).unwrap();
+            }
+
+            writeln!(writer, "        }} = self;").unwrap();
+
+            for field in fields {
+                let name = &field.name;
+
+                let lc_snake_name
+                    = name.to_case(Case::Snake);
+
+                writeln!(writer).unwrap();
+                writeln!(writer, "        let env_value").unwrap();
+                writeln!(writer, "            = context.env.get_key_value(\"YARN_{}\");", name.to_case(Case::UpperSnake)).unwrap();
+
+                for alias in &field.aliases {
+                    writeln!(writer, "        let env_value = env_value").unwrap();
+                    writeln!(writer, "            .or_else(|| context.env.get_key_value(\"YARN_{}\"));", alias.to_case(Case::UpperSnake)).unwrap();
+                }
+
+                writeln!(writer).unwrap();
+                writeln!(writer, "        let {lc_snake_name} = match env_value {{").unwrap();
+                writeln!(writer, "            Some((env_name, env_value)) => MergeSettings::from_env_string(env_value, Some({lc_snake_name}))").unwrap();
+                writeln!(writer, "                .map_err(|error| env_override_error(env_name, \"{name}\", error))?,").unwrap();
+                writeln!(writer, "            None => {lc_snake_name},").unwrap();
+                writeln!(writer, "        }};").unwrap();
+            }
+
+            writeln!(writer).unwrap();
+            writeln!(writer, "        Ok(Self {{").unwrap();
+
+            for field in fields {
+                writeln!(writer, "            {},", field.name.to_case(Case::Snake)).unwrap();
+            }
+
+            writeln!(writer, "        }})").unwrap();
             writeln!(writer, "    }}").unwrap();
             writeln!(writer, "}}").unwrap();
         }
