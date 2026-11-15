@@ -20,7 +20,7 @@ Here's what happens under the hood when you run a Yarn command:
 5. It executes the cached binary, passing along any CLI arguments you provided.
 
 :::note
-Yarn Switch is very similar in idea to [Corepack](https://www.google.com/search?q=corepack&oq=corepack&gs_lcrp=EgZjaHJvbWUyCQgAEEUYORiABDIHCAEQABiABDIHCAIQABiABDIHCAMQABiABDIGCAQQRRhBMgYIBRBFGD0yBggGEEUYPDIGCAcQRRhB0gEIMTAzM2oxajSoAgCwAgE&sourceid=chrome&ie=UTF-8), except it's officially maintained by the Yarn team and is designed specifically for Yarn.
+Yarn Switch is very similar in idea to [Corepack](https://github.com/nodejs/corepack), except it's officially maintained by the Yarn team and is designed specifically for Yarn.
 
 Given that the Node.js TSC [decided to phase out Corepack into Node.js](https://github.com/nodejs/TSC/pull/1697#issuecomment-2737093616), we decided to refocus our efforts, and now recommend using Yarn Switch over Corepack when possible.
 :::

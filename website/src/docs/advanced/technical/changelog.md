@@ -5,4 +5,4 @@ title: Changelog
 description: All changes, version by version.
 ---
 
-See the [CHANGELOG on GitHub](https://github.com/yarnpkg/zpm/blob/main/CHANGELOG.md) for the full list of changes.
+See the [releases on GitHub](https://github.com/yarnpkg/zpm/releases) for the full list of changes.
