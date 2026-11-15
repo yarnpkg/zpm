@@ -42,12 +42,19 @@ impl Indent {
         }
     }
 
+    /**
+     * Return the indentation of a value nested one level deeper (for example
+     * the value of a property whose key is indented by `child_indent`). The
+     * step between two levels is the one between `self_indent` and
+     * `child_indent`; a missing `self_indent` means the object starts at the
+     * beginning of the line.
+     */
     pub fn increment(&self) -> Self {
         let self_indent
             = self.child_indent;
 
         let child_indent = match self.child_indent {
-            Some(i) => Some(i + self.self_indent.unwrap_or(i)),
+            Some(i) => Some(i + i.saturating_sub(self.self_indent.unwrap_or(0))),
             None => None,
         };
 
