@@ -50,6 +50,8 @@ Since your CI workflows will likely report errors due to the automatic enablemen
 YARN_ENABLE_MIGRATION_MODE=0 yarn install
 ```
 
+Setting `YARN_ENABLE_MIGRATION_MODE=0` makes Yarn Switch run the version from the `packageManager` field for this command only, so the mainstream lockfile is updated by the release everyone else uses.
+
 ### Zero-installs
 
 You'll notice an issue when running installs on [zero-install](/concepts/zero-installs)-enabled repositories: Yarn will update the `.pnp.cjs` and associated files, but **you shouldn't commit those changes**.
