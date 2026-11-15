@@ -1,4 +1,15 @@
-import {npath, ppath} from '@yarnpkg/fslib';
+import {npath, ppath, xfs} from '@yarnpkg/fslib';
+
+// On Windows, Node always forwards USERPROFILE to child processes when it's
+// missing from their environment, so we set the variables to empty values,
+// which Yarn ignores.
+const noHomeEnv = process.platform === `win32` ? {
+  HOME: ``,
+  USERPROFILE: ``,
+} : {
+  HOME: undefined,
+  USERPROFILE: undefined,
+};
 
 describe(`Commands`, () => {
   describe(`switch`, () => {
@@ -37,27 +48,36 @@ describe(`Commands`, () => {
     );
 
     test(
-      `it should download and run yarn without a home folder when YARNSW_CACHE_PATH is set`,
+      `it should install yarn into YARNSW_CACHE_PATH without a home folder`,
       makeTemporaryEnv({
         packageManager: `yarn@6.0.0`,
       }, async ({path, runSwitch}) => {
-        await expect(runSwitch(`--version`, {
-          env: {
-            HOME: undefined,
-            USERPROFILE: undefined,
-            YARNSW_CACHE_PATH: npath.fromPortablePath(ppath.join(path, `switch-cache`)),
-          },
-        })).resolves.toMatchObject({
+        const cachePath = ppath.join(path, `switch-cache`);
+        const env = {...noHomeEnv, YARNSW_CACHE_PATH: npath.fromPortablePath(cachePath)};
+
+        // Doesn't execute the downloaded release, which is a shell script
+        await expect(runSwitch(`switch`, `cache`, `--install`, {env})).resolves.toMatchObject({
           code: 0,
-          stdout: expect.stringContaining(`Fake Yarn 6.0.0`),
         });
 
-        await expect(runSwitch(`switch`, `--version`, {
-          env: {
-            HOME: undefined,
-            USERPROFILE: undefined,
-          },
-        })).resolves.toMatchObject({
+        await expect(runSwitch(`switch`, `cache`, `--check`, `6.0.0`, {env})).resolves.toMatchObject({
+          code: 0,
+        });
+
+        await expect(xfs.readdirPromise(cachePath)).resolves.toHaveLength(1);
+      }),
+    );
+
+    test(
+      `it should run yarn without a home folder`,
+      makeTemporaryEnv({}, async ({path, runSwitch}) => {
+        // Runs the local yarn-bin binary the test environment sets as default
+        await expect(runSwitch(`--version`, {env: noHomeEnv})).resolves.toMatchObject({
+          code: 0,
+          stdout: expect.stringMatching(/^\d+\.\d+\.\d+/),
+        });
+
+        await expect(runSwitch(`switch`, `--version`, {env: noHomeEnv})).resolves.toMatchObject({
           code: 0,
           stdout: expect.stringMatching(/^\d+\.\d+\.\d+/),
         });
