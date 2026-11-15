@@ -266,7 +266,9 @@ function majorCheck(test: (major: number) => boolean) {
 }
 
 export const FEATURE_CHECKS = {
-  forEachWorktree: majorCheck(major => major <= 4),
+  // Berry gates `yarn workspaces foreach --worktree` to 4.x and older; zpm
+  // supports it again, so it's available whatever the major under test
+  forEachWorktree: true,
   forEachVerboseDone: majorCheck(major => major >= 5),
   jsonLockfile: majorCheck(major => major >= 5),
   prologConstraints: majorCheck(major => major <= 4),
