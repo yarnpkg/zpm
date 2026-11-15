@@ -422,7 +422,37 @@ impl<'a, 'b> Hoister<'a, 'b> {
             }
 
             self.has_changed = false;
-            self.process_node(0);
+            self.process_tree();
+        }
+    }
+
+    /// Processes the nodes depth-first, parents before their children. The
+    /// traversal uses an explicit stack rather than recursion, as the depth
+    /// of the tree is only bounded by the length of the dependency chains.
+    fn process_tree(&mut self) {
+        enum Step {
+            Enter(usize),
+            Leave,
+        }
+
+        let mut steps
+            = vec![Step::Enter(0)];
+
+        while let Some(step) = steps.pop() {
+            match step {
+                Step::Enter(node_idx) => {
+                    let node_children
+                        = self.process_node(node_idx);
+
+                    steps.push(Step::Leave);
+                    steps.extend(node_children.into_iter().rev().map(Step::Enter));
+                },
+
+                Step::Leave => {
+                    //self.seen[node_idx] = false;
+                    self.stack.pop();
+                },
+            }
         }
     }
 
@@ -430,7 +460,9 @@ impl<'a, 'b> Hoister<'a, 'b> {
         println!("{}{}", "  ".repeat(self.stack.len()), message);
     }
 
-    fn process_node(&mut self, node_idx: usize) {
+    /// Hoists what can be hoisted into the given node, and returns its
+    /// children (which must be processed next).
+    fn process_node(&mut self, node_idx: usize) -> Vec<usize> {
         if self.print_logs {
             self.print(&format!(
                 "Attempting to hoist dependencies into {}",
@@ -823,11 +855,6 @@ impl<'a, 'b> Hoister<'a, 'b> {
             }
         }
 
-        for child_idx in node_children {
-            self.process_node(child_idx);
-        }
-
-        //self.seen[node_idx] = false;
-        self.stack.pop();
+        node_children
     }
 }
