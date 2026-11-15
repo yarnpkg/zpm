@@ -245,6 +245,114 @@ describe(`Commands`, () => {
             });
           }),
         );
+
+        // Yarn 4 lets the dependency's binary override the workspace's own one
+        // when they share a name; zpm deliberately does the opposite, so that a
+        // workspace always runs the binary it declares itself.
+        test(
+          `it should let the workspace's own binary win over a dependency's binary of the same name`,
+          makeTemporaryEnv({
+            name: `my-package`,
+            bin: {
+              [`has-bin-entries`]: `./self-bin.js`,
+            },
+            dependencies: {
+              [`has-bin-entries`]: `1.0.0`,
+            },
+          }, config, async ({path, run, source}) => {
+            await xfs.writeFilePromise(ppath.join(path, `self-bin.js`), `console.log('from the workspace');\n`);
+            await run(`install`);
+
+            const selfBinPath = toPrintedPath(ppath.join(path, `self-bin.js`));
+
+            await expect(run(`bin`, `has-bin-entries`)).resolves.toMatchObject({
+              code: 0,
+              stdout: `${selfBinPath}\n`,
+            });
+
+            const {stdout: listStdout} = await run(`bin`);
+            expect(listStdout.split(`\n`).filter(line => line === `has-bin-entries`)).toHaveLength(1);
+
+            const {stdout: verboseStdout} = await run(`bin`, `-v`);
+            expect(verboseStdout.split(`\n`).filter(line => line.startsWith(`has-bin-entries `))).toEqual([
+              expect.stringMatching(/^has-bin-entries +my-package@workspace:my-package$/),
+            ]);
+
+            const {stdout: jsonStdout} = await run(`bin`, `--json`);
+            expect(parseNdjson(jsonStdout).filter(entry => entry.name === `has-bin-entries`)).toEqual([{
+              name: `has-bin-entries`,
+              source: `my-package`,
+              path: selfBinPath,
+            }]);
+
+            // The fixture's binary would print its arguments back
+            await expect(run(`run`, `has-bin-entries`, `from the dependency`)).resolves.toMatchObject({
+              code: 0,
+              stdout: `from the workspace\n`,
+            });
+
+            await expect(run(`has-bin-entries`, `from the dependency`)).resolves.toMatchObject({
+              code: 0,
+              stdout: `from the workspace\n`,
+            });
+          }),
+        );
+
+        // Binaries are sorted by name using a plain byte-wise comparison (not a
+        // locale-aware one): uppercase letters come before `_`, which comes
+        // before lowercase letters, regardless of which package provides each
+        // binary or in which order they're declared.
+        test(
+          `it should sort the binaries by name (byte order), regardless of their source or declaration order`,
+          makeTemporaryEnv({
+            name: `my-package`,
+            bin: {
+              [`zzz-self`]: `./self-bin.js`,
+              [`m-self`]: `./self-bin.js`,
+              [`abc-self`]: `./self-bin.js`,
+              [`_under-self`]: `./self-bin.js`,
+              [`B-upper-self`]: `./self-bin.js`,
+            },
+            dependencies: {
+              [`no-deps-bins`]: `1.0.0`,
+              [`has-bin-entries`]: `1.0.0`,
+            },
+          }, config, async ({path, run, source}) => {
+            await setupSelfBin(npath.fromPortablePath(path));
+            await run(`install`);
+
+            const expectedOrder: Array<[string, string]> = [
+              [`B-upper-self`, `my-package@workspace:my-package`],
+              [`_under-self`, `my-package@workspace:my-package`],
+              [`abc-self`, `my-package@workspace:my-package`],
+              [`has-bin-entries`, `has-bin-entries@npm:1.0.0`],
+              [`has-bin-entries-get-pwd`, `has-bin-entries@npm:1.0.0`],
+              [`has-bin-entries-with-exit-code`, `has-bin-entries@npm:1.0.0`],
+              [`has-bin-entries-with-relative-require`, `has-bin-entries@npm:1.0.0`],
+              [`has-bin-entries-with-require`, `has-bin-entries@npm:1.0.0`],
+              [`m-self`, `my-package@workspace:my-package`],
+              [`no-deps-bins`, `no-deps-bins@npm:1.0.0`],
+              [`zzz-self`, `my-package@workspace:my-package`],
+            ];
+
+            await expect(run(`bin`)).resolves.toMatchObject({
+              code: 0,
+              stdout: expectedOrder.map(([name]) => `${name}\n`).join(``),
+            });
+
+            const width = `has-bin-entries-with-relative-require`.length;
+
+            await expect(run(`bin`, `-v`)).resolves.toMatchObject({
+              code: 0,
+              stdout: expectedOrder.map(([name, locator]) => `${name.padEnd(width)}   ${locator}\n`).join(``),
+            });
+
+            const {stdout: jsonStdout} = await run(`bin`, `--json`);
+            expect(parseNdjson(jsonStdout).map(entry => [entry.name, entry.source])).toEqual(expectedOrder.map(([name, locator]) => {
+              return [name, locator.replace(/@(npm|workspace):.*$/, ``)];
+            }));
+          }),
+        );
       });
     }
   });
