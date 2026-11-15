@@ -474,6 +474,121 @@ describe(`Features`, () => {
       );
     });
 
+    // Like in Yarn 4/5, a value without unit is a number of minutes (1440 is
+    // one day); release-date-hours@1.1.0 was published two hours ago, so it
+    // only passes a gate that would read the value as seconds (24 minutes)
+    describe(`values without unit`, () => {
+      test(
+        `it should read a YAML number from .yarnrc.yml as minutes`,
+        makeTemporaryEnv({
+          dependencies: {[`release-date-hours`]: `^1.0.0`},
+        }, {
+          npmMinimalAgeGate: undefined,
+        }, async ({path, run, source}) => {
+          await writeFile(`${path}/.yarnrc.yml`, `npmMinimalAgeGate: 1440\n`);
+
+          await run(`install`);
+
+          await expect(source(`require('release-date-hours/package.json')`)).resolves.toMatchObject({
+            name: `release-date-hours`,
+            version: `1.0.0`,
+          });
+        }),
+      );
+
+      test(
+        `it should read a numeric string from .yarnrc.yml as minutes`,
+        makeTemporaryEnv({
+          dependencies: {[`release-date-hours`]: `^1.0.0`},
+        }, {
+          npmMinimalAgeGate: undefined,
+        }, async ({path, run, source}) => {
+          await writeFile(`${path}/.yarnrc.yml`, `npmMinimalAgeGate: "1440"\n`);
+
+          await run(`install`);
+
+          await expect(source(`require('release-date-hours/package.json')`)).resolves.toMatchObject({
+            name: `release-date-hours`,
+            version: `1.0.0`,
+          });
+        }),
+      );
+
+      test(
+        `it should read the environment variable as minutes`,
+        makeTemporaryEnv({
+          dependencies: {[`release-date-hours`]: `^1.0.0`},
+        }, {
+          npmMinimalAgeGate: `1440`,
+        }, async ({run, source}) => {
+          await run(`install`);
+
+          await expect(source(`require('release-date-hours/package.json')`)).resolves.toMatchObject({
+            name: `release-date-hours`,
+            version: `1.0.0`,
+          });
+        }),
+      );
+
+      test(
+        `it should still read values with an explicit unit in that unit`,
+        makeTemporaryEnv({
+          dependencies: {[`release-date-hours`]: `^1.0.0`},
+        }, {
+          npmMinimalAgeGate: `1440s`,
+        }, async ({run, source}) => {
+          await run(`install`);
+
+          await expect(source(`require('release-date-hours/package.json')`)).resolves.toMatchObject({
+            name: `release-date-hours`,
+            version: `1.1.0`,
+          });
+        }),
+      );
+
+      test(
+        `it should read a YAML number in packageRules as minutes`,
+        makeTemporaryEnv({
+          dependencies: {[`release-date-hours`]: `^1.0.0`},
+        }, async ({path, run, source}) => {
+          await writeFile(`${path}/.yarnrc.yml`, [
+            `packageRules:`,
+            `  - packageFilter: release-date-hours`,
+            `    npmMinimalAgeGate: 1440`,
+            ``,
+          ].join(`\n`));
+
+          await run(`install`);
+
+          await expect(source(`require('release-date-hours/package.json')`)).resolves.toMatchObject({
+            name: `release-date-hours`,
+            version: `1.0.0`,
+          });
+        }),
+      );
+
+      test(
+        `it should read a YAML number in sourceRules as minutes`,
+        makeTemporaryEnv({
+          dependencies: {[`release-date-hours`]: `^1.0.0`},
+        }, async ({path, run, source}) => {
+          await writeFile(`${path}/.yarnrc.yml`, [
+            `sourceRules:`,
+            `  - ecosystemFilter: npm`,
+            `    npmMinimalAgeGate: 1440`,
+            ``,
+          ].join(`\n`));
+
+          await run(`install`);
+
+          await expect(source(`require('release-date-hours/package.json')`)).resolves.toMatchObject({
+            name: `release-date-hours`,
+            version: `1.0.0`,
+          });
+        }),
+      );
+    });
+
     describe(`packages with no release time metadata (e.g. GitHub Packages)`, () => {
       test(
         `it should install a package with no release time even if npmMinimalAgeGate is set`,

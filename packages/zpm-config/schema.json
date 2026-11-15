@@ -54,7 +54,8 @@
     },
     "daemonDefaultWarmupPeriod": {
       "type": "std::time::Duration",
-      "description": "Default warm-up period for long-lived tasks in the daemon. After a long-lived task starts, dependents are unblocked once this period elapses.",
+      "unit": "s",
+      "description": "Default warm-up period for long-lived tasks in the daemon. After a long-lived task starts, dependents are unblocked once this period elapses. Values without unit are in seconds.",
       "affectsInstall": false,
       "default": "1s"
     },
@@ -354,7 +355,8 @@
     },
     "npmMinimalAgeGate": {
       "type": "std::time::Duration",
-      "description": "Minimum age of a package version to be considered for installation. Can be used to prevent installing very new packages, either because they tend to be more likely to include accidental bugs, or because of supply-chain security concerns.",
+      "unit": "m",
+      "description": "Minimum age of a package version to be considered for installation. Can be used to prevent installing very new packages, either because they tend to be more likely to include accidental bugs, or because of supply-chain security concerns. Values without unit are in minutes, as in Yarn 4.",
       "default": "1d"
     },
     "npmPreapprovedPackages": {
@@ -447,7 +449,8 @@
     },
     "pypiMinimalAgeGate": {
       "type": "std::time::Duration",
-      "description": "Minimum age of a PyPI release file (based on its upload time) to be considered for installation. Files whose index doesn't report an upload time are never filtered.",
+      "unit": "m",
+      "description": "Minimum age of a PyPI release file (based on its upload time) to be considered for installation. Files whose index doesn't report an upload time are never filtered. Values without unit are in minutes, like for `npmMinimalAgeGate`.",
       "default": "0s"
     },
     "pypiMacosTarget": {
@@ -519,7 +522,8 @@
           },
           "pypiMinimalAgeGate": {
             "type": ["std::time::Duration", "null"],
-            "description": "Minimum age of a PyPI release file to be considered for matching packages"
+            "unit": "m",
+            "description": "Minimum age of a PyPI release file to be considered for matching packages (values without unit are in minutes)"
           },
           "pypiAuthToken": {
             "type": ["zpm_utils::Secret<String>", "null"],
@@ -531,7 +535,8 @@
           },
           "npmMinimalAgeGate": {
             "type": ["std::time::Duration", "null"],
-            "description": "Minimum age of an npm package version to be considered for matching packages"
+            "unit": "m",
+            "description": "Minimum age of an npm package version to be considered for matching packages (values without unit are in minutes)"
           },
           "npmAlwaysAuth": {
             "type": ["boolean", "null"],
@@ -565,11 +570,13 @@
           },
           "npmMinimalAgeGate": {
             "type": ["std::time::Duration", "null"],
-            "description": "Minimum age of an npm package version to be considered from matching sources"
+            "unit": "m",
+            "description": "Minimum age of an npm package version to be considered from matching sources (values without unit are in minutes)"
           },
           "pypiMinimalAgeGate": {
             "type": ["std::time::Duration", "null"],
-            "description": "Minimum age of a PyPI release file to be considered from matching indexes"
+            "unit": "m",
+            "description": "Minimum age of a PyPI release file to be considered from matching indexes (values without unit are in minutes)"
           },
           "pypiAuthToken": {
             "type": ["zpm_utils::Secret<String>", "null"],

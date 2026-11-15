@@ -1447,6 +1447,8 @@ fn apply_hardened_mode(settings: &mut Settings) {
     }
 }
 
+mod duration;
+
 mod fns;
 pub use fns::*;
 
