@@ -221,7 +221,7 @@ pub async fn fetch_nodejs_locator<'a>(context: &InstallContext<'a>, locator: &Lo
             };
 
             let serialized_manifest
-                = JsonDocument::to_string(&manifest)?;
+                = format!("{}\n", JsonDocument::to_string(&manifest)?);
 
             let entries
                 = dist_entries
