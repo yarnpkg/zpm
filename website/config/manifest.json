@@ -158,7 +158,7 @@
     },
     "libc": {
       "title": "Set of C standard libraries on which this package depends.",
-      "description": "The host standard library will be compared at install-time against this set. Should no matches be found, any postinstall script the package define will be skipped. If the package was exclusively depended upon via `optionalDependencies` entries, the package won't be installed at all.",
+      "description": "The host standard library will be compared at install-time against this set. Should no matches be found, any postinstall script the package define will be skipped. If the package was exclusively depended upon via `optionalDependencies` entries, the package won't be installed at all.\n\nAs with `os` and `cpu`, values prefixed with `!` are excluded, and a list mixing both forms only accepts the values it lists that aren't also excluded. Hosts without a detected standard library (macOS, Windows) never match a `libc` set, even a negated one.",
       "type": "array",
       "items": {
         "type": "string"
@@ -172,6 +172,10 @@
         {
           "description": "Allow both common Linux C libraries.",
           "value": ["glibc", "musl"]
+        },
+        {
+          "description": "Exclude musl-based Linux distributions.",
+          "value": ["!musl"]
         }
       ]
     },
