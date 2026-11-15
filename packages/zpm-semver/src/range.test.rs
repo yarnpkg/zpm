@@ -149,6 +149,21 @@ fn test_range_factories(#[case] range: Range, #[case] expected: Range) {
     assert_eq!(range, expected);
 }
 
+#[rstest]
+#[case("1.2.3", Some(Version { major: 1, minor: 2, patch: 3, rc: None }))]
+#[case("1.2.3-rc.1", Version::from_file_string("1.2.3-rc.1").ok())]
+#[case("1.2.3+build", Some(Version { major: 1, minor: 2, patch: 3, rc: None }))]
+#[case("1", None)]
+#[case("1.2", None)]
+#[case("*", None)]
+#[case("1.x", None)]
+#[case("1.2.x", None)]
+#[case("^1.2.3", None)]
+#[case("1.2.3 || 1.2.4", None)]
+fn test_range_exact_version(#[case] range: Range, #[case] expected: Option<Version>) {
+    assert_eq!(range.exact_version(), expected);
+}
+
 #[test]
 fn test_range_tokenize() {
     assert_eq!(Range::tokenize("1.2.3"), Some(vec![

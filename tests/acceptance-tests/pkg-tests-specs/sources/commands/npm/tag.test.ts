@@ -319,6 +319,42 @@ describe(`Commands`, () => {
       }),
     );
 
+    for (const [index, version] of [`1`, `1.0`, `*`, `1.x`, `1.0.x`].entries()) {
+      test(
+        `it should reject incomplete versions and wildcards (${version})`,
+        makeTemporaryEnv({}, async ({run}) => {
+          const env = await getIsolatedRegistryEnv(`tagincomplete${String.fromCharCode(97 + index)}`);
+
+          const requests = await startRegistryRecording(async () => {
+            await expect(run(`npm`, `tag`, `add`, `no-deps@${version}`, `beta`, {env})).rejects.toThrow(/must be a valid semver version/);
+          });
+
+          expect(requests).toEqual([]);
+
+          const {stdout} = await run(`npm`, `tag`, `list`, `no-deps`, `--json`, {env});
+          expect(misc.parseJsonStream(stdout)).toEqual([
+            {descriptor: `no-deps@latest`, locator: `no-deps@npm:2.0.0`},
+          ]);
+        }),
+      );
+    }
+
+    test(
+      `it should ignore build metadata, as registries don't key versions with it`,
+      makeTemporaryEnv({}, async ({run}) => {
+        const env = await getIsolatedRegistryEnv(`tagbuildmetadata`);
+
+        const {stdout: addStdout} = await run(`npm`, `tag`, `add`, `no-deps@1.0.0+build.1`, `beta`, {env});
+        expect(addStdout).toContain(`Tag beta added to version 1.0.0 of package no-deps`);
+
+        const {stdout} = await run(`npm`, `tag`, `list`, `no-deps`, `--json`, {env});
+        expect(misc.parseJsonStream(stdout)).toEqual([
+          {descriptor: `no-deps@beta`, locator: `no-deps@npm:1.0.0`},
+          {descriptor: `no-deps@latest`, locator: `no-deps@npm:2.0.0`},
+        ]);
+      }),
+    );
+
     test(
       `it should report versions that don't exist`,
       makeTemporaryEnv({}, async ({run}) => {

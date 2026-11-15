@@ -51,9 +51,14 @@ impl Add {
             = Ident::from_file_string(ident_str)
                 .map_err(|_| Error::InvalidIdent(ident_str.to_string()))?;
 
+        // Unlike `Version::from_file_string`, which fills in missing components
+        // and wildcards (`1`, `1.x`, `*`), a range only has an exact version if
+        // all three components are present. Build metadata is dropped, like
+        // npm does when publishing, as registries don't key versions with it.
         let version
-            = zpm_semver::Version::from_file_string(version_str)
-                .map_err(|_| Error::InvalidNpmTagVersion(version_str.to_string()))?
+            = zpm_semver::Range::from_file_string(version_str).ok()
+                .and_then(|range| range.exact_version())
+                .ok_or_else(|| Error::InvalidNpmTagVersion(version_str.to_string()))?
                 .to_file_string();
 
         let project
