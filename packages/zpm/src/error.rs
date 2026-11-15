@@ -223,6 +223,12 @@ pub enum Error {
     #[error("No matching variant found for {}", .0.to_print_string())]
     NoMatchingVariantFound(Locator),
 
+    #[error("Encountered a stack overflow when resolving peer dependencies: the dependency tree is more than {max_depth} levels deep (… → {}). This is usually caused by a dependency cycle through peer dependencies, or by an extremely deep dependency chain.", stack_excerpt.iter().map(|locator| locator.to_print_string()).collect::<Vec<_>>().join(" → "))]
+    StackOverflowResolution {
+        max_depth: usize,
+        stack_excerpt: Vec<Locator>,
+    },
+
     #[error("No candidates found for {}", .0.to_print_string())]
     NoCandidatesFound(Range),
 
