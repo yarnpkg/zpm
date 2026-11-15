@@ -516,7 +516,10 @@ impl Project {
                 None => Error::ImmutableLockfileCreation,
             });
         } else if current_content.as_deref() != Some(contents.as_bytes()) {
-            lockfile_path.fs_write(contents)?;
+            // The migration lockfile lives in a folder that may not exist yet
+            lockfile_path
+                .fs_create_parent()?
+                .fs_write(contents)?;
         }
 
         Ok(())
