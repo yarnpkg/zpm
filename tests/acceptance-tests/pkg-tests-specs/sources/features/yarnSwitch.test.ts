@@ -1,5 +1,9 @@
 import {Filename, PortablePath, ppath, xfs} from '@yarnpkg/fslib';
 
+const {
+  tests: {testIf},
+} = require(`pkg-tests-core`);
+
 describe(`Features`, () => {
   describe(`Yarn Switch`, () => {
     describe(`project package manager`, () => {
@@ -144,7 +148,8 @@ describe(`Features`, () => {
         {packageManager: {name: 42}},
         {packageManager: [{name: 42}, `yarn`, [`yarn`]]},
       ]) {
-        test(
+        testIf(
+          `runnableFakeYarnRelease`,
           `it should ignore a malformed devEngines field (${JSON.stringify(devEngines)})`,
           makeTemporaryEnv({
             packageManager: `yarn@6.0.0`,
@@ -331,7 +336,8 @@ describe(`Features`, () => {
         );
       }
 
-      test(
+      testIf(
+        `runnableFakeYarnRelease`,
         `it should allow an explicit Yarn selector to override a Yarn devEngines entry`,
         makeTemporaryEnv({
           devEngines: {packageManager: {name: `yarn`, version: `5.0.0`}},
@@ -343,7 +349,8 @@ describe(`Features`, () => {
         }),
       );
 
-      test(
+      testIf(
+        `runnableFakeYarnRelease`,
         `it should allow an explicit Yarn selector to override the project manager`,
         makeTemporaryEnv({
           packageManager: `pnpm@10.0.0`,

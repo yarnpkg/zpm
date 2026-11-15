@@ -275,6 +275,10 @@ export const FEATURE_CHECKS = {
   // `lib/pythonX.Y/site-packages`, symlinked interpreter); see the
   // "Limitations" section of the pypi protocol documentation
   venvLinker: process.platform !== `win32`,
+  // The fake Yarn 6.x release served by the test registry (see
+  // `RequestType.YarnSwitchTarball`) is a shell script; Yarn Switch installs
+  // it as `yarn-bin.exe` on Windows, which can't execute it (os error 216)
+  runnableFakeYarnRelease: process.platform !== `win32`,
 } as const;
 
 // Testing things inside a big-endian container takes forever
