@@ -4,6 +4,13 @@ use zpm_utils::IoResultExt;
 use crate::{errors::Error, links::links_dir};
 
 /// Remove all Yarn Switch links
+///
+/// ## Examples
+///
+/// Remove all the links
+///
+/// `yarn switch links --clear`
+///
 #[cli::command]
 #[cli::path("switch", "links")]
 #[cli::category("Local Yarn development")]

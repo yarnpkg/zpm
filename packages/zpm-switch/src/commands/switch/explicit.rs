@@ -9,6 +9,16 @@ use crate::{config::validate_yarn_version, cwd::{get_fake_cwd, get_final_cwd}, e
 ///
 /// This command resolves the selector, installs the matching Yarn binary if needed, and forwards the remaining arguments to it.
 ///
+/// ## Examples
+///
+/// Run a command with Yarn 4.12.0, regardless of the project settings
+///
+/// `yarn switch 4.12.0 --version`
+///
+/// Run a command with the latest stable release of Yarn 4
+///
+/// `yarn switch berry install`
+///
 #[cli::command(proxy)]
 #[cli::path("switch")]
 #[cli::category("General commands")]

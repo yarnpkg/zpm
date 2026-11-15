@@ -7,6 +7,16 @@ use crate::{cwd::get_final_cwd, errors::Error, install::install_package_manager,
 /// With explicit versions, this command installs those Yarn releases into the local Switch cache. Without versions, it installs the Yarn version
 /// selected by the current project.
 ///
+/// ## Examples
+///
+/// Install the Yarn version selected by the current project
+///
+/// `yarn switch cache --install`
+///
+/// Install a specific Yarn version
+///
+/// `yarn switch cache -i 4.12.0`
+///
 #[cli::command]
 #[cli::path("switch", "cache")]
 #[cli::category("Cache management")]

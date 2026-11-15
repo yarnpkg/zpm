@@ -9,6 +9,12 @@ use crate::{errors::Error, http::fetch};
 ///
 /// This command downloads and runs the Yarn Switch installer, replacing the current Switch installation with the latest published version.
 ///
+/// ## Examples
+///
+/// Update Yarn Switch to the latest version
+///
+/// `yarn switch update`
+///
 #[cli::command]
 #[cli::path("switch", "update")]
 #[cli::category("Switch commands")]

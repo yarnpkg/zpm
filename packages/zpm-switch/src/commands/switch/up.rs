@@ -17,6 +17,16 @@ use crate::{
 /// Without arguments, this command selects the latest stable version from the `zpm` release line and forwards `yarn set version zpm` to it. Pass a
 /// selector to choose a specific release line, channel, version, or range.
 ///
+/// ## Examples
+///
+/// Upgrade the current project to the latest stable release of Yarn 6
+///
+/// `yarn switch up`
+///
+/// Upgrade the current project to the latest stable release of Yarn 4
+///
+/// `yarn switch up berry`
+///
 #[cli::command]
 #[cli::path("switch", "up")]
 #[cli::category("General commands")]
