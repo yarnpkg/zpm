@@ -74,6 +74,23 @@ describe(`Entry`, () => {
     );
 
     test(
+      `it should print the whole description of an option documented over several lines`,
+      makeTemporaryEnv({}, async ({path, run, source}) => {
+        const spec = await getCommandSpec(run, [`import`, `uv`]);
+        const help = normalizeOutput((await run(`import`, `uv`, `--help`)).stdout);
+
+        const option = spec.components.find(component => component.type === `option` && component.primaryName === `--extra`)!;
+        const description = [option.documentation!.description, option.documentation!.details].filter(Boolean).join(` `);
+
+        const entry = getSection(help, `Options`).match(/^ {2}--extra .*\n(?: {3,}\S.*\n)*/m)?.[0];
+        expect(entry).toBeDefined();
+
+        expect(collapseWhitespace(entry!)).toContain(collapseWhitespace(description));
+        expect(collapseWhitespace(entry!)).toContain(`as \`uv sync --extra\` does`);
+      }),
+    );
+
+    test(
       `it should print the help of a command when given -h`,
       makeTemporaryEnv({}, async ({path, run, source}) => {
         const longHelp = normalizeOutput((await run(`remove`, `--help`)).stdout);

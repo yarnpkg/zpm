@@ -67,8 +67,14 @@ export function cliBody(entry: DataEntry): string {
       lines.push(``);
       lines.push(`### \`${names}\` ${pills}`);
 
-      if (option.documentation?.description) {
-        lines.push(``, option.documentation.description);
+      // clipanion-rs cuts the description of an option after the first line
+      // of its doc comment, and puts the other lines in its details
+      const description = [option.documentation?.description, option.documentation?.details]
+        .filter(Boolean)
+        .join(` `);
+
+      if (description) {
+        lines.push(``, description);
       }
     }
   }

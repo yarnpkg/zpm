@@ -6,7 +6,7 @@
 //! same layout: the description, then the usage, the options, the details,
 //! and the examples.
 
-use std::process::ExitCode;
+use std::{iter::once, process::ExitCode};
 
 use clipanion::{
     Environment,
@@ -66,8 +66,11 @@ fn option_helps(command_spec: &CommandSpec) -> Vec<OptionHelp> {
             let definition
                 = usage[1..usage.len() - 1].to_string();
 
+            // The clipanion revision we use cuts the description of an option
+            // after the first line of its doc comment, and puts the other lines
+            // in its details
             let description = option.documentation.as_ref()
-                .map(|documentation| documentation.description.clone())
+                .map(|documentation| once(documentation.description.as_str()).chain(documentation.details.as_deref()).collect::<Vec<_>>().join(" "))
                 .unwrap_or_default();
 
             OptionHelp {
