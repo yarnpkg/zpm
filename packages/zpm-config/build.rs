@@ -169,6 +169,17 @@ impl Field {
                         panic!("Field {} can't set affectsInstall; only top-level settings can", name);
                     }
 
+                    // Scalar fields with neither a default nor a null value must be set by the
+                    // rc file declaring their parent; the runtime checks that via FindMissingSetting
+                    let required
+                        = field.default.is_none()
+                            && !field.types.contains(&Type::Null)
+                            && matches!(field.get_type().kind, InternalTypeKind::Native(_));
+
+                    if required && is_root {
+                        panic!("Field {} must have a default value; only nested settings can be required", name);
+                    }
+
                     fields.push(GeneratorField {
                         name: name.to_string(),
                         description: field.description.clone().unwrap_or_else(|| panic!("Field {} must have a description", name)),
@@ -177,6 +188,7 @@ impl Field {
                         default: field_default,
                         one_or_many: field.one_or_many.unwrap_or(false),
                         affects_install: field.affects_install.unwrap_or(true),
+                        required,
                     });
                 }
 
@@ -275,6 +287,7 @@ struct GeneratorField {
     default: String,
     one_or_many: bool,
     affects_install: bool,
+    required: bool,
 }
 
 struct Generator {
@@ -326,6 +339,32 @@ impl Generator {
                 writeln!(writer, "        #[serde(default{deserialize_with})] pub {lc_snake_name}: Partial<{}>,", type_.to_intermediate_type_string()).unwrap();
             }
 
+            writeln!(writer, "    }}").unwrap();
+            writeln!(writer).unwrap();
+            writeln!(writer, "    impl FindMissingSetting for {} {{", name).unwrap();
+            writeln!(writer, "        fn find_missing_setting(&self) -> Option<String> {{").unwrap();
+
+            for field in fields {
+                let name = &field.name;
+
+                let lc_snake_name
+                    = name.to_case(Case::Snake);
+
+                if field.required {
+                    writeln!(writer, "            if matches!(self.{lc_snake_name}, Partial::Missing) {{").unwrap();
+                    writeln!(writer, "                return Some(\"{name}\".to_string());").unwrap();
+                    writeln!(writer, "            }}").unwrap();
+                }
+
+                if !matches!(field.type_.kind, InternalTypeKind::Native(_)) {
+                    writeln!(writer, "            if let Some(path) = self.{lc_snake_name}.find_missing_setting() {{").unwrap();
+                    writeln!(writer, "                return Some(join_setting_path(\"{name}\", &path));").unwrap();
+                    writeln!(writer, "            }}").unwrap();
+                }
+            }
+
+            writeln!(writer, "            None").unwrap();
+            writeln!(writer, "        }}").unwrap();
             writeln!(writer, "    }}").unwrap();
         }
 
