@@ -39,6 +39,8 @@ Generally, a few main things will need to be taken care of:
 
 4. Some tools (mostly React Native and Flow) will require downgrading to the `node_modules` install strategy by setting the [`nodeLinker`](/configuration/yarnrc#nodeLinker) setting to `node-modules`. TypeScript doesn't have this problem.
 
+Your Yarn Classic lockfile is imported during the first install, so you keep the versions your project was locked to; see [Migrating from Yarn Classic](/getting-started/migrating-from-yarn-classic) for the details.
+
 Most projects will only face those four problems, which can all be fixed in a good afternoon of work. For more detailed instructions, please see the detailed [migration guide](/getting-started/breaking-changes).
 
 ## Which files should be gitignored?

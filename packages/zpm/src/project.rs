@@ -4,7 +4,7 @@ use colored::Colorize;
 use globset::{GlobBuilder, GlobSetBuilder};
 use zpm_config::{Configuration, ConfigurationContext, IslandLinker, Settings, Source};
 use zpm_macro_enum::zpm_enum;
-use zpm_parsers::JsonDocument;
+use zpm_parsers::{DataDocument, JsonDocument};
 use zpm_primitives::{Descriptor, Ident, Locator, Range, Reference, WorkspaceIdentReference, WorkspaceMagicRange, WorkspacePathReference};
 use zpm_switch::get_bin_version;
 use zpm_tasks::{apply_workspace_defaults, extract_workspace_defaults, parse as parse_taskfile, strip_workspace_defaults, ResolvedTasks, Task, TaskFile, TaskId, TaskName};
@@ -22,6 +22,7 @@ use crate::{
     http_npm,
     install::{InstallContext, InstallManager, InstallResult, InstallState},
     lockfile::{Lockfile, LockfileMetadata, LockfileProject, from_legacy_berry_lockfile, from_pnpm_node_modules},
+    lockfile_classic::{from_classic_lockfile, is_classic_lockfile},
     manifest::{Manifest, helpers::read_manifest_with_size},
     manifest_finder::CachedManifestFinder,
     npm::NpmEntryExt,
@@ -404,6 +405,27 @@ impl Project {
 
         if src.is_empty() {
             return Ok(Lockfile::new());
+        }
+
+        if is_classic_lockfile(&src) {
+            // Migrating the lockfile is a modification like any other, but
+            // we prefer to explain why it happens rather than show a diff
+            if config.settings.enable_immutable_installs.value {
+                return Err(Error::ClassicLockfileImmutableMigration);
+            }
+
+            let import
+                = from_classic_lockfile(&src, config)?;
+
+            crate::report::if_active(|report| {
+                report.info(format!("Migrating from a Yarn Classic lockfile; {} descriptors will keep the version they were locked to", import.pinned_count));
+
+                for warning in import.warnings {
+                    report.warn(warning);
+                }
+            });
+
+            return Ok(import.lockfile);
         }
 
         if src.starts_with('#') {
@@ -1665,12 +1687,58 @@ impl Project {
         Ok(())
     }
 
+    /**
+     * Yarn Classic projects aren't expected to be compatible with Plug'n'Play,
+     * so when we migrate them we default to the node-modules linker, unless
+     * they already picked a linker.
+     */
+    fn migrate_classic_project_settings(&mut self) -> Result<bool, Error> {
+        if self.config.settings.enable_immutable_installs.value || !matches!(self.config.settings.node_linker.source, Source::Default) {
+            return Ok(false);
+        }
+
+        let is_classic_project
+            = self.lockfile_path()
+                .fs_read_text()
+                .ok_missing()?
+                .is_some_and(|src| is_classic_lockfile(&src));
+
+        if !is_classic_project {
+            return Ok(false);
+        }
+
+        let Some(rc_path) = self.config.project_config_path.clone() else {
+            return Ok(false);
+        };
+
+        let document = rc_path
+            .fs_read_text()
+            .ok_missing()?
+            .unwrap_or_default();
+
+        let updated_document = DataDocument::update_document_field(
+            &document,
+            zpm_parsers::Path::from(["nodeLinker"]),
+            zpm_parsers::Value::String("node-modules".to_string()),
+        )?;
+
+        rc_path
+            .fs_change(&updated_document, false)?;
+
+        self.config.settings.node_linker.force(zpm_config::NodeLinker::NodeModules, Source::Project);
+
+        Ok(true)
+    }
+
     pub async fn run_install(&mut self, options: RunInstallOptions) -> Result<InstallResult, Error> {
         // Useful for optimization purposes as we can reuse some information such as content flags.
         // Discard errors; worst case scenario we just recompute the whole state from scratch.
         if self.install_state.is_none() {
             let _ = self.import_install_state();
         }
+
+        let migrated_classic_settings
+            = self.migrate_classic_project_settings()?;
 
         let report = StreamReport::new(StreamReportConfig {
             include_version: true,
@@ -1689,6 +1757,12 @@ impl Project {
             = background_writes.clone();
 
         let install_outcome = with_report_result(report, async {
+            if migrated_classic_settings {
+                crate::report::if_active(|report| {
+                    report.info(format!("Set {} in your configuration, since Yarn Classic projects expect a node_modules folder", DataType::Code.colorize("nodeLinker: node-modules")));
+                });
+            }
+
             let package_cache
                 = self.package_cache()?;
 
