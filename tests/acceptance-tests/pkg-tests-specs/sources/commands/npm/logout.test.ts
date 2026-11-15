@@ -77,6 +77,48 @@ describe(`Commands`, () => {
     );
 
     it(
+      `should logout a user from the default registry when its entry is keyed without the protocol`,
+      makeTemporaryEnv({}, {
+        npmRegistryServer: FAKE_REGISTRY_URL,
+        npmPublishRegistry: FAKE_PUBLISH_REGISTRY_URL,
+      }, async ({path, run, source}) => {
+        const homePath = await xfs.mktempPromise();
+
+        await yarn.writeConfiguration(homePath, {
+          npmRegistries: {
+            [FAKE_REGISTRY_URL.replace(/^https?:/, ``)]: {
+              ...CLASSIC_SCOPE_SETTINGS,
+              ...FAKE_REGISTRY_CREDENTIALS,
+            },
+            [`${FAKE_REGISTRY_URL}/`]: FAKE_REGISTRY_CREDENTIALS,
+            [FAKE_PUBLISH_REGISTRY_URL.replace(/^https?:/, ``)]: FAKE_REGISTRY_CREDENTIALS,
+            [FAKE_THIRD_REGISTRY_URL]: FAKE_REGISTRY_CREDENTIALS,
+          },
+        }, {
+          filename: SPEC_RC_FILENAME,
+        });
+
+        await run(`npm`, `logout`, {
+          env: {
+            HOME: homePath,
+            USERPROFILE: homePath,
+            YARN_RC_FILENAME: SPEC_RC_FILENAME,
+          },
+        });
+
+        await expect(yarn.readConfiguration(homePath, {
+          filename: SPEC_RC_FILENAME,
+        })).resolves.toStrictEqual({
+          npmRegistries: {
+            [FAKE_REGISTRY_URL.replace(/^https?:/, ``)]: CLASSIC_SCOPE_SETTINGS,
+            [FAKE_PUBLISH_REGISTRY_URL.replace(/^https?:/, ``)]: FAKE_REGISTRY_CREDENTIALS,
+            [FAKE_THIRD_REGISTRY_URL]: FAKE_REGISTRY_CREDENTIALS,
+          },
+        });
+      }),
+    );
+
+    it(
       `should logout a user from all registries and all scopes when the -A,--all flag is used`,
       makeTemporaryEnv({}, {
         npmRegistryServer: FAKE_REGISTRY_URL,

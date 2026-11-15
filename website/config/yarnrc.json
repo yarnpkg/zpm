@@ -582,7 +582,7 @@
     "npmRegistries": {
       "_package": "@yarnpkg/plugin-npm",
       "title": "Per-registry configurations.",
-      "description": "Legacy-compatible per-registry npm authentication settings. New configurations may prefer `sourceRules` for registry and ecosystem policy.",
+      "description": "Legacy-compatible per-registry npm authentication settings. New configurations may prefer `sourceRules` for registry and ecosystem policy.\n\nEach key is either the registry URL (`https://npm.pkg.github.com`) or the same URL without its protocol (`//npm.pkg.github.com`), which then applies whatever the protocol; trailing slashes are ignored. When both forms are set for a registry, only the entry with the protocol is used.",
       "type": "object",
       "patternProperties": {
         "^(?:^[a-zA-Z][a-zA-Z0-9+-.]*:)?[^\\s]*$": {
