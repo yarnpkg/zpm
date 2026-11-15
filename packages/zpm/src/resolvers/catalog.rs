@@ -1,6 +1,6 @@
 use std::collections::{BTreeMap, BTreeSet};
 
-use zpm_primitives::{CatalogPeerRange, CatalogRange, Ident, Locator, PeerRange, Range};
+use zpm_primitives::{CatalogPeerRange, CatalogRange, Ident, JsrSemverRange, Locator, PeerRange, Range, RegistrySemverRange};
 use zpm_utils::ToFileString;
 
 use crate::{
@@ -73,7 +73,8 @@ pub fn lookup_catalog_peer_range_in(catalogs: &BTreeMap<String, BTreeMap<Ident, 
             },
 
             // Aliases can't be expressed as peer ranges
-            Range::RegistrySemver(params) if params.ident.is_some() => {
+            Range::RegistrySemver(RegistrySemverRange {ident: Some(alias), ..}) |
+            Range::JsrSemver(JsrSemverRange {ident: Some(alias), ..}) if alias != ident => {
                 return Err(Error::InvalidPeerCatalogEntry {locator: locator.clone(), ident: ident.clone(), catalog: catalog_name, range: range.to_file_string()});
             },
 
@@ -81,6 +82,52 @@ pub fn lookup_catalog_peer_range_in(catalogs: &BTreeMap<String, BTreeMap<Ident, 
                 return range.to_peer_range()
                     .map_err(|_| Error::InvalidPeerCatalogEntry {locator: locator.clone(), ident: ident.clone(), catalog: catalog_name, range: range.to_file_string()});
             },
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use zpm_utils::FromFileString;
+
+    use super::*;
+
+    #[test]
+    fn test_catalog_peer_range() {
+        let cases: &[(&str, Option<&str>)] = &[
+            ("^3.0.0", Some("^3.0.0")),
+            ("npm:^3.0.0", Some("^3.0.0")),
+            ("npm:js-tokens@^3.0.0", Some("^3.0.0")),
+            ("jsr:^3.0.0", Some("^3.0.0")),
+            ("jsr:js-tokens@^3.0.0", Some("^3.0.0")),
+            ("npm:other@^3.0.0", None),
+            ("jsr:other@^3.0.0", None),
+            ("jsr:@scope/other@^3.0.0", None),
+            ("npm:latest", None),
+        ];
+
+        let ident
+            = Ident::new("js-tokens");
+
+        let locator
+            = Locator::from_file_string("my-lib@workspace:my-lib").unwrap();
+
+        for (entry, expected) in cases {
+            let catalogs
+                = BTreeMap::from([("default".to_string(), BTreeMap::from([(ident.clone(), Range::from_file_string(entry).unwrap())]))]);
+
+            let result
+                = lookup_catalog_peer_range_in(&catalogs, &CatalogPeerRange {catalog: None}, &locator, &ident, |_| {});
+
+            match expected {
+                Some(expected) => {
+                    assert_eq!(result.unwrap().to_file_string(), *expected, "{entry}");
+                },
+
+                None => {
+                    assert!(matches!(result, Err(Error::InvalidPeerCatalogEntry {..})), "{entry} gave {result:?}");
+                },
+            }
         }
     }
 }

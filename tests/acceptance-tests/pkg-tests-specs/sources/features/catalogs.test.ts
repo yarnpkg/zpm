@@ -642,6 +642,7 @@ describe(`Features`, () => {
           for (const [range, pattern] of [
             [`link:./no-deps`, /The no-deps peer dependency of my-lib@workspace:my-lib references the default catalog, whose entry \(link:\.\/no-deps\) can't be used as a peer range/],
             [`npm:no-deps-bins@^1.0.0`, /The no-deps peer dependency of my-lib@workspace:my-lib references the default catalog, whose entry \(npm:no-deps-bins@\^1\.0\.0\) can't be used as a peer range/],
+            [`jsr:no-deps-bins@^1.0.0`, /The no-deps peer dependency of my-lib@workspace:my-lib references the default catalog, whose entry \(jsr:no-deps-bins@\^1\.0\.0\) can't be used as a peer range/],
           ] as const) {
             await yarn.writeConfiguration(path, {
               catalog: {
@@ -650,6 +651,35 @@ describe(`Features`, () => {
             });
 
             await expect(run(`install`)).rejects.toThrow(pattern);
+          }
+        },
+      ),
+    );
+
+    test(
+      `it should accept catalog entries naming the peer dependency itself through a protocol`,
+      makeTemporaryMonorepoEnv(
+        {
+          workspaces: [`packages/*`],
+        },
+        {
+          packages: {},
+        },
+        async ({path, run}) => {
+          await makePeerCatalogWorkspaces(path, `catalog:`, `2.0.0`);
+
+          for (const range of [`npm:no-deps@^2.0.0`, `jsr:no-deps@^2.0.0`]) {
+            await yarn.writeConfiguration(path, {
+              catalog: {
+                [`no-deps`]: range,
+              },
+            });
+
+            const {stdout: installOut} = await run(`install`);
+            expect(installOut).not.toMatch(/Some peer dependencies are incorrectly met/);
+
+            const {stdout} = await run(`explain`, `peer-requirements`);
+            expect(stdout).toMatch(/✓ .* provides no-deps .* to my-lib/);
           }
         },
       ),
