@@ -41,6 +41,8 @@ Yarn Plug'n'Play has been the default installation strategy in Yarn since 2019, 
 
 Under this mode, a flat virtual store is generated in `node_modules/.yarn/store` containing one folder for each dependency in the project. Each dependency folder is populated with hardlinks obtained from Yarn's content-addressable store (by default under `~/.yarn/zpm/index`). Finally, symlinks to the relevant folders from the virtual store are placed into the `node_modules` folders.
 
+If the store and the project are on different filesystems (a common occurrence with Docker volumes), Yarn copies the files instead; see [Hardlinks and the store](/concepts/hardlinks) for how to avoid it.
+
 <div class="[&_table]:table-fixed [&_th]:w-[50%]">
 
 | Pros | Cons |
@@ -71,3 +73,7 @@ While we tend to recommend trying one of the two other modes first, it remains a
 | No need for IDE SDKs | Imperfect hoisting due to the filesystem reliance |
 
 </div>
+
+:::note
+The `hardlinks-local` and `hardlinks-global` modes of `nmMode` share identical files through hard links; see [Hardlinks and the store](/concepts/hardlinks) for how they work and when Yarn falls back to copies.
+:::
