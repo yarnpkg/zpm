@@ -37,15 +37,27 @@ pub fn preferred_global_folder(is_windows: bool, home: Option<&Path>, local_app_
 /// but the one used by the release candidates (`~/.yarn/zpm`) does, we keep
 /// using the latter so that upgrading doesn't silently orphan its content
 /// (package cache, content-addressed store, Python builds, ...).
-pub fn default_global_folder(is_windows: bool, home: Option<&Path>, local_app_data: Option<&Path>, xdg_data_home: Option<&Path>) -> Option<Path> {
+///
+/// On Windows the release candidates resolved the home folder from `HOME`
+/// before `USERPROFILE`, so a cache created from a shell that didn't set
+/// `HOME` lives in the user profile even when `HOME` points elsewhere; we
+/// look for the legacy folder in both places.
+pub fn default_global_folder(is_windows: bool, home: Option<&Path>, user_profile: Option<&Path>, local_app_data: Option<&Path>, xdg_data_home: Option<&Path>) -> Option<Path> {
     let preferred
         = preferred_global_folder(is_windows, home, local_app_data, xdg_data_home)?;
 
-    if let Some(home) = home {
-        let legacy
-            = legacy_global_folder(home);
+    if preferred.fs_exists() {
+        return Some(preferred);
+    }
 
-        if preferred != legacy && !preferred.fs_exists() && legacy.fs_exists() {
+    let legacy_homes = home.into_iter()
+        .chain(user_profile.filter(|_| is_windows));
+
+    for legacy_home in legacy_homes {
+        let legacy
+            = legacy_global_folder(legacy_home);
+
+        if legacy != preferred && legacy.fs_exists() {
             return Some(legacy);
         }
     }
@@ -70,16 +82,19 @@ pub fn compute_global_folder(context: &ConfigurationContext) -> Path {
     let is_windows
         = cfg!(windows);
 
+    let user_profile
+        = env_absolute_path(context, "USERPROFILE");
+
     // Same lookup order as `Path::home_dir`
     let home = env_absolute_path(context, "HOME")
-        .or_else(|| is_windows.then(|| env_absolute_path(context, "USERPROFILE")).flatten());
+        .or_else(|| user_profile.clone().filter(|_| is_windows));
 
     let local_app_data
         = env_absolute_path(context, "LOCALAPPDATA");
     let xdg_data_home
         = env_absolute_path(context, "XDG_DATA_HOME");
 
-    default_global_folder(is_windows, home.as_ref(), local_app_data.as_ref(), xdg_data_home.as_ref())
+    default_global_folder(is_windows, home.as_ref(), user_profile.as_ref(), local_app_data.as_ref(), xdg_data_home.as_ref())
         .unwrap_or_else(Path::empty)
 }
 
@@ -196,7 +211,7 @@ mod tests {
     fn it_should_return_nothing_without_a_home_folder() {
         assert_eq!(preferred_global_folder(false, None, None, None), None);
         assert_eq!(preferred_global_folder(true, None, None, None), None);
-        assert_eq!(default_global_folder(false, None, None, None), None);
+        assert_eq!(default_global_folder(false, None, None, None, None), None);
     }
 
     #[test]
@@ -212,25 +227,66 @@ mod tests {
             = xdg_data_home.with_join_str("yarn/zpm");
 
         // Nothing exists yet: we use the preferred location
-        assert_eq!(default_global_folder(false, Some(&home), None, Some(&xdg_data_home)), Some(preferred.clone()));
+        assert_eq!(default_global_folder(false, Some(&home), None, None, Some(&xdg_data_home)), Some(preferred.clone()));
 
         // A release candidate created the legacy folder: we keep using it
         legacy.fs_create_dir_all().unwrap();
-        assert_eq!(default_global_folder(false, Some(&home), None, Some(&xdg_data_home)), Some(legacy.clone()));
+        assert_eq!(default_global_folder(false, Some(&home), None, None, Some(&xdg_data_home)), Some(legacy.clone()));
 
         // Same thing on Windows
         let local_app_data
             = home.with_join_str("AppData/Local");
-        assert_eq!(default_global_folder(true, Some(&home), Some(&local_app_data), None), Some(legacy.clone()));
+        assert_eq!(default_global_folder(true, Some(&home), None, Some(&local_app_data), None), Some(legacy.clone()));
 
         // Once the preferred folder exists, it wins
         preferred.fs_create_dir_all().unwrap();
-        assert_eq!(default_global_folder(false, Some(&home), None, Some(&xdg_data_home)), Some(preferred.clone()));
+        assert_eq!(default_global_folder(false, Some(&home), None, None, Some(&xdg_data_home)), Some(preferred.clone()));
 
         // And without XDG_DATA_HOME the legacy folder is the preferred one anyway
-        assert_eq!(default_global_folder(false, Some(&home), None, None), Some(legacy.clone()));
+        assert_eq!(default_global_folder(false, Some(&home), None, None, None), Some(legacy.clone()));
 
         home.fs_rm().unwrap();
+    }
+
+    #[test]
+    fn it_should_look_for_the_legacy_folder_in_the_user_profile_on_windows() {
+        let root
+            = Path::temp_dir().unwrap();
+
+        // HOME is set to a custom folder, but the release candidate ran from a
+        // shell that didn't set it and thus used the user profile
+        let home
+            = root.with_join_str("home");
+        let user_profile
+            = root.with_join_str("profile");
+        let local_app_data
+            = user_profile.with_join_str("AppData/Local");
+
+        let legacy
+            = user_profile.with_join_str(".yarn/zpm");
+        let preferred
+            = local_app_data.with_join_str("Yarn/zpm");
+
+        assert_eq!(default_global_folder(true, Some(&home), Some(&user_profile), Some(&local_app_data), None), Some(preferred.clone()));
+
+        legacy.fs_create_dir_all().unwrap();
+        assert_eq!(default_global_folder(true, Some(&home), Some(&user_profile), Some(&local_app_data), None), Some(legacy.clone()));
+
+        // The legacy folder in HOME takes precedence, as HOME did
+        let home_legacy
+            = home.with_join_str(".yarn/zpm");
+
+        home_legacy.fs_create_dir_all().unwrap();
+        assert_eq!(default_global_folder(true, Some(&home), Some(&user_profile), Some(&local_app_data), None), Some(home_legacy.clone()));
+
+        // USERPROFILE isn't a home folder outside of Windows
+        assert_eq!(default_global_folder(false, None, Some(&user_profile), None, None), None);
+
+        // Once the preferred folder exists, it wins
+        preferred.fs_create_dir_all().unwrap();
+        assert_eq!(default_global_folder(true, Some(&home), Some(&user_profile), Some(&local_app_data), None), Some(preferred.clone()));
+
+        root.fs_rm().unwrap();
     }
 
     fn context(env: &[(&str, &str)]) -> ConfigurationContext {
