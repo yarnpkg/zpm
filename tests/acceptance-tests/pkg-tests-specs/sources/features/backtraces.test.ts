@@ -25,6 +25,11 @@ const reportEnv = {
   YARN_TEST_REPORT_BACKTRACES: `1`,
 };
 
+// What reading a directory as if it were a file reports
+const IO_ERROR = process.platform === `win32`
+  ? `I/O error (Access is denied`
+  : `I/O error (Is a directory`;
+
 describe(`Features`, () => {
   describe(`Backtraces`, () => {
     for (const {name, config} of linkerConfigurations) {
@@ -58,14 +63,19 @@ describe(`Features`, () => {
     test(
       `it should print a backtrace for reported I/O errors when RUST_BACKTRACE is set`,
       makeTemporaryEnv({}, async ({path, run}) => {
-        // Reading it fails with EISDIR
+        // Reading it fails (EISDIR on POSIX, ERROR_ACCESS_DENIED on Windows)
         await xfs.mkdirPromise(ppath.join(path, `.yarnrc.yml`));
 
         const result = await run(`install`, {env: reportEnv}).catch(error => error);
 
         expect(result.code).toEqual(1);
-        expect(result.stdout).toContain(`I/O error (Is a directory`);
-        expect(result.stdout).toMatch(/^ +\d+: .*try_read$/m);
+        expect(result.stdout).toContain(IO_ERROR);
+        expect(result.stdout).toMatch(/^ +\d+: /m);
+
+        // The Windows release builds don't embed the symbol names
+        if (process.platform !== `win32`)
+          expect(result.stdout).toMatch(/^ +\d+: .*try_read$/m);
+
         expect(result.stdout).not.toContain(`Run with RUST_BACKTRACE=1 to get a backtrace`);
 
         // Proves that the counter used by the tests above sees the captures
@@ -81,7 +91,7 @@ describe(`Features`, () => {
         const result = await run(`install`, {env: {...reportEnv, RUST_BACKTRACE: undefined}}).catch(error => error);
 
         expect(result.code).toEqual(1);
-        expect(result.stdout).toContain(`I/O error (Is a directory`);
+        expect(result.stdout).toContain(IO_ERROR);
         expect(result.stdout).toContain(`Run with RUST_BACKTRACE=1 to get a backtrace`);
         expect(result.stdout).not.toMatch(/^ +\d+: /m);
         expect(result.stderr).toContain(`Captured backtraces: 0\n`);
