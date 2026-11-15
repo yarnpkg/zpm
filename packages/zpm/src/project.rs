@@ -22,6 +22,7 @@ use crate::{
     http_npm,
     install::{InstallContext, InstallManager, InstallResult, InstallState},
     lockfile::{Lockfile, LockfileMetadata, LockfileProject, from_legacy_berry_lockfile, from_pnpm_node_modules},
+    lockfile_migration::{LockfileMigration, migrate_legacy_lockfile_settings},
     manifest::{Manifest, helpers::read_manifest_with_size},
     manifest_finder::CachedManifestFinder,
     npm::NpmEntryExt,
@@ -220,6 +221,17 @@ impl Project {
         if config.settings.enable_migration_mode.value {
             config.settings.enable_global_cache.value = true;
             config.settings.enable_global_cache.source = config.settings.enable_migration_mode.source;
+
+            // The root lockfile keeps the format of the release we migrate
+            // from, so we can't persist the lockfile migration settings; we
+            // apply them to every command instead (so that the install config
+            // hash stays stable between installs).
+            if let Some(migration) = LockfileMigration::detect(&config, &project_cwd)? {
+                let source
+                    = config.settings.enable_migration_mode.source;
+
+                migration.apply(&mut config.settings, source);
+            }
         }
 
         let clone_concurrency
@@ -1689,6 +1701,11 @@ impl Project {
             = background_writes.clone();
 
         let install_outcome = with_report_result(report, async {
+            // Must run before anything reads the settings it may change (git
+            // approvals, age gate, build scripts), since the legacy lockfile
+            // gets replaced at the end of this install.
+            migrate_legacy_lockfile_settings(self)?;
+
             let package_cache
                 = self.package_cache()?;
 
