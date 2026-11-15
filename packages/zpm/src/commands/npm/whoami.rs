@@ -16,6 +16,20 @@ use crate::{
 ///
 /// With `--publish`, Yarn checks the publish registry configured through `npmPublishRegistry` or the regular npm registry fallback.
 ///
+/// ## Examples
+///
+/// Print username for the default registry
+///
+/// `yarn npm whoami`
+///
+/// Print username for the registry on a given scope
+///
+/// `yarn npm whoami --scope company`
+///
+/// Print username for the publish registry
+///
+/// `yarn npm whoami --publish`
+///
 #[cli::command]
 #[cli::path("npm", "whoami")]
 #[cli::category("Npm-related commands")]

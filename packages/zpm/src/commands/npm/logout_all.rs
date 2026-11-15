@@ -7,6 +7,13 @@ use crate::{
 };
 
 /// Remove all stored npm registry credentials
+///
+/// ## Examples
+///
+/// Logout of all registries
+///
+/// `yarn npm logout --all`
+///
 #[cli::command]
 #[cli::path("npm", "logout")]
 #[cli::category("Npm-related commands")]

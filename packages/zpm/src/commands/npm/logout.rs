@@ -16,6 +16,20 @@ use crate::{
 ///
 /// Use `-A,--all` to remove credentials for all registries and scopes.
 ///
+/// ## Examples
+///
+/// Logout of the default registry
+///
+/// `yarn npm logout`
+///
+/// Logout of the @my-scope scope
+///
+/// `yarn npm logout --scope my-scope`
+///
+/// Logout of the publish registry for the current package
+///
+/// `yarn npm logout --publish`
+///
 #[cli::command]
 #[cli::path("npm", "logout")]
 #[cli::category("Npm-related commands")]

@@ -27,6 +27,24 @@ use crate::{
 ///
 /// - `<name>@<tag>` — return information about the version associated with the given dist-tag.
 ///
+/// ## Examples
+///
+/// Show the latest version of react
+///
+/// `yarn npm info react`
+///
+/// Show information about react@16.12.0
+///
+/// `yarn npm info react@16.12.0`
+///
+/// Show the version of react tagged as `next`
+///
+/// `yarn npm info react@next`
+///
+/// Show the highest version of react matching a range
+///
+/// `yarn npm info react@^17`
+///
 #[cli::command]
 #[cli::path("npm", "info")]
 #[cli::category("Npm-related commands")]

@@ -40,6 +40,24 @@ use crate::{
 /// To understand the dependency tree requiring vulnerable packages, check the raw report with the `--json` flag or use
 /// `yarn why <package>` to get more information as to who depends on them.
 ///
+/// ## Examples
+///
+/// Check the direct dependencies of the active workspace for known security issues
+///
+/// `yarn npm audit`
+///
+/// Audit all direct and transitive dependencies of all workspaces
+///
+/// `yarn npm audit -AR`
+///
+/// Limit auditing to `dependencies` (excludes `devDependencies`)
+///
+/// `yarn npm audit --environment production`
+///
+/// Only report moderate (or more severe) vulnerabilities
+///
+/// `yarn npm audit --severity moderate`
+///
 #[cli::command]
 #[cli::path("npm", "audit")]
 #[cli::category("Npm-related commands")]
