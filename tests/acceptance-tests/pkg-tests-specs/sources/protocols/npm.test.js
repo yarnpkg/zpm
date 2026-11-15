@@ -211,5 +211,105 @@ describe(`Protocols`, () => {
         },
       ),
     );
+
+    // The `invalid-versions` package is published as 1.0.0 and 2.0.0, but its
+    // registry metadata also lists versions that aren't valid semver: `3.0`
+    // and `01.5.0` (only accepted by node-semver's loose mode), `4.0.0.1`, and
+    // `9007199254740992.0.0` (above Number.MAX_SAFE_INTEGER). Its `legacy` tag
+    // points to `3.0`.
+    describe(`registries listing invalid versions`, () => {
+      test(
+        `it should resolve an exact version`,
+        makeTemporaryEnv(
+          {
+            dependencies: {[`invalid-versions`]: `1.0.0`},
+          },
+          async ({run, source}) => {
+            await run(`install`);
+
+            await expect(source(`require('invalid-versions')`)).resolves.toMatchObject({
+              name: `invalid-versions`,
+              version: `1.0.0`,
+            });
+          },
+        ),
+      );
+
+      test(
+        `it should resolve a range to the highest valid version`,
+        makeTemporaryEnv(
+          {
+            dependencies: {[`invalid-versions`]: `^1.0.0`},
+          },
+          async ({run, source}) => {
+            await run(`install`);
+
+            await expect(source(`require('invalid-versions')`)).resolves.toMatchObject({
+              name: `invalid-versions`,
+              version: `1.0.0`,
+            });
+          },
+        ),
+      );
+
+      test(
+        `it should resolve a tag pointing to a valid version`,
+        makeTemporaryEnv(
+          {
+            dependencies: {[`invalid-versions`]: `latest`},
+          },
+          async ({run, source}) => {
+            await run(`install`);
+
+            await expect(source(`require('invalid-versions')`)).resolves.toMatchObject({
+              name: `invalid-versions`,
+              version: `2.0.0`,
+            });
+          },
+        ),
+      );
+
+      test(
+        `it should add the highest valid version`,
+        makeTemporaryEnv({}, async ({path, run, source}) => {
+          await run(`add`, `invalid-versions`);
+
+          await expect(xfs.readJsonPromise(`${path}/package.json`)).resolves.toMatchObject({
+            dependencies: {
+              [`invalid-versions`]: `^2.0.0`,
+            },
+          });
+
+          await expect(source(`require('invalid-versions')`)).resolves.toMatchObject({
+            name: `invalid-versions`,
+            version: `2.0.0`,
+          });
+        }),
+      );
+
+      test(
+        `it should report a clear error when a tag points to an invalid version`,
+        makeTemporaryEnv(
+          {
+            dependencies: {[`invalid-versions`]: `legacy`},
+          },
+          async ({run}) => {
+            await expect(run(`install`)).rejects.toThrow(/The `legacy` tag of invalid-versions points to an invalid semver version \(3\.0\)/);
+          },
+        ),
+      );
+
+      test(
+        `it should report a clear error when requesting an invalid version`,
+        makeTemporaryEnv(
+          {
+            dependencies: {[`invalid-versions`]: `3.0`},
+          },
+          async ({run}) => {
+            await expect(run(`install`)).rejects.toThrow(/The registry lists 3\.0 as a version of invalid-versions, but it isn't a valid semver version/);
+          },
+        ),
+      );
+    });
   });
 });

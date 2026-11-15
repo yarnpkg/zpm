@@ -111,10 +111,9 @@ async fn load_manifest_from_full_metadata(
             background_writes: context.background_writes.as_deref(),
         }).await?;
 
-    #[serde_as]
     #[derive(Deserialize)]
     struct RegistryMetadata<'a> {
-        #[serde(borrow)]
+        #[serde(borrow, deserialize_with = "npm::deserialize_packument_versions")]
         versions: BTreeMap<zpm_semver::Version, RawJsonValue<'a>>,
     }
 
@@ -235,9 +234,9 @@ pub async fn resolve_semver_descriptor(context: &InstallContext<'_>, descriptor:
     #[serde_as]
     #[derive(Deserialize)]
     struct RegistryMetadata<'a> {
-        #[serde_as(as = "Option<MapSkipError<_, _>>")]
+        #[serde_as(as = "Option<MapSkipError<npm::PackumentVersion, _>>")]
         time: Option<BTreeMap<zpm_semver::Version, DateTime<Utc>>>,
-        #[serde(borrow)]
+        #[serde(borrow, deserialize_with = "npm::deserialize_packument_versions")]
         versions: BTreeMap<zpm_semver::Version, RawJsonValue<'a>>,
     }
 
@@ -281,6 +280,10 @@ pub async fn resolve_semver_descriptor(context: &InstallContext<'_>, descriptor:
         return build_resolution_result(context, descriptor, package_ident, version.clone(), manifest);
     }
 
+    if let Some(error) = npm::find_ignored_version_error(package_ident, &bytes[..], params.range.source.as_str()) {
+        return Err(error);
+    }
+
     Err(Error::NoCandidatesFound(descriptor.range.clone()))
 }
 
@@ -321,10 +324,10 @@ pub async fn resolve_tag_descriptor(context: &InstallContext<'_>, descriptor: &D
     #[derive(Deserialize)]
     struct RegistryMetadata<'a> {
         #[serde(rename(deserialize = "dist-tags"))]
-        dist_tags: BTreeMap<String, zpm_semver::Version>,
-        #[serde_as(as = "Option<MapSkipError<_, _>>")]
+        dist_tags: BTreeMap<String, String>,
+        #[serde_as(as = "Option<MapSkipError<npm::PackumentVersion, _>>")]
         time: Option<BTreeMap<zpm_semver::Version, DateTime<Utc>>>,
-        #[serde(borrow)]
+        #[serde(borrow, deserialize_with = "npm::deserialize_packument_versions")]
         versions: BTreeMap<zpm_semver::Version, RawJsonValue<'a>>,
     }
 
@@ -332,10 +335,13 @@ pub async fn resolve_tag_descriptor(context: &InstallContext<'_>, descriptor: &D
     let registry_data: RegistryMetadata<'_>
         = JsonDocument::hydrate_from_slice(&bytes[..])?;
 
-    let latest_version
-        = registry_data.dist_tags
-        .get(params.tag.as_str())
-        .ok_or_else(|| Error::TagNotFound(params.tag.to_string()))?;
+    let latest_version = match npm::get_dist_tag_version(package_ident, &registry_data.dist_tags, params.tag.as_str()) {
+        Err(Error::TagNotFound(tag)) => {
+            return Err(npm::find_ignored_version_error(package_ident, &bytes[..], &tag).unwrap_or(Error::TagNotFound(tag)));
+        },
+
+        result => result?,
+    };
 
     let time
         = registry_data.time;
@@ -346,7 +352,7 @@ pub async fn resolve_tag_descriptor(context: &InstallContext<'_>, descriptor: &D
         = !project.http_client.config.is_network_enabled(&metadata_url);
 
     for (version, manifest) in registry_data.versions.into_iter().rev() {
-        if &version > latest_version {
+        if version > latest_version {
             continue;
         }
 

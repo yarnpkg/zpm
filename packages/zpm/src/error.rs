@@ -217,6 +217,12 @@ pub enum Error {
     #[error("Tag not found ({0})")]
     TagNotFound(String),
 
+    #[error("The `{tag}` tag of {ident} points to an invalid semver version ({version})", tag = .1, ident = .0.to_print_string(), version = .2)]
+    InvalidDistTagVersion(Ident, String, String),
+
+    #[error("The registry lists {version} as a version of {ident}, but it isn't a valid semver version", version = .1, ident = .0.to_print_string())]
+    InvalidRegistryVersion(Ident, String),
+
     #[error("Package not found ({})", .0.to_print_string())]
     PackageNotFound(Ident),
 
