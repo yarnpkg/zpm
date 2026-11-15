@@ -220,16 +220,40 @@ impl FromFileString for std::time::Duration {
     }
 }
 
+/// Durations are written as a single integer followed by the largest unit
+/// that represents them exactly, from milliseconds to days (`0s`, `90s`,
+/// `3h`, `1d`, `36h`, `1500ms`). The unit is always explicit so that the
+/// result doesn't depend on how a bare number would be interpreted, and the
+/// units are the ones Yarn 4 also understands. Weeks aren't used, since `7d`
+/// and `14d` are easier to read than `1w` and `2w`. Durations with a
+/// sub-millisecond part fall back to nanoseconds to stay exact.
 impl ToFileString for std::time::Duration {
     fn to_file_string(&self) -> String {
-        let ms = self.as_millis();
-        if ms == 0 {
-            "0s".to_string()
-        } else if ms % 1000 == 0 {
-            format!("{}s", ms / 1000)
-        } else {
-            format!("{}ms", ms)
+        const UNITS: [(&str, u128); 4] = [
+            ("d", 24 * 60 * 60 * 1000),
+            ("h", 60 * 60 * 1000),
+            ("m", 60 * 1000),
+            ("s", 1000),
+        ];
+
+        if self.is_zero() {
+            return "0s".to_string();
         }
+
+        if self.subsec_nanos() % 1_000_000 != 0 {
+            return format!("{}ns", self.as_nanos());
+        }
+
+        let ms
+            = self.as_millis();
+
+        for (unit, multiplier) in UNITS {
+            if ms % multiplier == 0 {
+                return format!("{}{}", ms / multiplier, unit);
+            }
+        }
+
+        format!("{}ms", ms)
     }
 }
 
@@ -387,3 +411,44 @@ macro_rules! impl_file_string_serialization(($type:ty) => {
         }
     }
 });
+
+#[cfg(test)]
+mod tests {
+    use std::time::Duration;
+
+    use rstest::rstest;
+
+    use super::*;
+
+    #[rstest]
+    #[case(Duration::ZERO, "0s")]
+    #[case(Duration::from_millis(1), "1ms")]
+    #[case(Duration::from_millis(1500), "1500ms")]
+    #[case(Duration::from_secs(1), "1s")]
+    #[case(Duration::from_secs(90), "90s")]
+    #[case(Duration::from_secs(60), "1m")]
+    #[case(Duration::from_secs(90 * 60), "90m")]
+    #[case(Duration::from_secs(3 * 60 * 60), "3h")]
+    #[case(Duration::from_secs(36 * 60 * 60), "36h")]
+    #[case(Duration::from_secs(24 * 60 * 60), "1d")]
+    #[case(Duration::from_secs(7 * 24 * 60 * 60), "7d")]
+    #[case(Duration::from_secs(400 * 24 * 60 * 60), "400d")]
+    #[case(Duration::from_nanos(1_500), "1500ns")]
+    #[case(Duration::new(1, 1), "1000000001ns")]
+    fn durations_should_use_a_canonical_file_string(#[case] duration: Duration, #[case] expected: &str) {
+        assert_eq!(duration.to_file_string(), expected);
+        assert_eq!(Duration::from_file_string(expected).unwrap(), duration);
+    }
+
+    #[rstest]
+    #[case("0", "0s")]
+    #[case("0ms", "0s")]
+    #[case("3h", "3h")]
+    #[case("180m", "3h")]
+    #[case("1.5h", "90m")]
+    #[case("1w", "7d")]
+    #[case("86400s", "1d")]
+    fn durations_should_normalize_equivalent_inputs(#[case] input: &str, #[case] expected: &str) {
+        assert_eq!(Duration::from_file_string(input).unwrap().to_file_string(), expected);
+    }
+}

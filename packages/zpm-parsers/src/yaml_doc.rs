@@ -136,16 +136,7 @@ impl YamlDocument {
                     .map(|(i, _)| i)
                     .unwrap_or(0);
 
-            while scanner.offset < self.input.len() {
-                let line_indent
-                    = scanner.get_line_indent();
-
-                if line_indent <= block_indent && !scanner.is_empty_or_comment_line() {
-                    break;
-                }
-
-                scanner.skip_line();
-            }
+            scanner.skip_block_lines(block_indent + 1);
         } else {
             scanner.skip_line();
         }
@@ -198,18 +189,8 @@ impl YamlDocument {
             let block_indent
                 = indent.child_indent.unwrap_or(2);
 
-            while scanner.offset < self.input.len() {
-                let line_indent
-                    = scanner.get_line_indent();
-
-                // Check if we hit a line with less indent (sibling or parent level)
-                // Lines at block_indent are children, not siblings
-                if line_indent < block_indent && !scanner.is_empty_or_comment_line() {
-                    break;
-                }
-
-                scanner.skip_line();
-            }
+            // Lines at block_indent are children, not siblings
+            scanner.skip_block_lines(block_indent);
         } else {
             // Skip inline value
             scanner.skip_to_eol();
@@ -224,6 +205,14 @@ impl YamlDocument {
         // If the new value starts with a newline (block value), start from after the colon
         // to remove any trailing spaces. Otherwise, add a space if needed.
         let (replace_start, replace_end, final_value) = if formatted.starts_with('\n') {
+            // The block value we replace includes its trailing newline, but
+            // the formatted value doesn't
+            let formatted = if is_block && post_value_offset > 0 && self.input[post_value_offset - 1] == b'\n' {
+                format!("{}\n", formatted)
+            } else {
+                formatted
+            };
+
             (after_colon_offset, post_value_offset, formatted)
         } else {
             // Ensure there's a space before inline values
@@ -244,31 +233,30 @@ impl YamlDocument {
     }
 
     fn insert_key(&mut self, path: &Path, value: Value) -> Result<(), Error> {
-        let parent_path
-            = Path::from_segments(path[0..path.len() - 1].to_vec());
-
-        if path.len() > 1 {
-            self.insert_nested_key(&parent_path, &path[path.len() - 1], value)
-        } else if path.len() == 1 {
-            self.insert_top_level_key(&path[path.len() - 1], value)
-        } else {
-            Ok(())
-        }
-    }
-
-    fn ensure_object_key(&mut self, path: &Path) -> Result<(), Error> {
-        if self.paths.contains_key(path) {
+        if path.is_empty() {
             return Ok(());
         }
 
-        self.insert_key(&path, Value::Object(vec![]))?;
+        // The missing parents are inserted along with the value, as a single
+        // nested object under the closest ancestor that already exists
+        let mut existing_len
+            = path.len() - 1;
 
-        Ok(())
+        while existing_len > 0 && !self.paths.contains_key(&Path::from_segments(path[0..existing_len].to_vec())) {
+            existing_len -= 1;
+        }
+
+        let value = path[existing_len + 1..].iter().rev()
+            .fold(value, |value, segment| Value::Object(vec![(segment.clone(), value)]));
+
+        if existing_len > 0 {
+            self.insert_nested_key(&Path::from_segments(path[0..existing_len].to_vec()), &path[existing_len], value)
+        } else {
+            self.insert_top_level_key(&path[0], value)
+        }
     }
 
     fn insert_nested_key(&mut self, parent_path: &Path, new_key: &str, value: Value) -> Result<(), Error> {
-        self.ensure_object_key(&parent_path)?;
-
         let &parent_key_offset
             = self.paths.get(parent_path)
                 .expect("A parent key must exist");
@@ -284,13 +272,29 @@ impl YamlDocument {
         let parent_indent
             = self.find_indent_at(parent_key_offset).map(|(i, _)| i).unwrap_or(0);
 
+        // The new key must be aligned with its siblings, if any
+        let sibling_indent
+            = self.paths.iter()
+                .filter(|(path, _)| path.is_direct_child_of(parent_path))
+                .filter_map(|(_, &offset)| self.find_indent_at(offset))
+                .map(|(indent, _)| indent)
+                .min();
+
         // Calculate indent delta by comparing parent's indent with grandparent's indent
-        let indent_delta
-            = parent_path.parent()
-                .and_then(|grandparent| self.paths.get(&grandparent))
-                .and_then(|&grandparent_offset| self.find_indent_at(grandparent_offset))
-                .map(|(grandparent_indent, _)| parent_indent.saturating_sub(grandparent_indent))
-                .unwrap_or(2);
+        let indent_delta = match sibling_indent {
+            Some(sibling_indent) if sibling_indent > parent_indent => {
+                sibling_indent - parent_indent
+            },
+
+            _ => {
+                parent_path.parent()
+                    .and_then(|grandparent| self.paths.get(&grandparent))
+                    .and_then(|&grandparent_offset| self.find_indent_at(grandparent_offset))
+                    .map(|(grandparent_indent, _)| parent_indent.saturating_sub(grandparent_indent))
+                    .filter(|delta| *delta > 0)
+                    .unwrap_or(2)
+            },
+        };
 
         let child_indent
             = parent_indent + indent_delta;
@@ -389,16 +393,7 @@ impl YamlDocument {
             let block_indent
                 = indent.child_indent.unwrap_or(self_indent + 2);
 
-            while scanner.offset < self.input.len() {
-                let line_indent
-                    = scanner.get_line_indent();
-
-                if line_indent < block_indent && !scanner.is_empty_or_comment_line() {
-                    break;
-                }
-
-                scanner.skip_line();
-            }
+            scanner.skip_block_lines(block_indent);
         } else {
             scanner.skip_line();
         }
@@ -586,12 +581,31 @@ impl YamlDocument {
 
                     result.push_str("- ");
 
-                    let item_str
-                        = self.format_value(item, Indent::with_style(
-                            Some(child_indent + 2),
-                            Some(child_indent + 4),
-                            indent.style,
-                        ));
+                    let item_str = match item {
+                        // Objects start on the same line as their dash, with
+                        // their other keys aligned on the first one
+                        Value::Object(obj) if !obj.is_empty() => {
+                            let item_indent
+                                = child_indent + 2;
+
+                            let formatted
+                                = self.format_value(item, Indent::with_style(
+                                    Some(item_indent),
+                                    Some(item_indent),
+                                    indent.style,
+                                ));
+
+                            formatted[1 + item_indent..].to_string()
+                        },
+
+                        _ => {
+                            self.format_value(item, Indent::with_style(
+                                Some(child_indent + 2),
+                                Some(child_indent + 4),
+                                indent.style,
+                            ))
+                        },
+                    };
 
                     result.push_str(&item_str);
                 }
@@ -762,72 +776,100 @@ impl YamlDocument {
     }
 }
 
-fn format_yaml_string(s: &str) -> String {
-    if s.is_empty() {
-        return "\"\"".to_string();
+/// YAML 1.1 (used by many other tools reading the same files) also reads
+/// those as booleans; we quote them so that they stay strings everywhere.
+const YAML_1_1_BOOLEANS: &[&str] = &[
+    "y", "yes", "n", "no", "on", "off",
+];
+
+/// Characters that can't start a plain scalar, as they'd be read as an
+/// indicator (anchor, alias, tag, directive, block scalar, flow collection,
+/// comment, quote...).
+const INDICATOR_CHARS: &[char] = &[
+    '-', '?', ':', ',', '[', ']', '{', '}', '#', '&', '*', '!', '|', '>', '\'', '"', '%', '@', '`',
+];
+
+/// Checks that `document` (a single `key: value` line) gets read back by
+/// the YAML parser as a mapping from `key` to `value`.
+fn plain_scalars_roundtrip(document: &str, key: &str, value: &str) -> bool {
+    let Ok(yaml_provider::Value::Mapping(mapping)) = yaml_provider::from_str::<yaml_provider::Value>(document) else {
+        return false;
+    };
+
+    let Some((parsed_key, parsed_value)) = mapping.iter().next() else {
+        return false;
+    };
+
+    mapping.len() == 1
+        && parsed_key.as_str() == Some(key)
+        && parsed_value.as_str() == Some(value)
+}
+
+/// Whether a scalar must be quoted to be read back as the very same string,
+/// be it as a key or as a value.
+fn scalar_needs_quotes(s: &str) -> bool {
+    if s.is_empty() || s.trim() != s {
+        return true;
+    }
+
+    if s.starts_with(INDICATOR_CHARS) {
+        return true;
+    }
+
+    // Line breaks, comments, and mapping separators; we also check for the
+    // characters that our own scanner relies on, even if they'd be fine
+    // for a regular YAML parser
+    if s.contains(['\n', '\r', '#', ':', '\t']) {
+        return true;
     }
 
     let lower
         = s.to_lowercase();
 
-    let needs_quotes
-        = lower == "true" || lower == "false" || lower == "null" || lower == "~"
-            || s.parse::<f64>().is_ok()
-            || s.contains(' ')
-            || s.contains(':')
-            || s.contains('#')
-            || s.contains('\n')
-            || s.contains('"')
-            || s.contains('\'')
-            || s.starts_with(' ')
-            || s.ends_with(' ')
-            || s.starts_with('-')
-            || s.starts_with('[')
-            || s.starts_with('{')
-            || s.starts_with('!')
-            || s.starts_with('&')
-            || s.starts_with('*')
-            || s.starts_with('|')
-            || s.starts_with('>')
-            || s.starts_with('%')
-            || s.starts_with('@')
-            || s.starts_with('`');
+    if YAML_1_1_BOOLEANS.contains(&lower.as_str()) {
+        return true;
+    }
 
-    if needs_quotes {
-        let escaped = s
-            .replace('\\', "\\\\")
-            .replace('"', "\\\"")
-            .replace('\n', "\\n")
-            .replace('\t', "\\t");
+    // Anything else the parser would read as something else than a string
+    // (null, booleans, numbers in their various notations, ...)
+    !plain_scalars_roundtrip(&format!("{s}: {s}\n"), s, s)
+}
 
-        format!("\"{}\"", escaped)
+fn quote_yaml_string(s: &str) -> String {
+    let mut quoted
+        = String::with_capacity(s.len() + 2);
+
+    quoted.push('"');
+
+    for c in s.chars() {
+        match c {
+            '\\' => quoted.push_str("\\\\"),
+            '"' => quoted.push_str("\\\""),
+            '\n' => quoted.push_str("\\n"),
+            '\r' => quoted.push_str("\\r"),
+            '\t' => quoted.push_str("\\t"),
+            c if c.is_control() => quoted.push_str(&format!("\\u{:04X}", c as u32)),
+            c => quoted.push(c),
+        }
+    }
+
+    quoted.push('"');
+    quoted
+}
+
+fn format_yaml_string(s: &str) -> String {
+    // Spaces and quotes are fine inside plain scalars, but we've always quoted
+    // them; we keep doing so for consistency with the files we already wrote
+    if s.contains([' ', '\'', '"']) || scalar_needs_quotes(s) {
+        quote_yaml_string(s)
     } else {
         s.to_string()
     }
 }
 
 fn format_yaml_key(key: &str) -> String {
-    // Check if the key needs quoting
-    let needs_quotes
-        = key.is_empty()
-            || key.contains(':')
-            || key.contains('#')
-            || key.contains('\n')
-            || key.starts_with(' ')
-            || key.ends_with(' ')
-            || key.starts_with('-')
-            || key.starts_with('[')
-            || key.starts_with('{')
-            || key.starts_with('"')
-            || key.starts_with('\'');
-
-    if needs_quotes {
-        let escaped
-            = key
-                .replace('\\', "\\\\")
-                .replace('"', "\\\"")
-                .replace('\n', "\\n");
-        format!("\"{}\"", escaped)
+    if scalar_needs_quotes(key) {
+        quote_yaml_string(key)
     } else {
         key.to_string()
     }
@@ -878,6 +920,38 @@ impl<'a> Scanner<'a> {
         if self.peek() == Some(b'\n') {
             self.offset += 1;
         }
+    }
+
+    /// Skips the lines of a block value, which are the ones indented by at
+    /// least `min_indent`. The empty lines and the less indented comments
+    /// that follow the block aren't part of it (they usually describe the
+    /// next key), so we leave them alone.
+    fn skip_block_lines(&mut self, min_indent: usize) {
+        let mut content_end
+            = self.offset;
+
+        while self.offset < self.input.len() {
+            let line_indent
+                = self.get_line_indent();
+
+            let is_empty_or_comment
+                = self.is_empty_or_comment_line();
+
+            if line_indent < min_indent && !is_empty_or_comment {
+                break;
+            }
+
+            let is_content
+                = !is_empty_or_comment || (line_indent >= min_indent && self.input.get(self.offset + line_indent) == Some(&b'#'));
+
+            self.skip_line();
+
+            if is_content {
+                content_end = self.offset;
+            }
+        }
+
+        self.offset = content_end;
     }
 
     fn get_line_indent(&self) -> usize {
@@ -977,6 +1051,24 @@ impl<'a> Scanner<'a> {
                         b'n' => key.push(b'\n'),
                         b't' => key.push(b'\t'),
                         b'r' => key.push(b'\r'),
+
+                        b'u' if quote == b'"' => {
+                            let code_point = self.input.get(self.offset + 1..self.offset + 5)
+                                .and_then(|hex| std::str::from_utf8(hex).ok())
+                                .and_then(|hex| u32::from_str_radix(hex, 16).ok())
+                                .and_then(char::from_u32);
+
+                            let Some(c) = code_point else {
+                                return Ok(None);
+                            };
+
+                            let mut buffer
+                                = [0; 4];
+
+                            key.extend_from_slice(c.encode_utf8(&mut buffer).as_bytes());
+                            self.offset += 4;
+                        },
+
                         c => key.push(c),
                     }
 
@@ -1167,6 +1259,22 @@ mod tests {
     #[case(b"a:\n  b:\n    c: value\n", vec!["a"], Value::String("replaced".to_string()), b"a: replaced\n")]
     #[case(b"a:\n  b:\n    c: value\n", vec!["a", "b"], Value::String("replaced".to_string()), b"a:\n  b: replaced\n")]
 
+    // Replace a block value followed by a sibling
+    #[case(b"a:\n  - x\nb: 1\n", vec!["a"], Value::Array(vec![Value::String("z".to_string())]), b"a:\n  - z\nb: 1\n")]
+    #[case(b"a:\n  x: 1\nb: 1\n", vec!["a"], Value::Object(vec![("z".to_string(), Value::Number("2".to_string()))]), b"a:\n  z: 2\nb: 1\n")]
+
+    // Comments and empty lines after a block value belong to the next key
+    #[case(b"a:\n  x: 1\n\n# About b\nb: 1\n", vec!["a"], Value::Object(vec![("z".to_string(), Value::Number("2".to_string()))]), b"a:\n  z: 2\n\n# About b\nb: 1\n")]
+    #[case(b"a:\n  x: 1\n  # About x\n\n# About b\nb: 1\n", vec!["a"], Value::String("new".to_string()), b"a: new\n\n# About b\nb: 1\n")]
+    #[case(b"a:\n  x: 1\n\n# About b\nb: 1\n", vec!["a"], Value::Undefined, b"\n# About b\nb: 1\n")]
+    #[case(b"a:\n  x: 1\n\n# About c\nc: 1\n", vec!["d"], Value::Number("2".to_string()), b"a:\n  x: 1\n\n# About c\nc: 1\nd: 2\n")]
+    #[case(b"a:\n  x: 1\n\n# About c\nc: 1\n", vec!["b"], Value::Number("2".to_string()), b"a:\n  x: 1\n\n# About c\nb: 2\nc: 1\n")]
+    #[case(b"c:\n  x: 1\n\n# About d\nd: 1\n", vec!["c", "z"], Value::Number("2".to_string()), b"c:\n  x: 1\n  z: 2\n\n# About d\nd: 1\n")]
+
+    // Missing parents are created along with the value
+    #[case(b"other: 1\n", vec!["a", "b", "c"], Value::Bool(true), b"a:\n  b:\n    c: true\nother: 1\n")]
+    #[case(b"a:\n    existing: 1\n", vec!["a", "b", "c"], Value::Bool(true), b"a:\n    b:\n        c: true\n    existing: 1\n")]
+
     fn test_update_document(#[case] document: &[u8], #[case] path: Vec<&str>, #[case] value: Value, #[case] expected: &[u8]) {
         let mut document
             = YamlDocument::new(document.to_vec()).unwrap();
@@ -1222,5 +1330,176 @@ mod tests {
 
         assert_eq!(sorted, expected_sorted, "sort_object_keys return value mismatch");
         assert_eq!(String::from_utf8(document.input).unwrap(), String::from_utf8(expected.to_vec()).unwrap());
+    }
+
+    const AWKWARD_SCALARS: &[&str] = &[
+        "plain", "@babel/parser@*", "@scope/name", "*foo", "&anchor", "!tag", "%directive", "`backtick", "|block", ">folded",
+        "?question", "? question", "-dash", "- dash", ",comma", "[bracket", "]bracket", "{brace", "}brace", "#comment",
+        "a #b", "a#b", "a: b", "a:b", "https://example.org", "//npm.example.com/", " leading", "trailing ", "  ",
+        "1", "1.0", "-1", "+1", "0x10", "0o17", "1e3", "1_000", ".5", ".inf", "-.inf", ".nan", "inf", "nan",
+        "true", "false", "True", "FALSE", "yes", "no", "No", "on", "OFF", "y", "n", "null", "Null", "~", "",
+        "multi\nline", "trailing newline\n", "carriage\rreturn", "tab\tchar", "back\\slash", "quote\"inside", "\"quoted\"",
+        "it's", "'single'", "foo@1.0 || 2.0", "lodash@^1.0.0", "a=b", "a,b", "日本語", "bell\u{7}",
+    ];
+
+    #[test]
+    fn test_awkward_scalars_roundtrip_as_values() {
+        for scalar in AWKWARD_SCALARS {
+            let mut document
+                = YamlDocument::new(b"before: 1\nafter: 2\n".to_vec()).unwrap();
+
+            document.set_path(&Path::from_segments(vec!["between".to_string()]), Value::String(scalar.to_string())).unwrap();
+
+            let text
+                = String::from_utf8(document.input.clone()).unwrap();
+
+            let parsed: BTreeMap<String, serde_yaml::Value>
+                = serde_yaml::from_str(&text).unwrap_or_else(|e| panic!("{scalar:?} produced an invalid document ({e}):\n{text}"));
+
+            assert_eq!(parsed.get("between").and_then(|v| v.as_str()), Some(*scalar), "{scalar:?} didn't round-trip:\n{text}");
+            assert_eq!(parsed.len(), 3, "{scalar:?} corrupted the document:\n{text}");
+        }
+    }
+
+    #[test]
+    fn test_awkward_scalars_roundtrip_as_keys() {
+        for scalar in AWKWARD_SCALARS {
+            let mut document
+                = YamlDocument::new(b"parent:\n  existing: 1\n".to_vec()).unwrap();
+
+            let path
+                = Path::from_segments(vec!["parent".to_string(), scalar.to_string(), "child".to_string()]);
+
+            document.set_path(&path, Value::Bool(true)).unwrap();
+
+            let text
+                = String::from_utf8(document.input.clone()).unwrap();
+
+            let parsed: BTreeMap<String, BTreeMap<String, serde_yaml::Value>>
+                = serde_yaml::from_str(&text).unwrap_or_else(|e| panic!("{scalar:?} produced an invalid document ({e}):\n{text}"));
+
+            let child
+                = parsed["parent"].get(*scalar)
+                    .unwrap_or_else(|| panic!("{scalar:?} didn't round-trip:\n{text}"));
+
+            assert_eq!(child["child"], serde_yaml::Value::Bool(true), "{scalar:?} didn't round-trip:\n{text}");
+            assert_eq!(parsed["parent"].len(), 2, "{scalar:?} corrupted the document:\n{text}");
+
+            // Our own scanner must also find the key again, so that it can
+            // be updated or removed later on
+            assert!(document.paths.contains_key(&path), "{scalar:?} can't be found by the scanner:\n{text}");
+
+            document.set_path(&path, Value::Undefined).unwrap();
+            assert_eq!(String::from_utf8(document.input).unwrap(), "parent:\n  existing: 1\n", "{scalar:?} couldn't be removed");
+        }
+    }
+
+    #[rstest]
+    #[case("@babel/parser@*", "\"@babel/parser@*\"")]
+    #[case("foo@*", "foo@*")]
+    #[case("https://example.org", "\"https://example.org\"")]
+    #[case("*foo", "\"*foo\"")]
+    #[case("1.0", "\"1.0\"")]
+    #[case("no", "\"no\"")]
+    #[case("~", "\"~\"")]
+    #[case("", "\"\"")]
+    #[case("0x10", "\"0x10\"")]
+    #[case(".inf", "\".inf\"")]
+    #[case("a #b", "\"a #b\"")]
+    #[case("multi\nline", "\"multi\\nline\"")]
+    #[case("back\\slash", "back\\slash")]
+    fn test_key_quoting(#[case] key: &str, #[case] expected: &str) {
+        assert_eq!(format_yaml_key(key), expected);
+    }
+
+    #[rstest]
+    #[case("3h", "3h")]
+    #[case("**", "\"**\"")]
+    #[case("0x10", "\"0x10\"")]
+    #[case(".inf", "\".inf\"")]
+    #[case("yes", "\"yes\"")]
+    #[case("Off", "\"Off\"")]
+    #[case("tab\tchar", "\"tab\\tchar\"")]
+    #[case("bell\u{7}", "\"bell\\u0007\"")]
+    fn test_value_quoting(#[case] value: &str, #[case] expected: &str) {
+        assert_eq!(format_yaml_string(value), expected);
+    }
+
+    #[test]
+    fn test_insert_object_in_array() {
+        let mut document
+            = YamlDocument::new(b"enableScripts: false\n".to_vec()).unwrap();
+
+        document.set_path(&Path::from_segments(vec!["packageRules".to_string()]), Value::Array(vec![
+            Value::Object(vec![
+                ("packageFilter".to_string(), Value::String("@scoped/*".to_string())),
+                ("npmMinimalAgeGate".to_string(), Value::String("3h".to_string())),
+                ("dependencies".to_string(), Value::Object(vec![("x".to_string(), Value::String("*".to_string()))])),
+            ]),
+            Value::Object(vec![
+                ("packageFilter".to_string(), Value::String("lodash".to_string())),
+            ]),
+        ])).unwrap();
+
+        assert_eq!(String::from_utf8(document.input).unwrap(), concat!(
+            "enableScripts: false\n",
+            "packageRules:\n",
+            "  - packageFilter: \"@scoped/*\"\n",
+            "    npmMinimalAgeGate: 3h\n",
+            "    dependencies:\n",
+            "      x: \"*\"\n",
+            "  - packageFilter: lodash\n",
+        ));
+    }
+
+    #[test]
+    fn test_untouched_parts_are_preserved() {
+        let original = concat!(
+            "# Top comment\n",
+            "\n",
+            "enableScripts:   false   # aligned comment\n",
+            "npmScopes:\n",
+            "    # indented comment\n",
+            "    'single-quoted':\n",
+            "        npmAlwaysAuth: \"true\"\n",
+            "    zzz:\n",
+            "        npmRegistryServer: 'https://example.org'\n",
+            "\n",
+            "# Trailing comment\n",
+            "packageExtensions:\n",
+            "    \"foo@*\":\n",
+            "        dependencies: {bar: '*'}\n",
+        );
+
+        let mut document
+            = YamlDocument::new(original.as_bytes().to_vec()).unwrap();
+
+        document.set_path(&Path::from_segments(vec!["npmScopes".to_string(), "@new".to_string(), "npmAlwaysAuth".to_string()]), Value::Bool(true)).unwrap();
+        document.set_path(&Path::from_segments(vec!["npmMinimalAgeGate".to_string()]), Value::String("3h".to_string())).unwrap();
+
+        assert_eq!(String::from_utf8(document.input.clone()).unwrap(), concat!(
+            "# Top comment\n",
+            "\n",
+            "enableScripts:   false   # aligned comment\n",
+            "npmMinimalAgeGate: 3h\n",
+            "npmScopes:\n",
+            "    # indented comment\n",
+            "    \"@new\":\n",
+            "        npmAlwaysAuth: true\n",
+            "    'single-quoted':\n",
+            "        npmAlwaysAuth: \"true\"\n",
+            "    zzz:\n",
+            "        npmRegistryServer: 'https://example.org'\n",
+            "\n",
+            "# Trailing comment\n",
+            "packageExtensions:\n",
+            "    \"foo@*\":\n",
+            "        dependencies: {bar: '*'}\n",
+        ));
+
+        document.set_path(&Path::from_segments(vec!["npmScopes".to_string(), "@new".to_string(), "npmAlwaysAuth".to_string()]), Value::Undefined).unwrap();
+        document.set_path(&Path::from_segments(vec!["npmMinimalAgeGate".to_string()]), Value::Undefined).unwrap();
+
+        assert_eq!(String::from_utf8(document.input).unwrap(), original);
     }
 }

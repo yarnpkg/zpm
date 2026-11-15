@@ -31,6 +31,8 @@ fn path_exists<'a>(value: &serde_json::Value, mut segments: impl Iterator<Item =
 /// This command removes a configuration setting from the project configuration file by default. Use `-H,--home` to remove it from the home
 /// configuration file instead.
 ///
+/// Removing the last key of an entry (for example `npmScopes.foo.npmAlwaysAuth`) also removes the entry itself, as it would otherwise be left empty.
+///
 #[cli::command]
 #[cli::path("config", "unset")]
 #[cli::category("Configuration commands")]
