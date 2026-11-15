@@ -1,6 +1,6 @@
-use std::process::ExitCode;
+use std::{future::Future, pin::Pin, process::ExitCode};
 
-use clipanion::{prelude::*, Environment};
+use clipanion::{details::CommandResult, prelude::*, Environment};
 use zpm_switch::{extract_bin_meta, BinMeta};
 
 mod debug;
@@ -49,8 +49,45 @@ mod workspaces_list;
 mod workspace;
 mod why;
 
-#[cli::program(async)]
-pub enum YarnCli {
+/// Declares the `YarnCli` program. This is what `#[cli::program(async)]`
+/// would generate, except that each command future is moved to the heap
+/// before being awaited.
+///
+/// Without that, the dispatch future embeds the futures of all the commands
+/// inline: it's as large as the largest of them, and in debug builds the
+/// frame polling it reserves a slot for each one of them (several MB), which
+/// overflows the default main thread stack.
+macro_rules! yarn_cli {
+    ($($variant:ident($command:ty),)*) => {
+        #[clipanion::derive::cli_enum]
+        #[clipanion::derive::cli_provider]
+        pub enum YarnCli {
+            $($variant($command),)*
+        }
+
+        impl clipanion::details::CommandExecutorAsync for YarnCli {
+            async fn execute(self, _env: &Environment) -> CommandResult {
+                match self {
+                    $(Self::$variant(command) => {
+                        execute_boxed(move || async move {
+                            command.execute().await.into()
+                        }).await
+                    },)*
+                }
+            }
+        }
+    };
+}
+
+/// Builds the command future from within a dedicated (per command) stack
+/// frame and moves it to the heap, so that the caller's frame only has to
+/// hold a pointer.
+#[inline(never)]
+fn execute_boxed<'a, F, Fut>(f: F) -> Pin<Box<dyn Future<Output = CommandResult> + 'a>> where F: FnOnce() -> Fut, Fut: Future<Output = CommandResult> + 'a {
+    Box::pin(f())
+}
+
+yarn_cli! {
     BenchCleanup(debug::bench::BenchCleanup),
     BenchIter(debug::bench::BenchIter),
     BenchPrepare(debug::bench::BenchPrepare),
