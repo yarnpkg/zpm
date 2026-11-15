@@ -63,9 +63,9 @@ Some new features have been implemented. They are not "breaking changes" per se,
 
 - The `.pnp.cjs` file isn't generated with the `+x` flag anymore.
 
-- The `yarn version apply` command has a couple of changes:
+- The `yarn version` and `yarn version apply` commands have a couple of changes:
 
-  - It will only update package versions and won't update the cross-dependency ranges anymore. Use the magic workspace ranges instead (`workspace:^`, `workspace:~`, `workspace:=`).
+  - They will only update package versions and won't update the cross-dependency ranges anymore (so they don't have an `--exact` flag either). Use the magic workspace ranges instead (`workspace:^`, `workspace:~`, `workspace:=`).
 
   - The `--recursive` flag isn't supported at the moment. Please reach out if you find it useful, as its behaviour doesn't feel intuitive and I feel like it might be in need of a rework. Consider using `--all` instead.
 

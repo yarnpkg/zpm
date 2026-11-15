@@ -89,7 +89,6 @@ pub enum YarnCli {
     VersionApply(version::apply::VersionApply),
     VersionCheck(version::check::VersionCheck),
     Version(version::immediate::Version),
-    VersionDeferred(version::deferred::VersionDeferred),
 
     Add(add::Add),
     BinList(bin::BinList),
