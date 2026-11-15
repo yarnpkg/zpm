@@ -22,6 +22,12 @@ impl BinList {
 ///
 /// This command prints the path to a binary exposed by one of the current workspace's dependencies. The reported path may point inside a zip archive.
 ///
+/// ## Examples
+///
+/// Print the path to a specific binary
+///
+/// `yarn bin eslint`
+///
 #[cli::command]
 #[cli::path("bin")]
 #[cli::category("Scripting commands")]

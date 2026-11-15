@@ -17,6 +17,12 @@ use crate::{
 ///
 /// Note that no attempt is made at validating that `resolution` is a valid resolution entry for `descriptor`.
 ///
+/// ## Examples
+///
+/// Force all instances of lodash@npm:^4.17.0 to resolve to 4.17.21
+///
+/// `yarn set resolution lodash@npm:^4.17.0 npm:4.17.21`
+///
 #[cli::command]
 #[cli::path("set", "resolution")]
 #[cli::category("Dependency management")]

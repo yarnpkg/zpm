@@ -21,6 +21,24 @@ use crate::{
 ///
 /// With `--json`, the value is always parsed as JSON before it is written.
 ///
+/// ## Examples
+///
+/// Set a simple configuration setting (a string, a number, or a boolean)
+///
+/// `yarn config set initScope myScope`
+///
+/// Set a complex configuration setting (an Array) using the `--json` flag
+///
+/// `yarn config set unsafeHttpWhitelist --json '["*.example.com", "example.com"]'`
+///
+/// Set a complex configuration setting (an Object) using the `--json` flag
+///
+/// `yarn config set npmScopes --json '{"my-company": {"npmRegistryServer": "https://npm.example.com"}}'`
+///
+/// Set a configuration setting in the home configuration file
+///
+/// `yarn config set -H initScope myScope`
+///
 #[cli::command]
 #[cli::path("config", "set")]
 #[cli::category("Configuration commands")]

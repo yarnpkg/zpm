@@ -17,6 +17,16 @@ use crate::{
 ///
 /// By default all packages are rebuilt. Pass package names to rebuild only specific packages.
 ///
+/// ## Examples
+///
+/// Rebuild all packages
+///
+/// `yarn rebuild`
+///
+/// Rebuild fsevents only
+///
+/// `yarn rebuild fsevents`
+///
 #[cli::command]
 #[cli::path("rebuild")]
 #[cli::category("Dependency management")]

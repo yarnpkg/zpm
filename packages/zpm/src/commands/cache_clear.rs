@@ -8,6 +8,25 @@ use crate::{error::Error, project, report::{StreamReport, StreamReportConfig, wi
 ///
 /// By default this command removes only the per-project cache. The mirror, which is the project-global registry cache, is left untouched unless
 /// `--mirror` or `--all` is set.
+///
+/// ## Examples
+///
+/// Remove the cache of the current project
+///
+/// `yarn cache clean`
+///
+/// Remove the archives stored in the registry mirror
+///
+/// `yarn cache clean --mirror`
+///
+/// Remove both the project cache and the registry mirror
+///
+/// `yarn cache clean --all`
+///
+/// Remove only the cache entries older than seven days
+///
+/// `yarn cache clean --old`
+///
 #[cli::command]
 #[cli::path("cache", "clear")]
 #[cli::path("cache", "clean")]
@@ -35,6 +54,12 @@ impl CacheClear {
 /// Remove cache files
 ///
 /// This is a shorthand for `yarn cache clear` when used with `--clear` or `--clean`.
+///
+/// ## Examples
+///
+/// Remove the cache of the current project
+///
+/// `yarn cache --clean`
 ///
 #[cli::command]
 #[cli::path("cache")]

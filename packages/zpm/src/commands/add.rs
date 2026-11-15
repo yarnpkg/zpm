@@ -155,11 +155,6 @@ async fn expand_with_types<'a>(install_context: &InstallContext<'a>, _resolve_op
 ///
 /// - If the added package specifies a range (such as `^1.0.0`, `latest`, or `rc`), Yarn will add this range as-is in the resulting package.json entry (in particular, tags such as `rc` will be encoded as-is rather than being converted into a semver range).
 ///
-/// If the `--cached` option is used, Yarn will preferably reuse the highest version already used somewhere within the project, even if through a transitive dependency.
-///
-/// If the `-i,--interactive` option is used, or if the `preferInteractive` setting is enabled, Yarn first checks whether other workspaces in the
-/// project already use the specified package and offers to reuse those ranges.
-///
 /// If the `--mode=<mode>` option is set, Yarn will change which artifacts are generated. The modes currently supported are:
 ///
 /// - `skip-build` will not run the build scripts at all. Note that this is different from setting `enableScripts` to false because the latter will disable build scripts, and thus affect the content of the artifacts generated on disk, whereas the former will just disable the build step - but not the scripts themselves, which just won't run.
@@ -167,6 +162,25 @@ async fn expand_with_types<'a>(install_context: &InstallContext<'a>, _resolve_op
 /// - `update-lockfile` will skip the link step altogether, and only fetch packages that are missing from the lockfile (or that have no associated checksums). This mode is typically used by tools like Renovate or Dependabot to keep a lockfile up-to-date without incurring the full install cost.
 ///
 /// For a compilation of all the supported protocols, please consult the dedicated page from our website: https://yarnpkg.com/protocols.
+///
+/// ## Examples
+///
+/// Add a regular package to the current workspace
+///
+/// `yarn add lodash`
+///
+/// Add a specific version for a package to the current workspace
+///
+/// `yarn add lodash@4.17.21`
+///
+/// Add a package to the `devDependencies` of the current workspace
+///
+/// `yarn add -D typescript`
+///
+/// Add a local package (gzipped tarball format) to the current workspace
+///
+/// `yarn add local-package-name@file:../path/to/local-package-name-v0.1.2.tgz`
+///
 #[cli::command]
 #[cli::path("add")]
 #[cli::category("Dependency management")]

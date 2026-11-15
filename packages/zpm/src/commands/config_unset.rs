@@ -31,6 +31,24 @@ fn path_exists<'a>(value: &serde_json::Value, mut segments: impl Iterator<Item =
 /// This command removes a configuration setting from the project configuration file by default. Use `-H,--home` to remove it from the home
 /// configuration file instead.
 ///
+/// ## Examples
+///
+/// Unset a simple configuration setting
+///
+/// `yarn config unset initScope`
+///
+/// Unset a complex configuration setting
+///
+/// `yarn config unset packageExtensions`
+///
+/// Unset a nested configuration setting
+///
+/// `yarn config unset npmScopes.company.npmRegistryServer`
+///
+/// Unset a configuration setting from the home configuration file
+///
+/// `yarn config unset -H initScope`
+///
 #[cli::command]
 #[cli::path("config", "unset")]
 #[cli::category("Configuration commands")]

@@ -19,6 +19,12 @@ use crate::{
 ///   - `yarn create react-app`  →  `yarn dlx create-react-app`
 ///   - `yarn create @scope/app` →  `yarn dlx @scope/create-app`
 ///
+/// ## Examples
+///
+/// Scaffold a new Vite project using `create-vite`
+///
+/// `yarn create vite my-app --template vanilla`
+///
 #[cli::command(proxy)]
 #[cli::path("create")]
 #[cli::category("Scripting commands")]
