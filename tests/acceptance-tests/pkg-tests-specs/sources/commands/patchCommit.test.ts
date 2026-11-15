@@ -56,6 +56,44 @@ describe(`Commands`, () => {
     );
 
     test(
+      `it should only look for the patch metadata in the ancestors of a relative patch folder`,
+      makeTemporaryEnv({
+        dependencies: {
+          [`one-fixed-dep`]: `1.0.0`,
+        },
+      }, async ({path, run, source}) => {
+        await run(`install`);
+
+        const {stdout} = await run(`patch`, `one-fixed-dep`, `--json`);
+        const {path: updateFolderN} = JSON.parse(stdout);
+
+        const updateFolder = npath.toPortablePath(updateFolderN);
+        const updateFile = ppath.join(updateFolder, `index.js`);
+
+        const fileSource = await xfs.readFilePromise(updateFile, `utf8`);
+        const fileUser = fileSource.replace(`require(dep)`, `42`);
+        await xfs.writeFilePromise(updateFile, fileUser);
+
+        // The patch folder lives outside of the project, so its relative path
+        // starts with `..`; the current directory isn't one of its ancestors
+        // and its content must be ignored.
+        const relativeUpdateFolder = ppath.relative(path, updateFolder);
+        expect(relativeUpdateFolder.startsWith(`../`)).toBe(true);
+
+        await xfs.writeFilePromise(ppath.join(path, `.locator`), `not a locator`);
+
+        await run(`patch-commit`, `-s`, npath.fromPortablePath(relativeUpdateFolder));
+        await run(`install`);
+
+        await expect(source(`require('one-fixed-dep')`)).resolves.toMatchObject({
+          dependencies: {
+            [`no-deps`]: 42,
+          },
+        });
+      }),
+    );
+
+    test(
       `it should reference patches from the workspace dependencies when possible`,
       makeTemporaryEnv({
         dependencies: {
