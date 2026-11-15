@@ -105,7 +105,7 @@
     },
     "enableLocalCacheCleanup": {
       "type": "boolean",
-      "description": "Whether to remove unused packages from the local cache after each install",
+      "description": "Whether to remove unused packages from the local cache after each install (only applies when `enableGlobalCache` is false and `cacheFolder` is left to its default)",
       "default": true
     },
     "enableImmutableCache": {

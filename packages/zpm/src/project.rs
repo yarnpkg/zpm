@@ -549,8 +549,11 @@ impl Project {
         let enable_immutable_cache
             = self.config.settings.enable_immutable_cache.value;
 
+        // We only prune the local cache when it lives in the folder Yarn picks by
+        // default; a custom cacheFolder may be shared or contain unrelated files.
         let cleanable_local_cache
-            = matches!(self.config.settings.cache_folder.source, Source::Default);
+            = self.config.settings.enable_local_cache_cleanup.value
+                && matches!(self.config.settings.cache_folder.source, Source::Default);
 
         let name_suffix = match compression_algorithm {
             Some(zpm_formats::CompressionAlgorithm::Deflate(_)) => format!("-d{}", compression_algorithm.unwrap().to_file_string()),

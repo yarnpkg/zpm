@@ -1251,7 +1251,7 @@
     "enableLocalCacheCleanup": {
       "_package": "@yarnpkg/core",
       "title": "Define whether unused packages should be removed from the local cache after installs.",
-      "description": "When enabled, Yarn can remove unused entries from the project-local cache after each install.",
+      "description": "When enabled, Yarn removes the archives that the project doesn't use anymore from the project-local cache after each install. This only applies when `enableGlobalCache` is disabled and `cacheFolder` is left to its default: a custom cache folder may be shared with other projects, so it is never pruned. Unused entries make installs fail when `enableImmutableCache` is set, unless this setting is disabled.",
       "type": "boolean",
       "default": true,
       "_examples": [
