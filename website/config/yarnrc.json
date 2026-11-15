@@ -186,7 +186,7 @@
     "globalFolder": {
       "_package": "@yarnpkg/core",
       "title": "Path where all files global to the system will be stored.",
-      "description": "Stores the global package cache and metadata cache. Defaults to `.yarn/zpm` inside your home directory.",
+      "description": "Stores the global package cache, the metadata cache, the content-addressed store, and other files shared between projects. Defaults to `%LOCALAPPDATA%\\Yarn\\zpm` on Windows (or `AppData\\Local\\Yarn\\zpm` inside your home directory if `LOCALAPPDATA` isn't set), to `$XDG_DATA_HOME/yarn/zpm` when `XDG_DATA_HOME` is set, and to `.yarn/zpm` inside your home directory otherwise. If `.yarn/zpm` already exists inside your home directory and the platform-specific folder doesn't, Yarn keeps using `.yarn/zpm`.",
       "type": "string",
       "format": "uri-reference",
       "examples": ["${HOME}/.yarn/zpm"]

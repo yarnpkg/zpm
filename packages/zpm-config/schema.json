@@ -181,8 +181,8 @@
     },
     "globalFolder": {
       "type": "zpm_utils::Path",
-      "description": "The folder where the global cache will be stored",
-      "default": "Path::home_dir().unwrap().unwrap().with_join_str(\".yarn/zpm\")"
+      "description": "The folder where global files (package cache, metadata cache, content-addressed store, ...) will be stored",
+      "default": "crate::compute_global_folder(context)"
     },
     "initScope": {
       "type": "string",
