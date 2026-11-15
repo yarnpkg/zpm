@@ -186,6 +186,44 @@ pub struct FindResult {
     pub detected_dev_package_manager_names: Vec<String>,
 }
 
+impl FindResult {
+    /// Checks that the detected project may be run with Yarn as far as
+    /// `devEngines` is concerned. Every command that picks the Yarn version
+    /// of the project must call this before looking at links or falling back
+    /// to the default Yarn version, so that a nested `devEngines` claim is
+    /// never silently treated as an unconfigured project.
+    ///
+    /// Other package managers may declare themselves in `devEngines`, so we
+    /// recognize those declarations to avoid running Yarn on their projects.
+    /// Yarn itself is only ever selected through the `packageManager` field,
+    /// so a Yarn entry in `devEngines` is an error rather than a declaration.
+    pub fn check_dev_engines(&self) -> Result<(), Error> {
+        let dev_package_manager_names
+            = &self.detected_dev_package_manager_names;
+
+        if dev_package_manager_names.iter().any(|name| name == "yarn") {
+            // If the project is explicitly configured for another package manager,
+            // report that rather than suggesting to switch it over to Yarn.
+            if let Some(package_manager) = &self.detected_package_manager {
+                package_manager.reference("yarn")?;
+            }
+
+            let manifest_path = self.detected_root_path
+                .as_ref()
+                .map(|detected_root_path| detected_root_path.with_join_str("package.json"))
+                .expect("A devEngines declaration always comes from a detected manifest");
+
+            return Err(Error::DevEnginesYarnUnsupported(manifest_path));
+        }
+
+        if !dev_package_manager_names.is_empty() {
+            return Err(Error::UnsupportedProject {field: "devEngines.packageManager.name", name: dev_package_manager_names.join(", ")});
+        }
+
+        Ok(())
+    }
+}
+
 const ROOT_FILES: &[&'static str] = &[
     "yarn.lock",
 ];

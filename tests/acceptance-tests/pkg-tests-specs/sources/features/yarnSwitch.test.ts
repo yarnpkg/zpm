@@ -1,4 +1,4 @@
-import {Filename, ppath, xfs} from '@yarnpkg/fslib';
+import {Filename, PortablePath, ppath, xfs} from '@yarnpkg/fslib';
 
 describe(`Features`, () => {
   describe(`Yarn Switch`, () => {
@@ -153,6 +153,58 @@ describe(`Features`, () => {
             await expect(runSwitch(`--version`)).resolves.toMatchObject({
               code: 0,
               stdout: expect.stringContaining(`Fake Yarn 6.0.0`),
+            });
+          }),
+        );
+      }
+
+      for (const name of [`yarn`, `pnpm`]) {
+        const expectedError = name === `yarn`
+          ? `Yarn can't be selected through devEngines.packageManager`
+          : `configured for use with pnpm (devEngines.packageManager.name)`;
+
+        const makeNestedEnv = (fn: (args: {cwd: PortablePath, runSwitch: any}) => Promise<void>) => makeTemporaryEnv({
+          packageManager: `yarn@6.0.0`,
+        }, async ({path, runSwitch}) => {
+          const cwd = ppath.join(path, `child`);
+          await xfs.mkdirpPromise(cwd);
+          await xfs.writeJsonPromise(ppath.join(cwd, Filename.manifest), {
+            devEngines: {packageManager: {name}},
+          });
+
+          await fn({cwd, runSwitch});
+        });
+
+        test(
+          `it should reject yarn init under a nested devEngines ${name} declaration`,
+          makeNestedEnv(async ({cwd, runSwitch}) => {
+            await expect(runSwitch(`init`, {cwd})).rejects.toMatchObject({
+              code: 1,
+              stdout: expect.stringContaining(expectedError),
+            });
+
+            await expect(xfs.readJsonPromise(ppath.join(cwd, Filename.manifest))).resolves.toEqual({
+              devEngines: {packageManager: {name}},
+            });
+          }),
+        );
+
+        test(
+          `it should refuse to start a daemon under a nested devEngines ${name} declaration`,
+          makeNestedEnv(async ({cwd, runSwitch}) => {
+            await expect(runSwitch(`switch`, `daemon`, `--start`, {cwd})).rejects.toMatchObject({
+              code: 1,
+              stdout: expect.stringContaining(expectedError),
+            });
+          }),
+        );
+
+        test(
+          `it should refuse to install the project version under a nested devEngines ${name} declaration`,
+          makeNestedEnv(async ({cwd, runSwitch}) => {
+            await expect(runSwitch(`switch`, `cache`, `--install`, {cwd})).rejects.toMatchObject({
+              code: 1,
+              stdout: expect.stringContaining(expectedError),
             });
           }),
         );
