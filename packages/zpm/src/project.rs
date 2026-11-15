@@ -378,7 +378,37 @@ impl Project {
             let source_lockfile
                 = Project::lockfile_from(&source_lockfile_path, &self.config)?;
 
-            lockfile.resolutions.extend(source_lockfile.resolutions.into_iter());
+            // The resolutions from the main lockfile take precedence so that
+            // migrated installs follow the changes made by the other
+            // contributors. They must come with their entries, or with a
+            // lockfile version that tells the install to only use them as
+            // pins (lockfiles from other Yarn releases don't have usable
+            // entries).
+            let source_has_entries
+                = source_lockfile.metadata.version == lockfile.metadata.version;
+
+            let mut requires_pinning
+                = false;
+
+            for (descriptor, locator) in source_lockfile.resolutions {
+                if !lockfile.entries.contains_key(&locator) {
+                    match source_lockfile.entries.get(&locator) {
+                        Some(entry) if source_has_entries => {
+                            lockfile.entries.insert(locator.clone(), entry.clone());
+                        },
+
+                        _ => {
+                            requires_pinning = true;
+                        },
+                    }
+                }
+
+                lockfile.resolutions.insert(descriptor, locator);
+            }
+
+            if requires_pinning {
+                lockfile.metadata.version = source_lockfile.metadata.version;
+            }
         }
 
         Ok(lockfile)
@@ -502,6 +532,19 @@ impl Project {
                 return Ok(());
             }
 
+            // The migration lockfile is derived from the main lockfile (which
+            // may have been updated by other contributors since it was last
+            // written, or may not have been converted yet), so immutable
+            // installs are allowed to refresh it as long as they don't add or
+            // change any resolution
+            if self.config.settings.enable_migration_mode.value && self.is_lockfile_refresh(lockfile)? {
+                lockfile_path
+                    .fs_create_parent()?
+                    .fs_write(contents)?;
+
+                return Ok(());
+            }
+
             let diff
                 = render_lockfile_diff(current_content.clone(), contents.into_bytes());
 
@@ -523,6 +566,21 @@ impl Project {
         }
 
         Ok(())
+    }
+
+    fn is_lockfile_refresh(&self, lockfile: &Lockfile) -> Result<bool, Error> {
+        let recorded_lockfile
+            = self.lockfile()?;
+
+        // Workspaces are always resolved from the project itself, and
+        // builtin patches follow the resolution of the package they patch
+        // (other Yarn releases also record them in a different format)
+        let is_refresh = lockfile.resolutions.iter()
+            .filter(|(_, locator)| !locator.reference.is_workspace_reference())
+            .filter(|(descriptor, _)| !matches!(&descriptor.range, Range::Patch(params) if params.path == "<builtin>"))
+            .all(|(descriptor, locator)| recorded_lockfile.resolutions.get(descriptor) == Some(locator));
+
+        Ok(is_refresh)
     }
 
     pub fn package_cache(&self) -> Result<CompositeCache, Error> {
@@ -1299,10 +1357,28 @@ impl Project {
         Ok(true)
     }
 
-    /// Modification time of the lockfile, in nanoseconds since the
-    /// epoch; `None` when the lockfile doesn't exist.
+    /// Modification time of the lockfile (in migration mode, the most
+    /// recent of the migration and main lockfiles), in nanoseconds since
+    /// the epoch; `None` when the lockfile doesn't exist.
     pub fn lockfile_changed_at(&self) -> Result<Option<u128>, Error> {
-        let metadata = match self.lockfile_path().fs_metadata() {
+        let Some(changed_at) = Project::file_changed_at(&self.lockfile_path())? else {
+            return Ok(None);
+        };
+
+        // Migrated installs also read the main lockfile, so the install must
+        // be considered stale when it changes (for example after a pull)
+        if self.config.settings.enable_migration_mode.value {
+            let source_changed_at
+                = Project::file_changed_at(&self.project_cwd.with_join_str(LOCKFILE_NAME))?;
+
+            return Ok(Some(changed_at.max(source_changed_at.unwrap_or(0))));
+        }
+
+        Ok(Some(changed_at))
+    }
+
+    fn file_changed_at(path: &Path) -> Result<Option<u128>, Error> {
+        let metadata = match path.fs_metadata() {
             Ok(metadata) => metadata,
             Err(err) => return match err.io_kind() {
                 Some(ErrorKind::NotFound) | Some(ErrorKind::NotADirectory) => Ok(None),
