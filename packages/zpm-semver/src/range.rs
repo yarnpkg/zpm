@@ -329,6 +329,7 @@ impl FromFileString for Range {
             .ok_or_else(|| Error::InvalidRange(src.to_string()))?;
 
         let prefix = extract::infix_to_prefix(tokens.as_slice())
+            .filter(|prefix| extract::is_valid_prefix(prefix))
             .ok_or_else(|| Error::InvalidRange(src.to_string()))?;
 
         Ok(Range {

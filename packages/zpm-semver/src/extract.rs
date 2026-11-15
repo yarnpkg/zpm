@@ -398,6 +398,7 @@ pub fn extract_tokens(str: &mut std::iter::Peekable<std::str::Chars>) -> Option<
                 str.next();
 
                 if str.next_if_eq(&'|').is_some() {
+                    push_any_if_empty_alternative(&mut tokens);
                     tokens.push(Token::Syntax(TokenType::Or));
                 } else {
                     return None;
@@ -440,7 +441,48 @@ pub fn extract_tokens(str: &mut std::iter::Peekable<std::str::Chars>) -> Option<
         }
     }
 
+    push_any_if_empty_alternative(&mut tokens);
+
     Some(tokens)
+}
+
+/// Like node-semver, an empty comparator set (an empty or whitespace-only
+/// range, or an empty side of `||` such as in `1.2.3 ||`) matches any
+/// version, so we give it the same meaning as `*`.
+fn push_any_if_empty_alternative(tokens: &mut EcoVec<Token>) {
+    if matches!(tokens.last(), None | Some(Token::Syntax(TokenType::Or))) {
+        tokens.push(Token::Operation(
+            OperatorType::GreaterThanOrEqual,
+            Version::new_from_components(0, 0, 0, None),
+        ));
+    }
+}
+
+/// Checks that a prefix expression is a complete tree: each operator has
+/// exactly two operands, and no token is left over. Malformed inputs (`&&`,
+/// `()`, `1.2.3 &&`, ...) would otherwise only be noticed when evaluating the
+/// range.
+pub fn is_valid_prefix(tokens: &[Token]) -> bool {
+    let mut expected_operands = 1usize;
+
+    for token in tokens {
+        if expected_operands == 0 {
+            return false;
+        }
+
+        match token {
+            Token::Operation(_, _)
+                => expected_operands -= 1,
+
+            Token::Syntax(TokenType::SAnd | TokenType::And | TokenType::Or)
+                => expected_operands += 1,
+
+            Token::Syntax(TokenType::LParen | TokenType::RParen)
+                => return false,
+        }
+    }
+
+    expected_operands == 0
 }
 
 pub fn infix_to_prefix(input: &[Token]) -> Option<EcoVec<Token>> {
