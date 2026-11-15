@@ -100,7 +100,23 @@ struct Manifest {
 
     #[serde(default)]
     #[serde_as(deserialize_as = "DefaultOnError")]
+    gypfile: Option<bool>,
+
+    #[serde(default)]
+    #[serde_as(deserialize_as = "DefaultOnError")]
     scripts: BTreeMap<String, String>,
+}
+
+/**
+ * Like npm, packages with a `binding.gyp` file at their root but no install
+ * scripts are built by running `node-gyp rebuild`, unless they opt out by
+ * setting `gypfile` to `false` (typically because they ship prebuilt
+ * binaries).
+ */
+fn has_implicit_node_gyp_build(manifest: &Manifest, has_binding_gyp: bool) -> bool {
+    has_binding_gyp
+        && manifest.gypfile != Some(false)
+        && !UNPLUG_SCRIPTS.iter().any(|k| manifest.scripts.contains_key(*k))
 }
 
 fn extract_binaries(name: Option<Ident>, bin: Option<BinField>) -> BTreeMap<String, Binary> {
@@ -215,6 +231,13 @@ fn extract_pypi_binaries(package_bytes: &[u8]) -> Result<BTreeMap<String, Binary
 }
 
 impl ContentFlags {
+    /**
+     * Content flags are cached in the install state and reused by later
+     * installs. Bump this version whenever the way they're computed changes,
+     * so that the flags computed by older releases get recomputed.
+     */
+    pub const VERSION: u32 = 1;
+
     pub fn extract(locator: &Locator, package_data: &PackageData) -> Result<Self, Error> {
         if matches!(locator.reference, Reference::Link(_)) {
             return Ok(Self::default());
@@ -295,16 +318,16 @@ impl ContentFlags {
         let entries
             = zpm_formats::zip::entries_from_zip(&package_bytes)?;
 
-        if build_commands.is_empty() {
-            let binding_gyp_name
-                = Path::from_str(&format!("node_modules/{}/binding.gyp", locator.ident.as_str()))?;
+        let binding_gyp_name
+            = Path::from_str(&format!("node_modules/{}/binding.gyp", locator.ident.as_str()))?;
+        let has_binding_gyp
+            = entries.iter().any(|entry| entry.name == binding_gyp_name);
 
-            if entries.iter().any(|entry| entry.name == binding_gyp_name) {
-                build_commands.push(build::Command::Program {
-                    name: "node-gyp".to_string(),
-                    args: vec!["rebuild".to_string()],
-                });
-            }
+        if has_implicit_node_gyp_build(&meta_manifest, has_binding_gyp) {
+            build_commands.push(build::Command::Program {
+                name: "node-gyp".to_string(),
+                args: vec!["rebuild".to_string()],
+            });
         }
 
         let prefer_extracted
@@ -323,7 +346,49 @@ impl ContentFlags {
 
 #[cfg(test)]
 mod tests {
-    use crate::content_flags::parse_pypi_entry_point_value;
+    use zpm_parsers::JsonDocument;
+
+    use crate::content_flags::{
+        Manifest,
+        has_implicit_node_gyp_build,
+        parse_pypi_entry_point_value,
+    };
+
+    fn manifest(json: &str) -> Manifest {
+        JsonDocument::hydrate_from_slice(json.as_bytes()).unwrap()
+    }
+
+    #[test]
+    fn it_builds_packages_with_a_binding_gyp_using_node_gyp() {
+        assert!(has_implicit_node_gyp_build(&manifest(r#"{}"#), true));
+        assert!(has_implicit_node_gyp_build(&manifest(r#"{"gypfile": true}"#), true));
+        assert!(has_implicit_node_gyp_build(&manifest(r#"{"scripts": {"build": "tsc"}}"#), true));
+    }
+
+    #[test]
+    fn it_doesnt_build_packages_without_a_binding_gyp_using_node_gyp() {
+        assert!(!has_implicit_node_gyp_build(&manifest(r#"{}"#), false));
+        assert!(!has_implicit_node_gyp_build(&manifest(r#"{"gypfile": true}"#), false));
+    }
+
+    #[test]
+    fn it_doesnt_build_packages_with_install_scripts_using_node_gyp() {
+        assert!(!has_implicit_node_gyp_build(&manifest(r#"{"scripts": {"preinstall": "true"}}"#), true));
+        assert!(!has_implicit_node_gyp_build(&manifest(r#"{"scripts": {"install": "true"}}"#), true));
+        assert!(!has_implicit_node_gyp_build(&manifest(r#"{"scripts": {"postinstall": "true"}}"#), true));
+    }
+
+    #[test]
+    fn it_doesnt_build_packages_with_gypfile_false_using_node_gyp() {
+        assert!(!has_implicit_node_gyp_build(&manifest(r#"{"gypfile": false}"#), true));
+    }
+
+    #[test]
+    fn it_only_lets_the_false_boolean_disable_the_node_gyp_build() {
+        assert!(has_implicit_node_gyp_build(&manifest(r#"{"gypfile": "false"}"#), true));
+        assert!(has_implicit_node_gyp_build(&manifest(r#"{"gypfile": 0}"#), true));
+        assert!(has_implicit_node_gyp_build(&manifest(r#"{"gypfile": null}"#), true));
+    }
 
     #[test]
     fn it_accepts_valid_entry_point_values() {

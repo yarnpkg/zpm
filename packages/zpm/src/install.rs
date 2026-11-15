@@ -905,6 +905,10 @@ pub struct InstallState {
     pub production: bool,
 
     pub install_config_hash: Option<Hash64>,
+
+    /// The `ContentFlags::VERSION` the content flags were computed with;
+    /// flags from another version are recomputed rather than reused.
+    pub content_flags_version: u32,
     pub content_flags: BTreeMap<Locator, ContentFlags>,
     pub resolution_tree: ResolutionTree,
     pub descriptor_to_locator: BTreeMap<Descriptor, Locator>,
@@ -945,6 +949,7 @@ impl Default for InstallState {
             installed_workspaces: Some(BTreeSet::new()),
             production: false,
             install_config_hash: None,
+            content_flags_version: ContentFlags::VERSION,
             content_flags: BTreeMap::new(),
             resolution_tree: ResolutionTree::default(),
             descriptor_to_locator: BTreeMap::new(),
@@ -1843,6 +1848,7 @@ impl<'a> InstallManager<'a> {
     fn record_fetch(&mut self, locator: Locator, package_data: PackageData) -> Result<(), Error> {
         let content_flags
             = self.previous_state
+                .filter(|previous_state| previous_state.content_flags_version == ContentFlags::VERSION)
                 .and_then(|previous_state| previous_state.content_flags.get(&locator))
                 .cloned()
                 .map_or_else(|| ContentFlags::extract(&locator, &package_data), Ok)?;
