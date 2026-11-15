@@ -171,7 +171,7 @@ describe(`Features`, () => {
     };
 
     const setupWorkspaces = async (path: PortablePath) => {
-      for (const workspace of [`ws1`, `ws2`]) {
+      for (const workspace of [`ws1`, `ws2`] as Array<Filename>) {
         await xfs.mkdirPromise(ppath.join(path, workspace));
         await xfs.writeJsonPromise(ppath.join(path, workspace, Filename.manifest), {
           name: workspace,

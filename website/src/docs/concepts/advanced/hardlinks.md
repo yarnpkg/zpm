@@ -97,6 +97,8 @@ steps:
 
 Once the setup is fixed, run `yarn install --force` once to turn the existing copies back into links.
 
+If a copy can't be replaced (on Windows, typically because a process has the file open), Yarn keeps it, reports it in the warning, and tries again on the next `yarn install --force`.
+
 ### Use a mode that doesn't use the store
 
 If you can't move the global folder, you can switch to an install mode that doesn't rely on the store:

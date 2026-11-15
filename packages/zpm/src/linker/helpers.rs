@@ -231,6 +231,11 @@ pub enum CopyFallbackReason {
     /// The source already has as many links as the filesystem allows
     /// (`EMLINK`, or `ERROR_TOO_MANY_LINKS` past NTFS' 1023 links).
     LinkLimit,
+
+    /// An up-to-date copy from an earlier fallback could have become a
+    /// link, but replacing it failed (on Windows, typically because a
+    /// process has it open); the copy is kept.
+    ReplaceFailed,
 }
 
 impl CopyFallbackReason {
@@ -263,6 +268,7 @@ enum LinkOutcome {
 pub struct CopyFallbacks {
     cross_device: std::sync::atomic::AtomicUsize,
     link_limit: std::sync::atomic::AtomicUsize,
+    replace_failed: std::sync::atomic::AtomicUsize,
 }
 
 pub const COPY_FALLBACK_DOCS_URL: &str = "https://yarnpkg.com/concepts/hardlinks";
@@ -277,6 +283,7 @@ impl CopyFallbacks {
             LinkOutcome::Linked => return,
             LinkOutcome::Copied(CopyFallbackReason::CrossDevice) => &self.cross_device,
             LinkOutcome::Copied(CopyFallbackReason::LinkLimit) => &self.link_limit,
+            LinkOutcome::Copied(CopyFallbackReason::ReplaceFailed) => &self.replace_failed,
         };
 
         counter.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
@@ -286,30 +293,30 @@ impl CopyFallbacks {
     /// `store` is the global index the files link from, or `None` for
     /// `hardlinks-local` (where they link to each other).
     pub fn warning(&self, store: Option<&Path>, project_cwd: &Path) -> Option<String> {
-        let cross_device
-            = self.cross_device.load(std::sync::atomic::Ordering::Relaxed);
-        let link_limit
-            = self.link_limit.load(std::sync::atomic::Ordering::Relaxed);
-
-        let total
-            = cross_device + link_limit;
-
-        if total == 0 {
-            return None;
-        }
-
         let cross_device_reason = match store {
             Some(store) => format!("the store at {} and the project at {} are on different filesystems", store.to_print_string(), project_cwd.to_print_string()),
             None => format!("parts of the project at {} are on different filesystems", project_cwd.to_print_string()),
         };
 
-        let link_limit_reason
-            = "their content reached the filesystem's maximum number of hard links per file".to_string();
+        let reasons = [
+            (&self.cross_device, cross_device_reason),
+            (&self.link_limit, "their content reached the filesystem's maximum number of hard links per file".to_string()),
+            (&self.replace_failed, "existing copies couldn't be replaced by hard links".to_string()),
+        ];
 
-        let reason = match (cross_device, link_limit) {
-            (_, 0) => format!("because {}", cross_device_reason),
-            (0, _) => format!("because {}", link_limit_reason),
-            _ => format!("({} because {}, {} because {})", cross_device, cross_device_reason, link_limit, link_limit_reason),
+        let reasons
+            = reasons.into_iter()
+                .map(|(counter, reason)| (counter.load(std::sync::atomic::Ordering::Relaxed), reason))
+                .filter(|(count, _)| *count > 0)
+                .collect::<Vec<_>>();
+
+        let total: usize
+            = reasons.iter().map(|(count, _)| count).sum();
+
+        let reason = match reasons.as_slice() {
+            [] => return None,
+            [(_, reason)] => format!("because {}", reason),
+            _ => format!("({})", reasons.iter().map(|(count, reason)| format!("{} because {}", count, reason)).collect::<Vec<_>>().join(", ")),
         };
 
         let files = match total {
@@ -341,10 +348,16 @@ fn ensure_hardlink(target: &Path, source: &Path, data: &[u8]) -> Result<LinkOutc
     let injected_error
         = injected_link_error();
 
-    ensure_hardlink_with(target, source, data, &|source, target| match injected_error {
+    let link = |source: &Path, target: &Path| match injected_error {
         Some(kind) => Err(kind.into()),
         None => std::fs::hard_link(source.to_path_buf(), target.to_path_buf()),
-    })
+    };
+
+    let rename = |from: &Path, to: &Path| {
+        std::fs::rename(from.to_path_buf(), to.to_path_buf())
+    };
+
+    ensure_hardlink_with(target, source, data, &link, &rename)
 }
 
 /// Acceptance tests can't mount a second filesystem or create a
@@ -367,7 +380,9 @@ fn injected_link_error() -> Option<std::io::ErrorKind> {
     })
 }
 
-fn ensure_hardlink_with(target: &Path, source: &Path, data: &[u8], link: &dyn Fn(&Path, &Path) -> std::io::Result<()>) -> Result<LinkOutcome, Error> {
+type FsOp<'a> = &'a dyn Fn(&Path, &Path) -> std::io::Result<()>;
+
+fn ensure_hardlink_with(target: &Path, source: &Path, data: &[u8], link: FsOp<'_>, rename: FsOp<'_>) -> Result<LinkOutcome, Error> {
     if is_same_file(target, source) {
         return Ok(LinkOutcome::Linked);
     }
@@ -375,25 +390,10 @@ fn ensure_hardlink_with(target: &Path, source: &Path, data: &[u8], link: &dyn Fn
     // A copy left by an earlier fallback is kept as long as linking still
     // fails, so reinstalling over a copied tree doesn't rewrite it. The
     // probe goes next to it, and replaces it if linking works again (the
-    // store moved, or an entry got below the link limit).
+    // store moved, or an entry got below the link limit). The copy is
+    // valid, so failing to replace it never fails the install.
     if is_fallback_copy_of(target, source, data) {
-        let probe_path = target.dirname()
-            .expect("Expected the target to have a parent")
-            .with_join_str(format!(".{}.link-probe", target.basename().unwrap_or_default()));
-
-        let _ = probe_path.fs_rm_file().ok_missing();
-
-        return match link(source, &probe_path) {
-            Ok(()) => {
-                probe_path.fs_rename(target)?;
-                Ok(LinkOutcome::Linked)
-            },
-
-            Err(error) => match CopyFallbackReason::from_link_error(&error) {
-                Some(reason) => Ok(LinkOutcome::Copied(reason)),
-                None => Err(zpm_utils::PathError::from(error).into()),
-            },
-        };
+        return Ok(upgrade_fallback_copy(target, source, link, rename));
     }
 
     if target.fs_exists() {
@@ -417,6 +417,31 @@ fn ensure_hardlink_with(target: &Path, source: &Path, data: &[u8], link: &dyn Fn
             Ok(LinkOutcome::Copied(reason))
         },
     }
+}
+
+fn upgrade_fallback_copy(target: &Path, source: &Path, link: FsOp<'_>, rename: FsOp<'_>) -> LinkOutcome {
+    let probe_path = target.dirname()
+        .expect("Expected the target to have a parent")
+        .with_join_str(format!(".{}.link-probe", target.basename().unwrap_or_default()));
+
+    // Also clears a probe left behind by an interrupted install
+    let _ = probe_path.fs_rm_file().ok_missing();
+
+    let outcome = match link(source, &probe_path) {
+        Ok(()) => match rename(&probe_path, target) {
+            Ok(()) => return LinkOutcome::Linked,
+            Err(_) => LinkOutcome::Copied(CopyFallbackReason::ReplaceFailed),
+        },
+
+        Err(error) => LinkOutcome::Copied(
+            CopyFallbackReason::from_link_error(&error)
+                .unwrap_or(CopyFallbackReason::ReplaceFailed),
+        ),
+    };
+
+    let _ = probe_path.fs_rm_file().ok_missing();
+
+    outcome
 }
 
 /// Whether `target` is a regular file with the permissions of `source`
@@ -932,6 +957,21 @@ mod tests {
         std::fs::hard_link(source.to_path_buf(), target.to_path_buf())
     }
 
+    fn real_rename(from: &Path, to: &Path) -> std::io::Result<()> {
+        std::fs::rename(from.to_path_buf(), to.to_path_buf())
+    }
+
+    fn ensure_with_link(target: &Path, source: &Path, data: &[u8], link: FsOp<'_>) -> Result<LinkOutcome, Error> {
+        ensure_hardlink_with(target, source, data, link, &real_rename)
+    }
+
+    fn probe_files(dir: &Path) -> Vec<String> {
+        dir.fs_read_dir().unwrap()
+            .map(|entry| entry.unwrap().file_name().to_string_lossy().to_string())
+            .filter(|name| name.ends_with(".link-probe"))
+            .collect()
+    }
+
     fn setup() -> (Path, Path, Path) {
         let dir
             = Path::temp_dir().unwrap();
@@ -981,7 +1021,7 @@ mod tests {
         let (_dir, source, target)
             = setup();
 
-        assert_eq!(ensure_hardlink_with(&target, &source, b"hello", &real_link).unwrap(), LinkOutcome::Linked);
+        assert_eq!(ensure_with_link(&target, &source, b"hello", &real_link).unwrap(), LinkOutcome::Linked);
         assert!(is_same_file(&target, &source));
     }
 
@@ -991,7 +1031,7 @@ mod tests {
             = setup();
 
         let outcome
-            = ensure_hardlink_with(&target, &source, b"hello", &failing_link(std::io::ErrorKind::CrossesDevices)).unwrap();
+            = ensure_with_link(&target, &source, b"hello", &failing_link(std::io::ErrorKind::CrossesDevices)).unwrap();
 
         assert_eq!(outcome, LinkOutcome::Copied(CopyFallbackReason::CrossDevice));
         assert!(!is_same_file(&target, &source));
@@ -1010,7 +1050,7 @@ mod tests {
             = setup();
 
         let outcome
-            = ensure_hardlink_with(&target, &source, b"hello", &failing_link(std::io::ErrorKind::TooManyLinks)).unwrap();
+            = ensure_with_link(&target, &source, b"hello", &failing_link(std::io::ErrorKind::TooManyLinks)).unwrap();
 
         assert_eq!(outcome, LinkOutcome::Copied(CopyFallbackReason::LinkLimit));
         assert_eq!(target.fs_read_text().unwrap(), "hello");
@@ -1024,7 +1064,7 @@ mod tests {
         let cross_device
             = failing_link(std::io::ErrorKind::CrossesDevices);
 
-        ensure_hardlink_with(&target, &source, b"hello", &cross_device).unwrap();
+        ensure_with_link(&target, &source, b"hello", &cross_device).unwrap();
 
         // A second name for the copy tells us whether the next pass
         // replaced the file rather than leaving it alone
@@ -1036,7 +1076,7 @@ mod tests {
         let attempts
             = std::sync::atomic::AtomicUsize::new(0);
 
-        let outcome = ensure_hardlink_with(&target, &source, b"hello", &|source, target| {
+        let outcome = ensure_with_link(&target, &source, b"hello", &|source, target| {
             attempts.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
             cross_device(source, target)
         }).unwrap();
@@ -1054,11 +1094,11 @@ mod tests {
         let cross_device
             = failing_link(std::io::ErrorKind::CrossesDevices);
 
-        ensure_hardlink_with(&target, &source, b"hello", &cross_device).unwrap();
+        ensure_with_link(&target, &source, b"hello", &cross_device).unwrap();
 
         target.fs_write("HELLO").unwrap();
 
-        assert_eq!(ensure_hardlink_with(&target, &source, b"hello", &cross_device).unwrap(), LinkOutcome::Copied(CopyFallbackReason::CrossDevice));
+        assert_eq!(ensure_with_link(&target, &source, b"hello", &cross_device).unwrap(), LinkOutcome::Copied(CopyFallbackReason::CrossDevice));
         assert_eq!(target.fs_read_text().unwrap(), "hello");
     }
 
@@ -1070,7 +1110,7 @@ mod tests {
         let cross_device
             = failing_link(std::io::ErrorKind::CrossesDevices);
 
-        ensure_hardlink_with(&target, &source, b"hello", &cross_device).unwrap();
+        ensure_with_link(&target, &source, b"hello", &cross_device).unwrap();
 
         // Same size and permissions, different content (a package update)
         let updated_source = dir
@@ -1082,7 +1122,7 @@ mod tests {
             .fs_set_mode(0o755)
             .unwrap();
 
-        assert_eq!(ensure_hardlink_with(&target, &updated_source, b"world", &cross_device).unwrap(), LinkOutcome::Copied(CopyFallbackReason::CrossDevice));
+        assert_eq!(ensure_with_link(&target, &updated_source, b"world", &cross_device).unwrap(), LinkOutcome::Copied(CopyFallbackReason::CrossDevice));
         assert_eq!(target.fs_read_text().unwrap(), "world");
     }
 
@@ -1091,11 +1131,67 @@ mod tests {
         let (_dir, source, target)
             = setup();
 
-        ensure_hardlink_with(&target, &source, b"hello", &failing_link(std::io::ErrorKind::CrossesDevices)).unwrap();
+        ensure_with_link(&target, &source, b"hello", &failing_link(std::io::ErrorKind::CrossesDevices)).unwrap();
 
-        assert_eq!(ensure_hardlink_with(&target, &source, b"hello", &real_link).unwrap(), LinkOutcome::Linked);
+        assert_eq!(ensure_with_link(&target, &source, b"hello", &real_link).unwrap(), LinkOutcome::Linked);
         assert!(is_same_file(&target, &source));
         assert_eq!(target.dirname().unwrap().fs_read_dir().unwrap().count(), 1);
+    }
+
+    #[test]
+    fn keeps_copies_when_the_probe_fails_with_another_error() {
+        let (_dir, source, target)
+            = setup();
+
+        ensure_with_link(&target, &source, b"hello", &failing_link(std::io::ErrorKind::CrossesDevices)).unwrap();
+
+        // Leaves a file behind before failing, like a partial link would
+        let outcome = ensure_with_link(&target, &source, b"hello", &|source, target| {
+            real_link(source, target)?;
+            Err(std::io::Error::from(std::io::ErrorKind::PermissionDenied))
+        }).unwrap();
+
+        assert_eq!(outcome, LinkOutcome::Copied(CopyFallbackReason::ReplaceFailed));
+        assert!(!is_same_file(&target, &source));
+        assert_eq!(target.fs_read_text().unwrap(), "hello");
+        assert!(probe_files(&target.dirname().unwrap()).is_empty());
+    }
+
+    #[test]
+    fn keeps_copies_when_replacing_them_fails() {
+        let (_dir, source, target)
+            = setup();
+
+        ensure_with_link(&target, &source, b"hello", &failing_link(std::io::ErrorKind::CrossesDevices)).unwrap();
+
+        // What Windows does when a process has the target open
+        let outcome = ensure_hardlink_with(&target, &source, b"hello", &real_link, &|_, _| {
+            Err(std::io::Error::from(std::io::ErrorKind::PermissionDenied))
+        }).unwrap();
+
+        assert_eq!(outcome, LinkOutcome::Copied(CopyFallbackReason::ReplaceFailed));
+        assert!(!is_same_file(&target, &source));
+        assert_eq!(target.fs_read_text().unwrap(), "hello");
+        assert!(probe_files(&target.dirname().unwrap()).is_empty());
+    }
+
+    #[test]
+    fn clears_probes_left_by_interrupted_installs() {
+        let (_dir, source, target)
+            = setup();
+
+        let cross_device
+            = failing_link(std::io::ErrorKind::CrossesDevices);
+
+        ensure_with_link(&target, &source, b"hello", &cross_device).unwrap();
+
+        let stale_probe = target.dirname().unwrap()
+            .with_join_str(".index.js.link-probe");
+
+        real_link(&source, &stale_probe).unwrap();
+
+        assert_eq!(ensure_with_link(&target, &source, b"hello", &cross_device).unwrap(), LinkOutcome::Copied(CopyFallbackReason::CrossDevice));
+        assert!(probe_files(&target.dirname().unwrap()).is_empty());
     }
 
     #[test]
@@ -1103,7 +1199,7 @@ mod tests {
         let (_dir, source, target)
             = setup();
 
-        assert!(ensure_hardlink_with(&target, &source, b"hello", &failing_link(std::io::ErrorKind::PermissionDenied)).is_err());
+        assert!(ensure_with_link(&target, &source, b"hello", &failing_link(std::io::ErrorKind::PermissionDenied)).is_err());
         assert!(!target.fs_exists());
     }
 
@@ -1134,6 +1230,16 @@ mod tests {
         assert_eq!(
             fallbacks.warning(None, &project).unwrap(),
             format!("3 files were copied instead of hard-linked (2 because parts of the project at /project are on different filesystems, 1 because their content reached the filesystem's maximum number of hard links per file); installs are slower and use more disk space as a result (see {})", COPY_FALLBACK_DOCS_URL),
+        );
+
+        let fallbacks
+            = CopyFallbacks::new();
+
+        fallbacks.record(LinkOutcome::Copied(CopyFallbackReason::ReplaceFailed));
+
+        assert_eq!(
+            fallbacks.warning(Some(&store), &project).unwrap(),
+            format!("1 file was copied instead of hard-linked because existing copies couldn't be replaced by hard links; installs are slower and use more disk space as a result (see {})", COPY_FALLBACK_DOCS_URL),
         );
     }
 }
