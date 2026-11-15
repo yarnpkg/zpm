@@ -1,14 +1,14 @@
 use std::process::ExitCode;
 
 use zpm_primitives::Ident;
-use clipanion::{cli, prelude::*};
+use clipanion::cli;
 
 use crate::{
     error::Error,
     project::Project,
 };
 
-use super::YarnCli;
+use super::run_cli;
 
 /// Run a command in a workspace
 ///
@@ -40,7 +40,7 @@ impl Workspace {
         let env = self.cli_environment.clone().with_argv(self.args.clone());
         Ok(tokio::task::block_in_place(move || {
             tokio::runtime::Handle::current().block_on(async move {
-                YarnCli::run(env).await
+                run_cli(env).await
             })
         }))
     }
