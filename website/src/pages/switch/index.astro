@@ -1,0 +1,16 @@
+---
+import {getCollection} from 'astro:content';
+import DocsLayout from '../../layouts/DocsLayout.astro';
+import ReferenceSidebar from '../../components/ReferenceSidebar.astro';
+import CliIndex from '../../components/CliIndex.astro';
+
+const switchEntries = await getCollection(`switch`);
+---
+
+<DocsLayout title="Yarn Switch CLI reference" activePage="reference" mainMaxWidth="820px" breadcrumb={["Docs", "Reference", "Switch"]} description="List of all the commands available in Yarn Switch.">
+  <Fragment slot="sidebar">
+    <ReferenceSidebar activePage="switch/" cliEntries={switchEntries} cliPrefix="switch" />
+  </Fragment>
+
+  <CliIndex cliEntries={switchEntries} cliPrefix="switch" />
+</DocsLayout>
