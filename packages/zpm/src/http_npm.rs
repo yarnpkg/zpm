@@ -55,7 +55,7 @@ fn package_rule_matches(rule: &PackageRule, ecosystem: EcosystemFilter, ident: O
 fn source_rule_matches(rule: &SourceRule, ecosystem: EcosystemFilter, registry: &str) -> bool {
     ecosystem_matches(rule.ecosystem_filter.value, ecosystem)
         && rule.registry_filter.value.as_ref().map_or(true, |filter| {
-            normalize_registry_url(filter) == normalize_registry_url(registry)
+            registry_key_matches(filter, registry)
         })
 }
 
@@ -107,6 +107,13 @@ pub fn matching_registry_keys<'a, I: IntoIterator<Item = &'a str>>(keys: I, regi
     result.extend(exact_keys.chain(protocol_less_keys).filter(|key| **key != registry));
 
     result
+}
+
+/// Returns whether a registry key (an `npmRegistries` key or a
+/// `sourceRules[].registryFilter`) designates the given registry; see
+/// `matching_registry_keys` for the accepted forms.
+pub fn registry_key_matches(key: &str, registry: &str) -> bool {
+    !matching_registry_keys([key], registry).is_empty()
 }
 
 /// Returns the `npmRegistries` key whose settings apply to the given registry;
@@ -1218,5 +1225,17 @@ mod tests {
             matching_registry_keys(["//host", "//other", "https://host", "https://host/", "http://host"], "https://host"),
             vec!["https://host", "https://host/", "//host"],
         );
+    }
+
+    #[test]
+    fn single_registry_keys_match_like_npm_registries_keys() {
+        // Used for `sourceRules[].registryFilter`
+        assert!(registry_key_matches("https://host/repo/", "https://host/repo"));
+        assert!(registry_key_matches("//host/repo", "https://host/repo"));
+        assert!(registry_key_matches("//host/repo/", "http://host/repo"));
+
+        assert!(!registry_key_matches("//host", "https://host/repo"));
+        assert!(!registry_key_matches("//other/repo", "https://host/repo"));
+        assert!(!registry_key_matches("http://host/repo", "https://host/repo"));
     }
 }

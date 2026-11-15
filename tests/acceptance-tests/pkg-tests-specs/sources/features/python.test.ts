@@ -136,6 +136,41 @@ describe(`Features`, () => {
       expect(cacheEntries.some(entry => entry.includes(`pypi-entry-points-pypi-1.0.0`))).toEqual(true);
     }));
 
+    test(`it should authenticate through source rules with a registry filter written without the protocol`, makeTemporaryEnv({
+      dependencies: {[`pypi-no-deps`]: `pypi:1.0.0`},
+    }, async ({path, run}) => {
+      const registryUrl = await tests.startPackageServer();
+
+      await yarn.writeConfiguration(path, {
+        pypiRegistryServer: `${registryUrl}/simple-auth/`,
+        sourceRules: [{
+          registryFilter: `${registryUrl.replace(/^https?:/, ``)}/simple-auth`,
+          pypiAuthToken: PYPI_AUTH_TOKEN,
+        }],
+      });
+
+      await run(`install`);
+
+      const cacheEntries = await xfs.readdirPromise(ppath.join(path, `.yarn/cache`));
+      expect(cacheEntries.some(entry => entry.includes(`pypi-no-deps-pypi-1.0.0`))).toEqual(true);
+    }));
+
+    test(`it shouldn't apply source rules with a registry filter written without the protocol to other indexes`, makeTemporaryEnv({
+      dependencies: {[`pypi-no-deps`]: `pypi:1.0.0`},
+    }, async ({path, run}) => {
+      const registryUrl = await tests.startPackageServer();
+
+      await yarn.writeConfiguration(path, {
+        pypiRegistryServer: `${registryUrl}/simple-auth/`,
+        sourceRules: [{
+          registryFilter: `${registryUrl.replace(/^https?:/, ``)}/simple`,
+          pypiAuthToken: PYPI_AUTH_TOKEN,
+        }],
+      });
+
+      await expect(run(`install`)).rejects.toThrow(/401 Unauthorized/);
+    }));
+
     testIf(`venvLinker`, `it should honor pypiMinimalAgeGate`, makeTemporaryMonorepoEnv({
       workspaces: [`app`],
     }, {

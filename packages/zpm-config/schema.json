@@ -561,7 +561,7 @@
           },
           "registryFilter": {
             "type": ["string", "null"],
-            "description": "The normalized registry URL this rule applies to"
+            "description": "The registry URL this rule applies to, with or without its protocol"
           },
           "npmMinimalAgeGate": {
             "type": ["std::time::Duration", "null"],

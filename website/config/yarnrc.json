@@ -812,7 +812,8 @@
           },
           "registryFilter": {
             "type": ["string", "null"],
-            "format": "uri",
+            "description": "The registry or index URL this rule applies to, or the same URL without its protocol (`//registry.example.org`) to match it whatever its protocol; trailing slashes are ignored.",
+            "format": "uri-reference",
             "_hidden": true
           },
           "npmMinimalAgeGate": {
