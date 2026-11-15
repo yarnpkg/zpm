@@ -16,6 +16,20 @@ use crate::{
 ///
 /// If the `-A,--all` flag is set, the entire project will be installed. Combine with `--production` to replicate the old `yarn install --production`.
 ///
+/// ## Examples
+///
+/// Install the active workspace and the workspaces it depends on
+///
+/// `yarn workspaces focus`
+///
+/// Install a specific workspace and the workspaces it depends on
+///
+/// `yarn workspaces focus components`
+///
+/// Install all workspaces without their development dependencies
+///
+/// `yarn workspaces focus -A --production`
+///
 #[cli::command]
 #[cli::path("workspaces", "focus")]
 #[cli::category("Workspace commands")]
