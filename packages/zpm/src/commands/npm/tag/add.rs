@@ -1,6 +1,6 @@
 use clipanion::cli;
-use zpm_primitives::{split_ident_and_selector, Ident};
-use zpm_utils::{DataType, FromFileString, ToFileString, ToHumanString};
+use zpm_primitives::IdentVersion;
+use zpm_utils::{DataType, ToFileString, ToHumanString};
 
 use crate::{
     error::Error,
@@ -32,7 +32,7 @@ pub struct Add {
     otp: Option<String>,
 
     /// The package and version to tag, in the form `<name>@<version>`
-    package: String,
+    package: IdentVersion,
 
     /// The tag to add
     tag: String,
@@ -40,26 +40,13 @@ pub struct Add {
 
 impl Add {
     pub async fn execute(&self) -> Result<(), Error> {
-        let (ident_str, version_str)
-            = split_ident_and_selector(&self.package);
-
-        let Some(version_str) = version_str.filter(|version| !version.is_empty()) else {
-            return Err(Error::InvalidDescriptor(self.package.clone()));
-        };
-
         let ident
-            = Ident::from_file_string(ident_str)
-                .map_err(|_| Error::InvalidIdent(ident_str.to_string()))?;
+            = &self.package.ident;
 
-        // Unlike `Version::from_file_string`, which fills in missing components
-        // and wildcards (`1`, `1.x`, `*`), a range only has an exact version if
-        // all three components are present. Build metadata is dropped, like
-        // npm does when publishing, as registries don't key versions with it.
+        // Build metadata isn't kept, which matches what npm does when it
+        // publishes a package: registries never key versions with it.
         let version
-            = zpm_semver::Range::from_file_string(version_str).ok()
-                .and_then(|range| range.exact_version())
-                .ok_or_else(|| Error::InvalidNpmTagVersion(version_str.to_string()))?
-                .to_file_string();
+            = self.package.version.to_file_string();
 
         let project
             = Project::new(None).await?;
@@ -69,7 +56,7 @@ impl Add {
 
         with_report_result(report, async {
             let (registry, authorization)
-                = publish_registry_auth(&project, &ident).await?;
+                = publish_registry_auth(&project, ident).await?;
 
             let pretty_ident
                 = ident.to_print_string();
@@ -79,7 +66,7 @@ impl Add {
                 = DataType::Code.colorize(&self.tag);
 
             let dist_tags
-                = get_dist_tags(&project, &registry, &ident, authorization.as_deref()).await?;
+                = get_dist_tags(&project, &registry, ident, authorization.as_deref()).await?;
 
             if dist_tags.get(&self.tag) == Some(&version) {
                 crate::report::if_active_async(|report| {
@@ -90,7 +77,7 @@ impl Add {
             http_npm::put(&NpmHttpParams {
                 http_client: &project.http_client,
                 registry: &registry,
-                path: &dist_tags_path(&ident, Some(&self.tag)),
+                path: &dist_tags_path(ident, Some(&self.tag)),
                 authorization: authorization.as_deref(),
                 otp: self.otp.as_deref(),
             }, serde_json::to_string(&version).unwrap()).await?;

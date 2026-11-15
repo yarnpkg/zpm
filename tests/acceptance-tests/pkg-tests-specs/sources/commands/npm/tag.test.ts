@@ -312,16 +312,16 @@ describe(`Commands`, () => {
         const requests = await startRegistryRecording(async () => {
           await expect(run(`npm`, `tag`, `add`, `no-deps@^1.0.0`, `beta`, {env})).rejects.toThrow(/The range \^1\.0\.0 must be a valid semver version/);
           await expect(run(`npm`, `tag`, `add`, `no-deps@beta`, `beta`, {env})).rejects.toThrow(/must be a valid semver version/);
-          await expect(run(`npm`, `tag`, `add`, `no-deps`, `beta`, {env})).rejects.toThrow(/Invalid descriptor \(no-deps\)/);
+          await expect(run(`npm`, `tag`, `add`, `no-deps`, `beta`, {env})).rejects.toThrow(/Invalid package version \(no-deps\); expected <name>@<version>/);
         });
 
         expect(requests).toEqual([]);
       }),
     );
 
-    for (const [index, version] of [`1`, `1.0`, `*`, `1.x`, `1.0.x`].entries()) {
+    for (const [index, version] of [`1`, `1.0`, `*`, `1.x`, `1.0.x`, `=1.0.0`, `=1`].entries()) {
       test(
-        `it should reject incomplete versions and wildcards (${version})`,
+        `it should reject ranges, incomplete versions and wildcards (${version})`,
         makeTemporaryEnv({}, async ({run}) => {
           const env = await getIsolatedRegistryEnv(`tagincomplete${String.fromCharCode(97 + index)}`);
 

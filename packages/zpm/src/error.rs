@@ -69,9 +69,6 @@ pub enum Error {
     #[error("Invalid npm stage ID ({0}); expected a UUID in the form xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx")]
     InvalidNpmStageId(String),
 
-    #[error("The range {} must be a valid semver version", DataType::Range.colorize(.0))]
-    InvalidNpmTagVersion(String),
-
     #[error("The 'latest' tag cannot be removed.")]
     CannotRemoveLatestNpmTag,
 
