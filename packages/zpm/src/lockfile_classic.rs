@@ -138,14 +138,15 @@ fn parse_classic_lockfile(data: &str) -> Vec<ClassicLockfileEntry> {
 }
 
 static NPM_TARBALL_PATTERNS: LazyLock<Vec<Regex>> = LazyLock::new(|| vec![
-    // Regular npm registries; `/download/` is used by some mirrors (Taobao)
-    Regex::new(r"^https?://[^/]+/(?:[^/]+/)*(?:@.+(?:/|%2f))?(?<name>[^/]+)/(?:-|download)/(?<file>[^/]+)\.tgz(?:#|$)").unwrap(),
+    // Regular npm registries; `/download/` is used by some mirrors (Taobao),
+    // which also add a query string after the tarball name
+    Regex::new(r"^https?://[^/]+/(?:[^/]+/)*(?:@.+(?:/|%2f))?(?<name>[^/]+)/(?:-|download)/(?<file>[^/?#]+)\.tgz(?:\?[^#]*)?(?:#|$)").unwrap(),
     // GitHub Packages
     Regex::new(r"^https://npm\.pkg\.github\.com/download/(?:@[^/]+)/(?:[^/]+)/(?:[^/]+)/(?:[0-9a-f]+)(?:#|$)").unwrap(),
     // FontAwesome
-    Regex::new(r"^https://npm\.fontawesome\.com/(?:@[^/]+)/(?<name>[^/]+)/-/(?:[^/]+)/(?<file>[^/]+)\.tgz(?:#|$)").unwrap(),
+    Regex::new(r"^https://npm\.fontawesome\.com/(?:@[^/]+)/(?<name>[^/]+)/-/(?:[^/]+)/(?<file>[^/?#]+)\.tgz(?:\?[^#]*)?(?:#|$)").unwrap(),
     // JFrog Artifactory, which repeats the scope in the tarball path
-    Regex::new(r"^https?://[^/]+/.*/(?<scope>@[^/]+)/(?<name>[^/]+)/-/(?<scope2>@[^/]+)/(?<file>[.\w-]+)\.tgz(?:#|$)").unwrap(),
+    Regex::new(r"^https?://[^/]+/.*/(?<scope>@[^/]+)/(?<name>[^/]+)/-/(?<scope2>@[^/]+)/(?<file>[.\w-]+)\.tgz(?:\?[^#]*)?(?:#|$)").unwrap(),
     // Yarn Classic offline mirror
     Regex::new(r"^[^/]+\.tgz#[0-9a-f]+$").unwrap(),
 ]);
@@ -544,6 +545,33 @@ bar@^1.0.0:
             ("left-pad", "https://example.com/left-pad-1.3.0.tgz"),
             // The tarball of another package (for example because of an override)
             ("lodash", "https://registry.yarnpkg.com/underscore/-/underscore-1.13.0.tgz"),
+        ];
+
+        for (ident, resolved) in negative_tests {
+            assert!(!is_npm_tarball_url(resolved, &Ident::new(ident)), "{resolved}");
+        }
+    }
+
+    #[test]
+    fn matches_npm_tarball_urls_with_query_strings() {
+        let tests = [
+            // Taobao / npmmirror, with and without a second tarball url in `other_urls`
+            ("yargs", "https://registry.npm.taobao.org/yargs/download/yargs-12.0.5.tgz?cache=0&sync_timestamp=1600000000000&other_urls=https%3A%2F%2Fregistry.npm.taobao.org%2Fyargs%2Fdownload%2Fyargs-12.0.5.tgz#05f5997b609647b64f66b81e3b4b10a368e7ad13"),
+            ("yargs", "https://registry.npm.taobao.org/yargs/download/yargs-12.0.5.tgz?cache=0&sync_timestamp=1600000000000#05f5997b609647b64f66b81e3b4b10a368e7ad13"),
+            ("lodash", "https://registry.npmmirror.com/lodash/-/lodash-4.17.21.tgz?cache=0#c2e54ad5fd1a7da46f4cdaa9a8f1df1cf1ab7a6c"),
+            ("lodash", "https://registry.npmmirror.com/lodash/-/lodash-4.17.21.tgz?cache=0"),
+            ("@scope/package-name", "https://company.jfrog.io/company/api/npm/registry-name/@scope/package-name/-/@scope/package-name-1.0.0.tgz?foo=bar#eeeec1e4e8850bed0468f938292b06cda793bf34"),
+        ];
+
+        for (ident, resolved) in tests {
+            assert!(is_npm_tarball_url(resolved, &Ident::new(ident)), "{resolved}");
+        }
+
+        let negative_tests = [
+            // Still not a registry tarball path
+            ("left-pad", "https://example.com/left-pad-1.3.0.tgz?cache=0#5fa9b3e5d1e5e1e3fef1ba3c5f6e8c1b3a1e1e1e"),
+            // The query string mentions our package, but the tarball is another one
+            ("lodash", "https://registry.yarnpkg.com/underscore/-/underscore-1.13.0.tgz?other_urls=https%3A%2F%2Fregistry.yarnpkg.com%2Flodash%2F-%2Flodash-1.0.0.tgz"),
         ];
 
         for (ident, resolved) in negative_tests {

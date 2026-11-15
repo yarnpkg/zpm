@@ -150,6 +150,31 @@ describe(`Features`, () => {
     );
 
     test(
+      `it should import entries whose tarball url has a query string`,
+      makeTemporaryEnv({
+        dependencies: {
+          [`no-deps`]: `^1.0.0`,
+        },
+      }, async ({path, run, source}) => {
+        // As written by mirrors such as Taobao; a fresh install would pick 1.1.0
+        await xfs.writeFilePromise(ppath.join(path, Filename.lockfile), `${V1_HEADER}${[
+          `no-deps@^1.0.0:`,
+          `  version "1.0.0"`,
+          `  resolved "https://registry.npmmirror.com/no-deps/-/no-deps-1.0.0.tgz?cache=0&sync_timestamp=1600000000000#0000000000000000000000000000000000000000"`,
+          ``,
+        ].join(`\n`)}`);
+
+        const {stdout} = await run(`install`);
+
+        expect(stdout).not.toContain(`Can't import this entry`);
+
+        await expect(source(`require('no-deps')`)).resolves.toMatchObject({
+          version: `1.0.0`,
+        });
+      }),
+    );
+
+    test(
       `it should resolve again the entries it can't import, and report them`,
       makeTemporaryEnv({
         dependencies: {
