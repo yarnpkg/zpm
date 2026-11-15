@@ -1,5 +1,11 @@
 import {Filename, PortablePath, npath, ppath, xfs} from '@yarnpkg/fslib';
 
+// Yarn prints the native form of paths but keeps forward slashes as separators,
+// including on Windows (`C:/Users/...`)
+const toPrintedPath = (p: PortablePath) => {
+  return npath.fromPortablePath(p).replace(/\\/g, `/`);
+};
+
 describe(`Features`, () => {
   describe(`Configuration`, () => {
     test(`it should let the project configuration override the home configuration`, makeTemporaryEnv({
@@ -161,7 +167,7 @@ describe(`Features`, () => {
         `    npmAlwaysAuth: 12`,
       ].join(`\n`));
 
-      const rcPath = npath.fromPortablePath(ppath.join(path, Filename.rc));
+      const rcPath = toPrintedPath(ppath.join(path, Filename.rc));
 
       await expect(run(`config`, `get`, `enableScripts`)).rejects.toMatchObject({
         stdout: expect.stringContaining(`An error occurred while parsing your configuration: ${rcPath}:4:20: npmScopes.foo.npmAlwaysAuth: Invalid value: 12`),
@@ -175,7 +181,7 @@ describe(`Features`, () => {
       await xfs.writeFilePromise(ppath.join(path, `..`, Filename.rc), `nodeLinker: foo\n`);
       await xfs.writeFilePromise(ppath.join(path, Filename.rc), `nodeLinker: pnp\n`);
 
-      const rcPath = npath.fromPortablePath(ppath.join(path, `..`, Filename.rc));
+      const rcPath = toPrintedPath(ppath.join(path, `..`, Filename.rc));
 
       await expect(run(`config`, `get`, `nodeLinker`)).rejects.toMatchObject({
         stdout: expect.stringContaining(`An error occurred while parsing your configuration: ${rcPath}:1:13: nodeLinker: Invalid enum value (foo)`),
@@ -192,7 +198,7 @@ describe(`Features`, () => {
         `    npmAlwaysAuth: true`,
       ].join(`\n`));
 
-      const rcPath = npath.fromPortablePath(ppath.join(path, `..`, Filename.rc));
+      const rcPath = toPrintedPath(ppath.join(path, `..`, Filename.rc));
 
       await expect(run(`config`, `get`, `enableScripts`)).rejects.toMatchObject({
         stdout: expect.stringContaining(`An error occurred while parsing your configuration: ${rcPath}: found character that cannot start any token at line 2 column 3`),
