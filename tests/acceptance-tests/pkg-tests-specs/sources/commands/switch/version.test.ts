@@ -1,3 +1,5 @@
+import {npath, ppath} from '@yarnpkg/fslib';
+
 describe(`Commands`, () => {
   describe(`switch`, () => {
     test(
@@ -30,6 +32,34 @@ describe(`Commands`, () => {
         await expect(runSwitch(`--version`)).resolves.toMatchObject({
           code: 0,
           stdout: expect.stringContaining(`Fake Yarn 6.0.0`),
+        });
+      }),
+    );
+
+    test(
+      `it should download and run yarn without a home folder when YARNSW_CACHE_PATH is set`,
+      makeTemporaryEnv({
+        packageManager: `yarn@6.0.0`,
+      }, async ({path, runSwitch}) => {
+        await expect(runSwitch(`--version`, {
+          env: {
+            HOME: undefined,
+            USERPROFILE: undefined,
+            YARNSW_CACHE_PATH: npath.fromPortablePath(ppath.join(path, `switch-cache`)),
+          },
+        })).resolves.toMatchObject({
+          code: 0,
+          stdout: expect.stringContaining(`Fake Yarn 6.0.0`),
+        });
+
+        await expect(runSwitch(`switch`, `--version`, {
+          env: {
+            HOME: undefined,
+            USERPROFILE: undefined,
+          },
+        })).resolves.toMatchObject({
+          code: 0,
+          stdout: expect.stringMatching(/^\d+\.\d+\.\d+/),
         });
       }),
     );
