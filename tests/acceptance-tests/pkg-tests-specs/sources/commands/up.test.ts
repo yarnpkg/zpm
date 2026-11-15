@@ -112,6 +112,33 @@ describe(`Commands`, () => {
       }),
     );
 
+    test.each([
+      [`no-deps@^1.0.0`, [], `^1.0.0`, `1.1.0`],
+      [`no-deps@~1.0.0`, [`-C`], `~1.0.0`, `1.0.1`],
+      [`no-deps@1`, [], `1`, `1.1.0`],
+      [`no-deps@^1.0.0`, [`-E`], `^1.0.0`, `1.1.0`],
+    ])(
+      `it should keep explicit semver ranges as-is (%s %j)`,
+      (request, flags, expected, version) => makeTemporaryEnv({
+        dependencies: {
+          [`no-deps`]: `2.0.0`,
+        },
+      }, async ({path, run, source}) => {
+        await run(`up`, request, ...flags);
+
+        await expect(xfs.readJsonPromise(ppath.join(path, Filename.manifest))).resolves.toStrictEqual({
+          dependencies: {
+            [`no-deps`]: expected,
+          },
+        });
+
+        await expect(source(`require('no-deps')`)).resolves.toMatchObject({
+          name: `no-deps`,
+          version,
+        });
+      })(),
+    );
+
     test(
       `it should upgrade regular dependencies to the current project (fixed tag)`,
       makeTemporaryEnv({
