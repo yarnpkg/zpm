@@ -18,6 +18,12 @@ async fn main() -> ExitCode {
 
     let exit_code = zpm::commands::run_default(None).await;
 
+    // Lets the tests check that expected errors (files probed before being
+    // created, etc) don't pay for a backtrace when RUST_BACKTRACE is set
+    if std::env::var_os("YARN_IS_TEST_ENV").is_some() && std::env::var_os("YARN_TEST_REPORT_BACKTRACES").is_some() {
+        eprintln!("Captured backtraces: {}", zpm_utils::captured_backtrace_count());
+    }
+
     if let Some(otel_guard) = otel_guard {
         otel_guard.shutdown();
     }
