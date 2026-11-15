@@ -17,16 +17,16 @@ mod version_tests;
 #[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Archive, rkyv::Serialize, rkyv::Deserialize)]
 #[rkyv(derive(PartialEq, Eq, Hash, PartialOrd, Ord))]
 pub enum VersionRc {
-    Number(u32),
+    Number(u64),
     String(EcoString),
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Hash, Archive, rkyv::Serialize, rkyv::Deserialize)]
 #[rkyv(derive(PartialEq, Eq, Hash, PartialOrd, Ord))]
 pub struct Version {
-    pub major: u32,
-    pub minor: u32,
-    pub patch: u32,
+    pub major: u64,
+    pub minor: u64,
+    pub patch: u64,
     pub rc: Option<EcoVec<VersionRc>>,
 }
 
@@ -40,7 +40,7 @@ impl Version {
         }
     }
 
-    pub fn new_from_components(major: u32, minor: u32, patch: u32, rc: Option<EcoVec<VersionRc>>) -> Version {
+    pub fn new_from_components(major: u64, minor: u64, patch: u64, rc: Option<EcoVec<VersionRc>>) -> Version {
         Version {
             major,
             minor,

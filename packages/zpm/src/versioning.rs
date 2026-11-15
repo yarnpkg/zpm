@@ -58,7 +58,7 @@ pub struct VersioningFile {
     pub declined: BTreeSet<Ident>,
 }
 
-fn extract_rc_number(version: &zpm_semver::Version, prerelease_pattern: &str) -> Option<u32> {
+fn extract_rc_number(version: &zpm_semver::Version, prerelease_pattern: &str) -> Option<u64> {
     let Some(n_pos) = prerelease_pattern.find("%n") else {
         return None;
     };
