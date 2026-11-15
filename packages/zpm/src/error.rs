@@ -69,6 +69,18 @@ pub enum Error {
     #[error("Invalid npm stage ID ({0}); expected a UUID in the form xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx")]
     InvalidNpmStageId(String),
 
+    #[error("The range {} must be a valid semver version", DataType::Range.colorize(.0))]
+    InvalidNpmTagVersion(String),
+
+    #[error("The 'latest' tag cannot be removed.")]
+    CannotRemoveLatestNpmTag,
+
+    #[error("{} is not a tag of package {}", DataType::Code.colorize(tag), ident.to_print_string())]
+    NpmTagNotFound { tag: String, ident: Ident },
+
+    #[error("Missing 'name' field in {}", .0.to_print_string())]
+    MissingWorkspaceName(Path),
+
     #[error("Missing environment variable when creating the provenance payload: {0}")]
     MissingEnvironmentVariableForProvenancePayload(String),
 
