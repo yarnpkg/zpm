@@ -1,6 +1,6 @@
-import {execUtils}            from '@yarnpkg/core';
-import {Filename, ppath, xfs} from '@yarnpkg/fslib';
-import {tests}                from 'pkg-tests-core';
+import {execUtils}                          from '@yarnpkg/core';
+import {Filename, PortablePath, ppath, xfs} from '@yarnpkg/fslib';
+import {tests}                              from 'pkg-tests-core';
 
 describe(`Cache`, () => {
   test(
@@ -381,4 +381,88 @@ describe(`Cache`, () => {
       }),
     );
   }
+
+  const expectCacheIn = async (cacheFolder: PortablePath) => {
+    const cacheFiles = await xfs.readdirPromise(cacheFolder);
+    expect(cacheFiles.find(name => name.startsWith(`no-deps-`))).toBeDefined();
+  };
+
+  for (const cacheFolder of [`./.yarn/custom-cache`, `.yarn/custom-cache`]) {
+    test(
+      `it should resolve a relative cacheFolder from the rc file against the folder of the rc file (${cacheFolder})`,
+      makeTemporaryEnv({
+        dependencies: {
+          [`no-deps`]: `1.0.0`,
+        },
+      }, async ({path, run, source}) => {
+        await xfs.writeFilePromise(ppath.join(path, Filename.rc), `cacheFolder: ${cacheFolder}\n`);
+        await xfs.mkdirPromise(ppath.join(path, `subfolder`));
+
+        await run(`install`, {cwd: ppath.join(path, `subfolder`)});
+        await expectCacheIn(ppath.join(path, `.yarn/custom-cache`));
+
+        await expect(xfs.existsPromise(ppath.join(path, `.yarn/cache`))).resolves.toEqual(false);
+        await expect(xfs.existsPromise(ppath.join(path, `subfolder/.yarn`))).resolves.toEqual(false);
+
+        await expect(run(`install`, `--immutable`, `--immutable-cache`)).resolves.toMatchObject({code: 0});
+      }),
+    );
+  }
+
+  for (const cacheFolder of [`./custom-cache`, `custom-cache`]) {
+    test(
+      `it should resolve a relative cacheFolder from the environment against the project root (${cacheFolder})`,
+      makeTemporaryEnv({
+        dependencies: {
+          [`no-deps`]: `1.0.0`,
+        },
+      }, {
+        cacheFolder,
+      }, async ({path, run, source}) => {
+        await run(`install`);
+        await expectCacheIn(ppath.join(path, `custom-cache`));
+
+        await expect(xfs.existsPromise(ppath.join(path, `.yarn/cache`))).resolves.toEqual(false);
+
+        await expect(run(`install`, `--immutable`, `--immutable-cache`)).resolves.toMatchObject({code: 0});
+      }),
+    );
+  }
+
+  test(
+    `it should resolve a relative cacheFolder from the environment against the project root when called from a subfolder`,
+    makeTemporaryEnv({
+      dependencies: {
+        [`no-deps`]: `1.0.0`,
+      },
+    }, {
+      cacheFolder: `custom-cache`,
+    }, async ({path, run, source}) => {
+      await xfs.mkdirPromise(ppath.join(path, `subfolder`));
+
+      await run(`install`, {cwd: ppath.join(path, `subfolder`)});
+      await expectCacheIn(ppath.join(path, `custom-cache`));
+
+      await expect(xfs.existsPromise(ppath.join(path, `subfolder/custom-cache`))).resolves.toEqual(false);
+
+      await expect(run(`install`, `--immutable`, `--immutable-cache`, {cwd: ppath.join(path, `subfolder`)})).resolves.toMatchObject({code: 0});
+    }),
+  );
+
+  test(
+    `it should resolve a relative globalFolder from the environment against the project root`,
+    makeTemporaryEnv({
+      dependencies: {
+        [`no-deps`]: `1.0.0`,
+      },
+    }, {
+      enableGlobalCache: true,
+      globalFolder: `custom-global`,
+    }, async ({path, run, source}) => {
+      await run(`install`);
+      await expectCacheIn(ppath.join(path, `custom-global/cache`));
+
+      await expect(run(`install`, `--immutable`, `--immutable-cache`)).resolves.toMatchObject({code: 0});
+    }),
+  );
 });

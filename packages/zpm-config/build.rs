@@ -402,7 +402,7 @@ impl Generator {
             writeln!(writer, "impl MergeSettings for {struct_name} {{").unwrap();
             writeln!(writer, "    type Intermediate = intermediate::{struct_name};").unwrap();
             writeln!(writer).unwrap();
-            writeln!(writer, "    fn from_env_string(_value: &str, _from_config: Option<Self>) -> Result<Self, HydrateError> {{").unwrap();
+            writeln!(writer, "    fn from_env_string(_context: &ConfigurationContext, _value: &str, _from_config: Option<Self>) -> Result<Self, HydrateError> {{").unwrap();
             writeln!(writer, "        unimplemented!(\"Configuration records cannot be returned directly just yet\");").unwrap();
             writeln!(writer, "    }}").unwrap();
             writeln!(writer).unwrap();
@@ -501,7 +501,7 @@ impl Generator {
 
                     writeln!(writer).unwrap();
                     writeln!(writer, "                if let Some(env_value) = env_value {{").unwrap();
-                    writeln!(writer, "                    MergeSettings::from_env_string(env_value, Some(merged_value)).unwrap()").unwrap();
+                    writeln!(writer, "                    MergeSettings::from_env_string(context, env_value, Some(merged_value)).unwrap()").unwrap();
                     writeln!(writer, "                }} else {{").unwrap();
                     writeln!(writer, "                    merged_value").unwrap();
                     writeln!(writer, "                }}").unwrap();

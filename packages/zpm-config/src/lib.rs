@@ -342,6 +342,7 @@ trait MergeSettings: Sized {
     type Intermediate;
 
     fn from_env_string(
+        context: &ConfigurationContext,
         value: &str,
         from_config: Option<Self>,
     ) -> Result<Self, HydrateError>;
@@ -374,7 +375,7 @@ trait MergeSettings: Sized {
 impl<K: Ord + ToFileString + ToHumanString + FromFileString + Serialize + std::fmt::Debug, T: MergeSettings + Serialize + std::fmt::Debug> MergeSettings for BTreeMap<K, T> {
     type Intermediate = BTreeMap<K, T::Intermediate>;
 
-    fn from_env_string(_value: &str, _from_config: Option<Self>) -> Result<Self, HydrateError> {
+    fn from_env_string(_context: &ConfigurationContext, _value: &str, _from_config: Option<Self>) -> Result<Self, HydrateError> {
         unimplemented!("Configuration maps cannot be returned directly just yet");
     }
 
@@ -491,7 +492,7 @@ impl<K: Ord + ToFileString + ToHumanString + FromFileString + Serialize + std::f
 impl<T: std::fmt::Debug + Serialize + MergeSettings> MergeSettings for Vec<T> {
     type Intermediate = Vec<T::Intermediate>;
 
-    fn from_env_string(value: &str, _from_config: Option<Self>) -> Result<Self, HydrateError> {
+    fn from_env_string(context: &ConfigurationContext, value: &str, _from_config: Option<Self>) -> Result<Self, HydrateError> {
         // An empty string means an explicitly empty array
         if value.is_empty() {
             return Ok(Vec::new());
@@ -508,7 +509,7 @@ impl<T: std::fmt::Debug + Serialize + MergeSettings> MergeSettings for Vec<T> {
 
         for item_str in items {
             let value
-                = T::from_env_string(item_str, None)
+                = T::from_env_string(context, item_str, None)
                     .map_err(|e| HydrateError::InvalidValue(e.to_string()))
                         .unwrap();
 
@@ -628,10 +629,24 @@ impl<T: std::fmt::Debug + Serialize + MergeSettings> MergeSettings for Vec<T> {
 impl MergeSettings for Setting<Path> {
     type Intermediate = Interpolated<Path>;
 
-    fn from_env_string(value: &str, _from_config: Option<Self>) -> Result<Self, HydrateError> {
+    fn from_env_string(context: &ConfigurationContext, value: &str, _from_config: Option<Self>) -> Result<Self, HydrateError> {
         let value
             = Path::from_file_string(value)
                 .map_err(|e| HydrateError::InvalidValue(e.to_string()))?;
+
+        // Values from the rc files are relative to the folder of the file
+        // declaring them (see `merge`); values from the environment are
+        // relative to the project, or to the current directory outside of one.
+        let value = if value.is_relative() {
+            let base = match context.preferred_cwd() {
+                Some(cwd) => cwd.clone(),
+                None => Path::current_dir().map_err(|e| HydrateError::InvalidValue(e.to_string()))?,
+            };
+
+            base.with_join(&value)
+        } else {
+            value
+        };
 
         Ok(Self {
             value,
@@ -723,7 +738,7 @@ macro_rules! merge_settings_impl {
         impl MergeSettings for Setting<$type> {
             type Intermediate = Interpolated<$type>;
 
-            fn from_env_string(value: &str, _from_config: Option<Self>) -> Result<Self, HydrateError> {
+            fn from_env_string(_context: &ConfigurationContext, value: &str, _from_config: Option<Self>) -> Result<Self, HydrateError> {
                 let value
                     = <$type as FromFileString>::from_file_string(value)
                         .map_err(|e| HydrateError::InvalidValue(e.to_string()))?;
@@ -809,10 +824,17 @@ macro_rules! merge_optional_settings_impl {
         impl MergeSettings for Setting<Option<$type>> {
             type Intermediate = Option<Interpolated<$type>>;
 
-            fn from_env_string(value: &str, _from_config: Option<Self>) -> Result<Self, HydrateError> {
+            fn from_env_string(context: &ConfigurationContext, value_str: &str, _from_config: Option<Self>) -> Result<Self, HydrateError> {
                 let value
-                    = <Option<$type> as FromFileString>::from_file_string(value)
+                    = <Option<$type> as FromFileString>::from_file_string(value_str)
                         .map_err(|e| HydrateError::InvalidValue(e.to_string()))?;
+
+                // Non-null values must get the same treatment as when the setting
+                // isn't nullable (relative paths get resolved, for instance)
+                let value = match value {
+                    Some(_) => Some(Setting::<$type>::from_env_string(context, value_str, None)?.value),
+                    None => None,
+                };
 
                 Ok(Self {
                     value,
@@ -1775,6 +1797,48 @@ mod tests {
                 .unwrap_err();
 
         assert_eq!(error.to_string(), "Invalid configuration: unstableIslands.x.linker: Missing required setting");
+    }
+
+    fn context_with_project_cwd(project_cwd: Option<&str>) -> ConfigurationContext {
+        ConfigurationContext {
+            env: BTreeMap::new(),
+            user_cwd: None,
+            project_cwd: project_cwd.map(|path| Path::from_file_string(path).unwrap()),
+            package_cwd: None,
+        }
+    }
+
+    #[test]
+    fn relative_paths_from_the_environment_should_be_resolved_from_the_project() {
+        let context
+            = context_with_project_cwd(Some("/project"));
+        let expected
+            = Path::from_file_string("/project/foo/bar").unwrap();
+
+        assert_eq!(Setting::<Path>::from_env_string(&context, "foo/bar", None).unwrap().value, expected);
+        assert_eq!(Setting::<Path>::from_env_string(&context, "./foo/bar", None).unwrap().value, expected);
+        assert_eq!(Setting::<Option<Path>>::from_env_string(&context, "foo/bar", None).unwrap().value, Some(expected));
+        assert_eq!(Setting::<Option<Path>>::from_env_string(&context, "null", None).unwrap().value, None);
+    }
+
+    #[test]
+    fn relative_paths_from_the_environment_should_be_resolved_from_the_current_directory_outside_of_a_project() {
+        let context
+            = context_with_project_cwd(None);
+        let expected
+            = Path::current_dir().unwrap().with_join_str("foo/bar");
+
+        assert_eq!(Setting::<Path>::from_env_string(&context, "foo/bar", None).unwrap().value, expected);
+    }
+
+    #[test]
+    fn absolute_paths_from_the_environment_should_be_kept_as_is() {
+        let context
+            = context_with_project_cwd(Some("/project"));
+        let absolute
+            = Path::from_file_string("/elsewhere/foo/bar").unwrap();
+
+        assert_eq!(Setting::<Path>::from_env_string(&context, "/elsewhere/foo/bar", None).unwrap().value, absolute);
     }
 
     #[test]
