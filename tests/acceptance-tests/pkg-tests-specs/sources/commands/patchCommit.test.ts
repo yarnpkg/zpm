@@ -161,6 +161,45 @@ describe(`Commands`, () => {
     );
 
     test(
+      `it should reference patches of dependencies declared with a star range using the 'resolutions' field`,
+      makeTemporaryEnv({
+        dependencies: {
+          [`star-parent`]: `portal:./star-parent`,
+        },
+      }, async ({path, run, source}) => {
+        await xfs.mkdirPromise(ppath.join(path, `star-parent`), {recursive: true});
+        await xfs.writeJsonPromise(ppath.join(path, `star-parent/package.json`), {
+          name: `star-parent`,
+          version: `1.0.0`,
+          dependencies: {
+            [`no-deps`]: `*`,
+          },
+        });
+        await xfs.writeFilePromise(ppath.join(path, `star-parent/index.js`), `module.exports = require('no-deps');\n`);
+
+        await run(`install`);
+
+        const {stdout} = await run(`patch`, `no-deps`, `--json`);
+        const {path: updateFolderN} = JSON.parse(stdout);
+
+        const updateFolder = npath.toPortablePath(updateFolderN);
+        await xfs.writeFilePromise(ppath.join(updateFolder, `index.js`), `module.exports = 42;\n`);
+
+        await run(`patch-commit`, `-s`, npath.fromPortablePath(updateFolder));
+
+        const manifest = await xfs.readJsonPromise(ppath.join(path, Filename.manifest));
+
+        expect(manifest.resolutions).toEqual({
+          [`no-deps@*`]: expect.stringMatching(/^patch:no-deps/),
+        });
+
+        await run(`install`);
+
+        await expect(source(`require('star-parent')`)).resolves.toEqual(42);
+      }),
+    );
+
+    test(
       `it should honour the patch resolutions written by Yarn 4`,
       makeTemporaryEnv({
         dependencies: {

@@ -270,10 +270,6 @@ fn invalid_selector(key: &str, reason: String) -> String {
 // The `key` parameter is the key as written in the manifest, only used to
 // build the error messages.
 fn parse_selector(key: &str, effective_key: &str) -> Result<ResolutionSelector, String> {
-    if effective_key.contains('*') {
-        return Err(invalid_selector(key, "glob patterns aren't supported (only a leading '**/' is tolerated); reference the packages by name instead, e.g. 'parent/child' or 'child'".to_string()));
-    }
-
     // Skip the `@scope/` slash when locating the parent/child split.
     let slash_search_start = if effective_key.starts_with('@') {
         effective_key.find('/').map_or(0, |idx| idx + 1)
@@ -326,6 +322,18 @@ fn parse_selector(key: &str, effective_key: &str) -> Result<ResolutionSelector, 
                 }
             }
         }
+    }
+
+    // Globs can only appear in the package names; a `*` in a range is a
+    // regular semver range (`pkg@*`).
+    let parent_name = if has_range_separator {
+        Descriptor::from_file_string(parent_part).map_or(parent_part.to_string(), |descriptor| descriptor.ident.to_file_string())
+    } else {
+        parent_part.to_string()
+    };
+
+    if parent_name.contains('*') || child_part.is_some_and(|child| child.contains('*')) {
+        return Err(invalid_selector(key, "glob patterns aren't supported (only a leading '**/' is tolerated); reference the packages by name instead, e.g. 'parent/child' or 'child'".to_string()));
     }
 
     let child_ident = child_part
@@ -445,6 +453,12 @@ mod tests {
             ("no-deps@npm:^1.0.0", "no-deps@^1.0.0"),
             ("@scope/no-deps@1.0.0", "@scope/no-deps@1.0.0"),
             ("@scope/no-deps@npm:1.0.0", "@scope/no-deps@1.0.0"),
+            ("no-deps@*", "no-deps@*"),
+            ("no-deps@npm:*", "no-deps@*"),
+            ("no-deps@1.x || *", "no-deps@1.x || *"),
+            ("parent@*/no-deps", "parent@*/no-deps"),
+            ("parent@npm:*/no-deps", "parent@*/no-deps"),
+            ("alias@npm:@scope/no-deps@*", "alias@npm:@scope/no-deps@*"),
             ("no-deps@latest", "no-deps@latest"),
             ("no-deps@npm:latest", "no-deps@latest"),
             ("alias@npm:no-deps@1.0.0", "alias@npm:no-deps@1.0.0"),
@@ -488,6 +502,8 @@ mod tests {
             ("parent@1.0.0/a/no-deps", "invalid resolution selector 'parent@1.0.0/a/no-deps': 'a/no-deps' isn't a valid package name"),
             ("*/no-deps", "invalid resolution selector '*/no-deps': glob patterns aren't supported (only a leading '**/' is tolerated); reference the packages by name instead, e.g. 'parent/child' or 'child'"),
             ("parent/**/no-deps", "invalid resolution selector 'parent/**/no-deps': glob patterns aren't supported"),
+            ("*@1.0.0", "invalid resolution selector '*@1.0.0': glob patterns aren't supported"),
+            ("*@1.0.0/no-deps", "invalid resolution selector '*@1.0.0/no-deps': glob patterns aren't supported"),
             ("**/parent/**/no-deps", "invalid resolution selector '**/parent/**/no-deps': glob patterns aren't supported"),
             ("@scope", "invalid resolution selector '@scope': '@scope' isn't a valid package name"),
         ];
@@ -511,6 +527,10 @@ mod tests {
             ("no-deps@1.0.0", "no-deps@npm:1.0.0", true),
             ("no-deps@npm:1.0.0", "no-deps@1.0.0", true),
             ("no-deps@npm:1.0.0", "no-deps@npm:1.0.0", true),
+            ("no-deps@*", "no-deps@*", true),
+            ("no-deps@npm:*", "no-deps@*", true),
+            ("no-deps@*", "no-deps@npm:*", true),
+            ("no-deps@*", "no-deps@1.0.0", false),
             ("no-deps@1.0.0", "no-deps@^1.0.0", false),
             ("no-deps@^1.0.0", "no-deps@1.0.0", false),
             ("no-deps@1.0.0", "no-deps@npm:other@1.0.0", false),
@@ -560,6 +580,7 @@ mod tests {
     fn it_should_build_canonical_selectors_from_dependencies() {
         assert_eq!(ResolutionSelector::from_dependency(&dependency("has-flag@npm:^4.0.0")).unwrap().to_file_string(), "has-flag@^4.0.0");
         assert_eq!(ResolutionSelector::from_dependency(&dependency("@scope/has-flag@npm:4.0.0")).unwrap().to_file_string(), "@scope/has-flag@4.0.0");
+        assert_eq!(ResolutionSelector::from_dependency(&dependency("has-flag@npm:*")).unwrap().to_file_string(), "has-flag@*");
         assert_eq!(ResolutionSelector::from_dependency(&dependency("has-flag@npm:latest")).unwrap().to_file_string(), "has-flag@latest");
         assert_eq!(ResolutionSelector::from_dependency(&dependency("alias@npm:has-flag@4.0.0")).unwrap().to_file_string(), "alias@npm:has-flag@4.0.0");
         assert!(ResolutionSelector::from_dependency(&dependency("has-flag@https://example.com/has-flag.tgz")).is_err());
