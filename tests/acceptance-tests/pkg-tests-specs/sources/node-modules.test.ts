@@ -1038,6 +1038,32 @@ describe(`Node Modules`, () => {
     ),
   );
 
+  test(`should self-reference workspaces whose folder is nested inside another workspace`,
+    makeTemporaryEnv(
+      {
+        private: true,
+        workspaces: [`packages/*`, `packages/*/*`],
+      },
+      {
+        nodeLinker: `node-modules`,
+      },
+      async ({path, run, source}) => {
+        await writeJson(npath.toPortablePath(`${path}/packages/a/package.json`), {
+          name: `a`,
+        });
+        await writeJson(npath.toPortablePath(`${path}/packages/a/b/package.json`), {
+          name: `b`,
+        });
+
+        await run(`install`);
+
+        await expect(source(`require('a/package.json').name`)).resolves.toEqual(`a`);
+        await expect(source(`require('b/package.json').name`)).resolves.toEqual(`b`);
+        expect(await xfs.existsPromise(`${path}/packages/a/node_modules/b` as PortablePath)).toEqual(false);
+      },
+    ),
+  );
+
   test(`should install dependencies in scoped workspaces`,
     makeTemporaryEnv(
       {

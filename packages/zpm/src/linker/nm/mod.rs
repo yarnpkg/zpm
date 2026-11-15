@@ -360,9 +360,10 @@ fn generate_workspace_node_modules(
         = workspace.rel_path == Path::new();
 
     if is_root_workspace {
-        // Only top-level workspaces self-reference: nested ones
-        // resolve peers through their parent's node_modules, so
-        // surfacing them at the root would mislead consumers.
+        // Nested workspaces with peer dependencies resolve them
+        // through their parent's node_modules, so surfacing them at
+        // the root would mislead consumers. Without peers, nothing
+        // ties them to their parent and they self-reference as usual.
         let non_root_workspace_paths: std::collections::BTreeSet<&Path> = project.workspaces.iter()
             .map(|ws| &ws.rel_path)
             .filter(|rel_path| !rel_path.is_empty())
@@ -370,7 +371,7 @@ fn generate_workspace_node_modules(
 
         let candidate_workspaces: Vec<(Ident, Path)> = project.workspaces.iter()
             .filter(|ws| {
-                ws.rel_path.iter_path().rev()
+                ws.manifest.remote.peer_dependencies.is_empty() || ws.rel_path.iter_path().rev()
                     .skip(1)
                     .all(|ancestor| !non_root_workspace_paths.contains(&ancestor))
             })
