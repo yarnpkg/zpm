@@ -15,10 +15,30 @@ pub async fn resolve_proxy_reference() -> Result<PackageManagerReference, Error>
     let mut find_result
         = find_closest_package_manager(&lookup_path)?;
 
-    if let Some(name) = &find_result.detected_dev_package_manager_name {
-        if name != "yarn" {
-            return Err(Error::UnsupportedProject {field: "devEngines.packageManager.name", name: name.clone()});
+    // Other package managers may declare themselves in `devEngines`, so we
+    // recognize those declarations to avoid running Yarn on their projects.
+    // Yarn itself is only ever selected through the `packageManager` field,
+    // so a Yarn entry in `devEngines` is an error rather than a declaration.
+    let dev_package_manager_names
+        = &find_result.detected_dev_package_manager_names;
+
+    if dev_package_manager_names.iter().any(|name| name == "yarn") {
+        // If the project is explicitly configured for another package manager,
+        // report that rather than suggesting to switch it over to Yarn.
+        if let Some(package_manager) = &find_result.detected_package_manager {
+            package_manager.reference("yarn")?;
         }
+
+        let manifest_path = find_result.detected_root_path
+            .as_ref()
+            .map(|detected_root_path| detected_root_path.with_join_str("package.json"))
+            .expect("A devEngines declaration always comes from a detected manifest");
+
+        return Err(Error::DevEnginesYarnUnsupported(manifest_path));
+    }
+
+    if !dev_package_manager_names.is_empty() {
+        return Err(Error::UnsupportedProject {field: "devEngines.packageManager.name", name: dev_package_manager_names.join(", ")});
     }
 
     if let Some(detected_root_path) = find_result.detected_root_path {

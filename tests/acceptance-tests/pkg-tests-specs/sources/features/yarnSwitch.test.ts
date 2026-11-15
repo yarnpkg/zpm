@@ -4,15 +4,20 @@ describe(`Features`, () => {
   describe(`Yarn Switch`, () => {
     describe(`project package manager`, () => {
       for (const packageManager of [undefined, `yarn@6.0.0`]) {
-        test(
-          `it should accept devEngines.packageManager.name=yarn with packageManager=${packageManager}`,
-          makeTemporaryEnv({
-            packageManager,
-            devEngines: {packageManager: {name: `yarn`}},
-          }, async ({runSwitch}) => {
-            await expect(runSwitch(`--version`)).resolves.toMatchObject({code: 0});
-          }),
-        );
+        for (const version of [undefined, `6.0.0`, `5.0.0`]) {
+          test(
+            `it should reject devEngines.packageManager.name=yarn (version=${version}) with packageManager=${packageManager}`,
+            makeTemporaryEnv({
+              packageManager,
+              devEngines: {packageManager: {name: `yarn`, version}},
+            }, async ({runSwitch}) => {
+              await expect(runSwitch(`--version`)).rejects.toMatchObject({
+                code: 1,
+                stdout: expect.stringMatching(/Yarn can't be selected through devEngines\.packageManager .*"packageManager": "yarn@<version>"/),
+              });
+            }),
+          );
+        }
 
         for (const name of [`npm`, `pnpm`]) {
           test(
@@ -42,6 +47,116 @@ describe(`Features`, () => {
           });
         }),
       );
+
+      for (const onFail of [`ignore`, `warn`, `error`]) {
+        test(
+          `it should reject a Yarn devEngines entry even with onFail=${onFail}`,
+          makeTemporaryEnv({
+            devEngines: {packageManager: {name: `yarn`, version: `6.0.0`, onFail}},
+          }, async ({runSwitch}) => {
+            await expect(runSwitch(`--version`)).rejects.toMatchObject({
+              code: 1,
+              stdout: expect.stringContaining(`Yarn can't be selected through devEngines.packageManager`),
+            });
+          }),
+        );
+      }
+
+      for (const names of [[`yarn`], [`yarn`, `pnpm`], [`npm`, `yarn`]]) {
+        test(
+          `it should reject a Yarn entry in a devEngines.packageManager array (${names.join(`, `)})`,
+          makeTemporaryEnv({
+            packageManager: `yarn@6.0.0`,
+            devEngines: {packageManager: names.map(name => ({name}))},
+          }, async ({runSwitch}) => {
+            await expect(runSwitch(`--version`)).rejects.toMatchObject({
+              code: 1,
+              stdout: expect.stringContaining(`Yarn can't be selected through devEngines.packageManager`),
+            });
+          }),
+        );
+      }
+
+      test(
+        `it should reject a devEngines.packageManager array that only lists other managers`,
+        makeTemporaryEnv({
+          packageManager: `yarn@6.0.0`,
+          devEngines: {packageManager: [{name: `npm`}, {name: `pnpm`}]},
+        }, async ({runSwitch}) => {
+          await expect(runSwitch(`--version`)).rejects.toMatchObject({
+            code: 1,
+            stdout: expect.stringContaining(`configured for use with npm, pnpm (devEngines.packageManager.name)`),
+          });
+        }),
+      );
+
+      test(
+        `it should report the top-level packageManager when it names another manager next to a Yarn devEngines array entry`,
+        makeTemporaryEnv({
+          packageManager: `pnpm@10.0.0`,
+          devEngines: {packageManager: [{name: `yarn`}]},
+        }, async ({runSwitch}) => {
+          await expect(runSwitch(`--version`)).rejects.toMatchObject({
+            code: 1,
+            stdout: expect.stringContaining(`configured for use with pnpm (packageManager)`),
+          });
+        }),
+      );
+
+      test(
+        `it should reject a devEngines-only Yarn declaration from a subdirectory`,
+        makeTemporaryEnv({
+          devEngines: {packageManager: {name: `yarn`, version: `6.0.0`}},
+        }, async ({path, runSwitch}) => {
+          const cwd = ppath.join(path, `packages`, `child`);
+          await xfs.mkdirpPromise(cwd);
+          await xfs.writeJsonPromise(ppath.join(cwd, Filename.manifest), {});
+
+          await expect(runSwitch(`--version`, {cwd})).rejects.toMatchObject({
+            code: 1,
+            stdout: expect.stringContaining(`Yarn can't be selected through devEngines.packageManager`),
+          });
+        }),
+      );
+
+      test(
+        `it should stop at a devEngines-only Yarn declaration before an ancestor packageManager`,
+        makeTemporaryEnv({
+          packageManager: `yarn@6.0.0`,
+        }, async ({path, runSwitch}) => {
+          const cwd = ppath.join(path, `child`);
+          await xfs.mkdirpPromise(cwd);
+          await xfs.writeJsonPromise(ppath.join(cwd, Filename.manifest), {
+            devEngines: {packageManager: {name: `yarn`, version: `6.0.0`}},
+          });
+
+          await expect(runSwitch(`--version`, {cwd})).rejects.toMatchObject({
+            code: 1,
+            stdout: expect.stringContaining(`Yarn can't be selected through devEngines.packageManager`),
+          });
+        }),
+      );
+
+      for (const devEngines of [
+        `yarn@6.0.0`,
+        [],
+        {packageManager: `yarn@6.0.0`},
+        {packageManager: {name: 42}},
+        {packageManager: [{name: 42}, `yarn`, [`yarn`]]},
+      ]) {
+        test(
+          `it should ignore a malformed devEngines field (${JSON.stringify(devEngines)})`,
+          makeTemporaryEnv({
+            packageManager: `yarn@6.0.0`,
+            devEngines,
+          }, async ({runSwitch}) => {
+            await expect(runSwitch(`--version`)).resolves.toMatchObject({
+              code: 0,
+              stdout: expect.stringContaining(`Fake Yarn 6.0.0`),
+            });
+          }),
+        );
+      }
 
       test(
         `it should allow devEngines without a package manager name`,
@@ -138,6 +253,43 @@ describe(`Features`, () => {
           }),
         );
       }
+
+      for (const link of [`local`, `migration`]) {
+        test(
+          `it should reject a Yarn devEngines entry before applying a ${link} link`,
+          makeTemporaryEnv({
+            packageManager: `yarn@6.0.0`,
+            packageManagerMigration: `yarn@6.0.0`,
+            devEngines: {packageManager: {name: `yarn`, version: `6.0.0`}},
+          }, async ({runSwitch, yarnBinary}) => {
+            if (link === `local`)
+              await runSwitch(`switch`, `link`, yarnBinary);
+            else
+              await runSwitch(`switch`, `link`, `--migration`);
+
+            try {
+              await expect(runSwitch(`--version`)).rejects.toMatchObject({
+                code: 1,
+                stdout: expect.stringContaining(`Yarn can't be selected through devEngines.packageManager`),
+              });
+            } finally {
+              await runSwitch(`switch`, `unlink`);
+            }
+          }),
+        );
+      }
+
+      test(
+        `it should allow an explicit Yarn selector to override a Yarn devEngines entry`,
+        makeTemporaryEnv({
+          devEngines: {packageManager: {name: `yarn`, version: `5.0.0`}},
+        }, async ({runSwitch}) => {
+          await expect(runSwitch(`switch`, `6.0.0`, `--version`)).resolves.toMatchObject({
+            code: 0,
+            stdout: expect.stringContaining(`Fake Yarn 6.0.0`),
+          });
+        }),
+      );
 
       test(
         `it should allow an explicit Yarn selector to override the project manager`,

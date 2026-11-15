@@ -93,6 +93,9 @@ pub enum Error {
         name: String,
     },
 
+    #[error("Yarn can't be selected through {} (in {}); remove the Yarn entry and use the {} field instead, for example {} (or run {} once the entry is removed)", DataType::Code.colorize("devEngines.packageManager"), .0.to_print_string(), DataType::Code.colorize("packageManager"), DataType::Code.colorize("\"packageManager\": \"yarn@<version>\""), DataType::Code.colorize("yarn set version <version>"))]
+    DevEnginesYarnUnsupported(Path),
+
     #[error("No project found in current directory or any parent")]
     NoProjectFound,
 
