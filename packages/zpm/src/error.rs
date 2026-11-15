@@ -394,6 +394,9 @@ pub enum Error {
     #[error("Binary not found ({0})")]
     BinaryNotFound(String),
 
+    #[error("Usage Error: Couldn't find a binary named \"{}\" for package \"{}\"", .0, .1.to_print_string())]
+    BinaryNotFoundForPackage(String, Locator),
+
     #[error("Task file parse error: {0}")]
     TaskParseError(#[source] zpm_tasks::Error),
 
