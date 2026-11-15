@@ -15,6 +15,31 @@ Commands are defined using the `#[cli::command]` macro. This macro is used to de
 #[cli::description("List the project's configuration values")]
 ```
 
+The first line of the doc comment is the command description, and the following paragraphs are its details. Clipanion joins consecutive doc comment lines into a single paragraph, so separate paragraphs (and list items) with an empty `///` line.
+
+## Command examples
+
+clipanion-rs doesn't read examples from the command definitions yet (the `examples` field of the command specs is always empty), so examples are written as the last section of the details: a `## Examples` paragraph followed by pairs of paragraphs, a short description and then the command wrapped in single backticks. The website extracts this section and renders it as the "Examples" section of the command page (see [website/src/utils/cli.ts](../../website/src/utils/cli.ts)); the build fails if a description has no command or the other way around. Note that `yarn <command> --help` only prints the usage line and the description, not the details. Only document commands and flags you ran against your build.
+
+```rust
+/// Add new dependencies to the project
+///
+/// This command adds packages to the nearest workspace manifest and then runs an install.
+///
+/// ## Examples
+///
+/// Add a regular package to the current workspace
+///
+/// `yarn add lodash`
+///
+/// Add a package to the `devDependencies` of the current workspace
+///
+/// `yarn add -D typescript`
+///
+#[cli::command]
+#[cli::path("add")]
+```
+
 ## Command execution
 
 Commands are executed using the `execute` method. This method is used to execute the command and return a result. It can be async:

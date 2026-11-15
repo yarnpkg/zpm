@@ -6,6 +6,53 @@ type DataEntry = {id: string, data: BaseData, filePath?: string};
 type OptionComponent = Extract<Component, {type: `option`}>;
 type PositionalComponent = Extract<Component, {type: `positional`}>;
 
+type Example = {description: string, command: string};
+
+const EXAMPLES_HEADING = `## Examples`;
+const EXAMPLE_COMMAND_REGEXP = /^`([^`]+)`$/;
+
+// clipanion-rs doesn't populate `commandSpec.examples` from the command
+// definitions yet, so the commands document their examples in a final
+// `## Examples` section of their details, as alternating description and
+// `` `command` `` paragraphs (see contributing/design/cli-commands.md). We
+// extract this section so it can be rendered after the options, the same
+// way as the examples coming from the command spec.
+function extractExamples(entry: DataEntry, details: string): {details: string, examples: Array<Example>} {
+  const paragraphs = details.split(/\n\n/);
+
+  const headingIndex = paragraphs.findIndex(paragraph => paragraph.trim() === EXAMPLES_HEADING);
+  if (headingIndex === -1)
+    return {details, examples: []};
+
+  const commandName = [entry.data.binaryName, ...entry.data.commandSpec.primaryPath].join(` `);
+  const examples: Array<Example> = [];
+
+  let description: string | null = null;
+  for (const paragraph of paragraphs.slice(headingIndex + 1).map(paragraph => paragraph.trim())) {
+    const match = paragraph.match(EXAMPLE_COMMAND_REGEXP);
+    if (match) {
+      if (description === null)
+        throw new Error(`The examples section of \`${commandName}\` has a command without description: ${paragraph}`);
+
+      examples.push({description, command: match[1]});
+      description = null;
+    } else {
+      if (description !== null)
+        throw new Error(`The examples section of \`${commandName}\` has a description without command: ${description}`);
+
+      description = paragraph;
+    }
+  }
+
+  if (description !== null)
+    throw new Error(`The examples section of \`${commandName}\` has a description without command: ${description}`);
+
+  return {
+    details: paragraphs.slice(0, headingIndex).join(`\n\n`).trim(),
+    examples,
+  };
+}
+
 function escapeDirective(s: string): string {
   return s.replace(/\\/g, `\\\\`).replace(/\[/g, `\\[`).replace(/\]/g, `\\]`);
 }
@@ -49,9 +96,12 @@ export function cliBody(entry: DataEntry): string {
   lines.push(buildUsageLine(entry));
   lines.push(`\`\`\``);
 
-  if (commandSpec.documentation?.details) {
+  const {details, examples: detailsExamples} = extractExamples(entry, commandSpec.documentation?.details ?? ``);
+  const examples = [...commandSpec.examples, ...detailsExamples];
+
+  if (details) {
     lines.push(``);
-    lines.push(commandSpec.documentation.details);
+    lines.push(details);
   }
 
   const options = commandSpec.components.filter(
@@ -73,11 +123,11 @@ export function cliBody(entry: DataEntry): string {
     }
   }
 
-  if (commandSpec.examples.length > 0) {
+  if (examples.length > 0) {
     lines.push(``);
     lines.push(`## Examples`);
 
-    for (const example of commandSpec.examples) {
+    for (const example of examples) {
       lines.push(``);
       if (example.description)
         lines.push(`**${example.description}**`);
