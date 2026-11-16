@@ -1,7 +1,7 @@
 use std::{cell::Cell, collections::{BTreeMap, BTreeSet}, fmt::Display, ops::Deref, sync::Arc, time::UNIX_EPOCH};
 
 use serde::{Deserialize, Deserializer, Serialize, Serializer, de};
-use zpm_utils::{AbstractValue, Container, Cpu, DataType, FromFileString, IoResultExt, LastModifiedAt, Libc, Os, Path, RawString, Serialized, System, SystemSet, ToFileString, ToHumanString, tree};
+use zpm_utils::{AbstractValue, Container, Cpu, DataType, FromFileString, LastModifiedAt, Libc, Os, Path, RawString, Serialized, System, SystemSet, ToFileString, ToHumanString, tree};
 
 #[derive(Debug, Clone)]
 pub struct ConfigurationContext {
@@ -1238,8 +1238,7 @@ impl RcFile {
             = dir.with_join_str(rc_filename);
 
         let metadata
-            = path.fs_metadata()
-                .ok_missing()?;
+            = path.fs_metadata_if_exists()?;
 
         let Some(metadata) = metadata else {
             return Ok(Some(RcFile {path, text: None}));
@@ -1320,8 +1319,7 @@ impl Configuration {
                 = project_cwd.with_join_str(actual_path);
 
             let metadata
-                = full_path.fs_metadata()
-                    .ok_missing()?;
+                = full_path.fs_metadata_if_exists()?;
 
             match metadata {
                 Some(metadata) => {

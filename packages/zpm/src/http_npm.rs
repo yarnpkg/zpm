@@ -365,7 +365,7 @@ pub async fn get_id_token(options: &GetIdTokenOptions<'_>) -> Result<Option<Stri
     Ok(Some(data.value))
 }
 
-fn get_ident_url(ident: &Ident) -> String {
+pub fn get_ident_url(ident: &Ident) -> String {
     let (scope, name)
         = ident.split();
 
@@ -717,8 +717,10 @@ async fn fetch_metadata_with_disk_cache(params: &GetPackageMetadataParams<'_>) -
     let cache_file
         = get_cache_file_path(params.global_folder, &url);
 
+    // Not going through `fs_read_prealloc`: the errors are discarded, and
+    // the file is missing for every package of a cold install
     let cached = if !params.refresh_lockfile {
-        cache_file.fs_read_prealloc().ok()
+        std::fs::read(cache_file.to_path_buf()).ok()
             .and_then(|data| rkyv::from_bytes::<CachedMetadataDisk, rkyv::rancor::BoxedError>(&data).ok())
     } else {
         None

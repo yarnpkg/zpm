@@ -371,8 +371,25 @@ pub fn pack_manifest(project: &Project, workspace: &Workspace, options: &PackOpt
 
     let manifest_content = manifest_path
         .fs_read_prealloc()?;
+    let manifest_text
+        = String::from_utf8_lossy(&manifest_content).to_string();
+
     let manifest: Manifest
-        = parse_manifest(&String::from_utf8_lossy(&manifest_content))?;
+        = parse_manifest(&manifest_text)?;
+
+    // The object fields are copied verbatim from the raw publishConfig
+    // rather than serialized back from their typed representation, which
+    // doesn't always preserve the authored key order (`bin` and `browser`
+    // are sorted maps). This order is semantic for `exports` and `imports`.
+    let raw_manifest
+        = Value::from_json_str(&manifest_text)?;
+
+    let raw_publish_config_field = |field: &str| {
+        raw_manifest.get_key("publishConfig")
+            .and_then(|publish_config| publish_config.get_key(field))
+            .cloned()
+            .expect("The field should exist since it was parsed from the same manifest")
+    };
 
     let mut document
         = JsonDocument::new(manifest_content)?;
@@ -391,17 +408,17 @@ pub fn pack_manifest(project: &Project, workspace: &Workspace, options: &PackOpt
         )?;
     }
 
-    if let Some(exports) = &manifest.publish_config.exports {
+    if manifest.publish_config.exports.is_some() {
         document.set_path(
             &zpm_parsers::Path::from_segments(vec!["exports".to_string()]),
-            Value::from_serializable(&exports)?,
+            raw_publish_config_field("exports"),
         )?;
     }
 
-    if let Some(imports) = &manifest.publish_config.imports {
+    if manifest.publish_config.imports.is_some() {
         document.set_path(
             &zpm_parsers::Path::from_segments(vec!["imports".to_string()]),
-            Value::from_serializable(&imports)?,
+            raw_publish_config_field("imports"),
         )?;
     }
 
@@ -412,17 +429,17 @@ pub fn pack_manifest(project: &Project, workspace: &Workspace, options: &PackOpt
         )?;
     }
 
-    if let Some(browser) = &manifest.publish_config.browser {
+    if manifest.publish_config.browser.is_some() {
         document.set_path(
             &zpm_parsers::Path::from_segments(vec!["browser".to_string()]),
-            Value::from_serializable(browser)?,
+            raw_publish_config_field("browser"),
         )?;
     }
 
-    if let Some(bin) = &manifest.publish_config.bin {
+    if manifest.publish_config.bin.is_some() {
         document.set_path(
             &zpm_parsers::Path::from_segments(vec!["bin".to_string()]),
-            Value::from_serializable(bin)?,
+            raw_publish_config_field("bin"),
         )?;
     }
 
