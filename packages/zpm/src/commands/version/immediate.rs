@@ -143,7 +143,7 @@ fn parse_strategy(strategy: &str) -> Result<Option<ReleaseStrategy>, Error> {
         _ => {},
     }
 
-    if let Ok(version) = zpm_semver::Version::from_strict_str(strategy) {
+    if let Some(version) = zpm_semver::Version::from_strict_str(strategy) {
         return Ok(Some(ExactReleaseStrategy {version}.into()));
     }
 

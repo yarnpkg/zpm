@@ -92,7 +92,7 @@ impl PrereleasePattern {
     pub fn apply(&self, base: &Version, current: &Version) -> Version {
         enum Part<'a> {
             Literal(&'a str),
-            Counter {increment: u32},
+            Counter {increment: u64},
             Reset,
         }
 
@@ -301,25 +301,5 @@ impl Version {
             rc: Some(EcoVec::from([VersionRc::Number(0)])),
             ..base
         }
-    }
-
-    /// Parses a version the way node-semver's `valid` does in strict mode:
-    /// all three components are required, numeric identifiers can't have
-    /// leading zeros, and only a single leading `v` is accepted. Build
-    /// metadata is accepted but discarded.
-    pub fn from_strict_str(src: &str) -> Result<Version, Error> {
-        let version
-            = Version::from_file_string(src)?;
-
-        let without_prefix
-            = src.strip_prefix('v').unwrap_or(src);
-        let without_build
-            = without_prefix.split_once('+').map_or(without_prefix, |(main, _)| main);
-
-        if !src.is_ascii() || version.to_file_string() != without_build {
-            return Err(Error::InvalidVersion(src.to_string()));
-        }
-
-        Ok(version)
     }
 }

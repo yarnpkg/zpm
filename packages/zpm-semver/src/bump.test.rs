@@ -120,5 +120,5 @@ fn test_from_strict_str_valid(#[case] src: &str, #[case] expected: &str) {
 #[case("vv1.2.3")]
 #[case("invalid")]
 fn test_from_strict_str_invalid(#[case] src: &str) {
-    assert!(Version::from_strict_str(src).is_err());
+    assert!(Version::from_strict_str(src).is_none());
 }
