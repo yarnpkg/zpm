@@ -245,6 +245,9 @@ impl Path {
         self.path.split('/')
     }
 
+    /// Iterates over the path and each of its ancestors; see [`PathIterator`]
+    /// for the exact contract.
+    ///
     /// ```
     /// use zpm_utils::p;
     ///
