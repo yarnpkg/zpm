@@ -12,9 +12,10 @@ struct PartialRcSettings {
 }
 
 fn load_switch_version_requirement() -> Result<Option<Range>, Error> {
-    let home_dir
-        = Path::home_dir()?
-            .ok_or(Error::MissingHomeFolder)?;
+    // Without a home directory there's no home rc file to read
+    let Some(home_dir) = Path::home_dir()? else {
+        return Ok(None);
+    };
 
     let rc_filename
         = std::env::var("YARN_RC_FILENAME")

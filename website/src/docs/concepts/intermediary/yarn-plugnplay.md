@@ -23,7 +23,7 @@ Ghost dependencies lead to unexpected behaviors and bugs as the addition or remo
 
 To address these issues, other package managers such as pnpm came up with improvements. Thanks to a smart use of symlinks those package managers can avoid some ghost dependencies by creating entirely separate `node_modules` branches for each package.
 
-While being a significant improvement over the naive `node_modules` approach, this strategy doesn't solve everything. For one it still involves a large amount of filesystem operations to generate symlinks and copy files. It also isn't able to represent all [dependency trees](/appendix/nm-peer-deps).
+While being a significant improvement over the naive `node_modules` approach, this strategy doesn't solve everything. For one it still involves a large amount of filesystem operations to generate symlinks and copy files. It also isn't able to represent all [dependency trees](/appendix/workspaces-and-peer-deps).
 
 ## How does Plug'n'Play work?
 
@@ -39,7 +39,7 @@ While our loader integrates perfectly with the standard Node.js resolution APIs 
 
 - Tools that implement their own dependency resolution logic rather than using the standard Node.js APIs. This is often the case with bundlers and linters as they need to support various features that Node.js wouldn't otherwise support (`browser` or `types` fields, etc).
 
-In that last case we worked with the relevant teams to implement native support Yarn Plug'n'Play in their pipeline. This work was made easier thanks to the [Plug'n'Play specification](https://yarnpkg.com/features/pnp) and the [`pnp-rs` crate](https://github.com/yarnpkg/pnp-rs), which explain how to implement Plug'n'Play support outside of Node.js environments.
+In that last case we worked with the relevant teams to implement native support Yarn Plug'n'Play in their pipeline. This work was made easier thanks to the [Plug'n'Play specification](/advanced/pnp-spec) and the [`pnp-rs` crate](https://github.com/yarnpkg/pnp-rs), which explain how to implement Plug'n'Play support outside of Node.js environments.
 
 Today, Yarn Plug'n'Play is supported natively by Vite, Webpack, Esbuild, Rspack, Eslint, and many more.
 

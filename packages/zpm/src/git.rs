@@ -204,28 +204,31 @@ async fn ls_remote(repo: &GitSource, config: &HttpConfig, approved_repos: &[Sett
 }
 
 pub async fn resolve_git_treeish(git_range: &GitRange, config: &HttpConfig, approved_repos: &[Setting<String>]) -> Result<String, Error> {
-    match &git_range.treeish {
+    // Errors from `ls_remote` (unapproved repository, disabled network,
+    // unreachable remote, ...) must be reported as-is; only the ref lookup
+    // below is allowed to fall through to the next candidate.
+    let refs
+        = ls_remote(&git_range.repo, config, approved_repos).await?;
+
+    resolve_treeish_from_refs(&refs, &git_range.treeish)
+}
+
+fn resolve_treeish_from_refs(refs: &BTreeMap<String, String>, treeish: &GitTreeish) -> Result<String, Error> {
+    match treeish {
         GitTreeish::AnythingGoes(treeish) => {
-            if let Ok(result) = resolve_git_treeish_stricter(&git_range.repo, GitTreeish::Commit(treeish.clone()), config, approved_repos).await {
-                Ok(result)
-            } else if let Ok(result) = resolve_git_treeish_stricter(&git_range.repo, GitTreeish::Tag(treeish.clone()), config, approved_repos).await {
-                Ok(result)
-            } else if let Ok(result) = resolve_git_treeish_stricter(&git_range.repo, GitTreeish::Head(treeish.clone()), config, approved_repos).await {
-                Ok(result)
-            } else {
-                Err(Error::InvalidGitSpecifier)
-            }
+            resolve_treeish_from_refs_stricter(refs, GitTreeish::Commit(treeish.clone()))
+                .or_else(|_| resolve_treeish_from_refs_stricter(refs, GitTreeish::Tag(treeish.clone())))
+                .or_else(|_| resolve_treeish_from_refs_stricter(refs, GitTreeish::Head(treeish.clone())))
+                .map_err(|_| Error::InvalidGitSpecifier)
         },
 
         _ => {
-            resolve_git_treeish_stricter(&git_range.repo, git_range.treeish.clone(), config, approved_repos).await
+            resolve_treeish_from_refs_stricter(refs, treeish.clone())
         },
     }
 }
 
-async fn resolve_git_treeish_stricter(repo: &GitSource, treeish: GitTreeish, config: &HttpConfig, approved_repos: &[Setting<String>]) -> Result<String, Error> {
-    let refs = ls_remote(repo, config, approved_repos).await?;
-
+fn resolve_treeish_from_refs_stricter(refs: &BTreeMap<String, String>, treeish: GitTreeish) -> Result<String, Error> {
     match treeish {
         GitTreeish::AnythingGoes(_) => {
             unreachable!();
@@ -253,7 +256,7 @@ async fn resolve_git_treeish_stricter(repo: &GitSource, treeish: GitTreeish, con
         }
 
         GitTreeish::Semver(tag) => {
-            let mut candidates: Vec<(String, zpm_semver::Version)> = refs.into_iter()
+            let mut candidates: Vec<(&String, zpm_semver::Version)> = refs.iter()
                 .filter(|(k, _)| k.starts_with("refs/tags/") && !k.ends_with("^{}"))
                 .filter_map(|(k, _)| zpm_semver::Version::from_file_string(&k[10..]).ok().map(|v| (k, v)))
                 .filter(|(_, v)| tag.check(v))
@@ -369,4 +372,85 @@ async fn git_clone_into(source: &GitSource, commit: &str, clone_dir: &Path, conf
         .ok()?;
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const COMMIT_HASH: &str = "b3562c2798507869edb767da869cd7b85487726d";
+    const TAG_HASH: &str = "6e923f7d98a0afbe5b9c7db9d0f0029c1936746c";
+    const HEAD_HASH: &str = "4bcc600d20e3a53ea27fa52c4d1fc49cc2d0eabb";
+
+    fn refs() -> BTreeMap<String, String> {
+        BTreeMap::from([
+            ("HEAD".to_string(), HEAD_HASH.to_string()),
+            ("refs/heads/main".to_string(), HEAD_HASH.to_string()),
+            ("refs/tags/v1.0.1".to_string(), TAG_HASH.to_string()),
+        ])
+    }
+
+    #[test]
+    fn resolves_anything_goes_as_a_commit() {
+        let result
+            = resolve_treeish_from_refs(&refs(), &GitTreeish::AnythingGoes(COMMIT_HASH.to_string()));
+
+        assert_eq!(result.unwrap(), COMMIT_HASH);
+    }
+
+    #[test]
+    fn resolves_anything_goes_as_a_tag() {
+        let result
+            = resolve_treeish_from_refs(&refs(), &GitTreeish::AnythingGoes("v1.0.1".to_string()));
+
+        assert_eq!(result.unwrap(), TAG_HASH);
+    }
+
+    #[test]
+    fn resolves_anything_goes_as_a_head() {
+        let result
+            = resolve_treeish_from_refs(&refs(), &GitTreeish::AnythingGoes("main".to_string()));
+
+        assert_eq!(result.unwrap(), HEAD_HASH);
+    }
+
+    #[test]
+    fn reports_unknown_anything_goes_as_an_invalid_specifier() {
+        let result
+            = resolve_treeish_from_refs(&refs(), &GitTreeish::AnythingGoes("does-not-exist".to_string()));
+
+        assert!(matches!(result, Err(Error::InvalidGitSpecifier)));
+    }
+
+    #[test]
+    fn reports_strict_treeish_errors_as_is() {
+        let result
+            = resolve_treeish_from_refs(&refs(), &GitTreeish::Head("does-not-exist".to_string()));
+
+        assert!(matches!(result, Err(Error::InvalidGitBranch(branch)) if branch == "does-not-exist"));
+    }
+
+    #[test]
+    fn rejects_every_repository_when_no_pattern_is_approved() {
+        assert!(!matches_approved_git_repository("https://github.com/yarnpkg/util-deprecate.git", &[]));
+    }
+
+    #[test]
+    fn matches_approved_repository_patterns() {
+        let patterns = vec![
+            Setting::new("https://github.com/yarnpkg/*".to_string(), Default::default()),
+        ];
+
+        assert!(matches_approved_git_repository("https://github.com/yarnpkg/util-deprecate.git", &patterns));
+        assert!(!matches_approved_git_repository("https://github.com/other/repo.git", &patterns));
+        assert!(!matches_approved_git_repository("git@github.com:yarnpkg/util-deprecate.git", &patterns));
+    }
+
+    #[test]
+    fn reports_the_repository_and_how_to_approve_it() {
+        let message
+            = Error::ApprovedGitRepositoriesError("https://github.com/yarnpkg/util-deprecate.git".to_string()).to_string();
+
+        assert_eq!(message, "Request to 'https://github.com/yarnpkg/util-deprecate.git' has been blocked because it doesn't match any of the patterns in 'approvedGitRepositories'. To approve it, add a matching pattern (for example 'https://github.com/yarnpkg/util-deprecate.git') to 'approvedGitRepositories' in your .yarnrc.yml, or use '**' to approve all git repositories.");
+    }
 }

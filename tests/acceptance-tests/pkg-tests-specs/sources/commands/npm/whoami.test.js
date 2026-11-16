@@ -51,6 +51,24 @@ describe(`Commands`, () => {
     );
 
     test(
+      `it should print the npm registry username when the registry entry is keyed without the protocol`,
+      makeTemporaryEnv({}, async ({path, run, source}) => {
+        const url = await startPackageServer();
+
+        await writeFile(`${path}/.yarnrc.yml`, [
+          `npmRegistryServer: "${url}"\n`,
+          `npmRegistries:\n`,
+          `  "${url.replace(/^https?:/, ``)}":\n`,
+          `    npmAuthToken: ${validLogins.fooUser.npmAuthToken}\n`,
+        ].join(``));
+
+        await expect(run(`npm`, `whoami`)).resolves.toMatchObject({
+          stdout: expect.stringContaining(`foo-user`),
+        });
+      }),
+    );
+
+    test(
       `it should throw an error when no auth config is found`,
       makeTemporaryEnv({}, async ({path, run, source}) => {
         await expect(run(`npm`, `whoami`)).rejects.toThrowError(/No authentication configured/);

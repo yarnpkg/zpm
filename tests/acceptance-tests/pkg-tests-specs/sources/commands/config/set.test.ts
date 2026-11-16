@@ -43,6 +43,40 @@ describe(`Commands`, () => {
     );
 
     test(
+      `it should update registry entries keyed without the protocol in place`,
+      makeTemporaryEnv({}, async ({path, run, source}) => {
+        await xfs.writeJsonPromise(ppath.join(path, Filename.rc), {
+          npmRegistries: {
+            [`//npm.pkg.github.com`]: {
+              npmAlwaysAuth: true,
+            },
+          },
+        });
+
+        await run(`config`, `set`, `npmRegistries["//npm.pkg.github.com"].npmAuthToken`, `foobar`);
+
+        expect(parseSyml(await xfs.readFilePromise(ppath.join(path, Filename.rc), `utf8`))).toStrictEqual({
+          npmRegistries: {
+            [`//npm.pkg.github.com`]: {
+              npmAlwaysAuth: `true`, // parseSyml doesn't parse booleans
+              npmAuthToken: `foobar`,
+            },
+          },
+        });
+
+        await run(`config`, `unset`, `npmRegistries["//npm.pkg.github.com"].npmAuthToken`);
+
+        expect(parseSyml(await xfs.readFilePromise(ppath.join(path, Filename.rc), `utf8`))).toStrictEqual({
+          npmRegistries: {
+            [`//npm.pkg.github.com`]: {
+              npmAlwaysAuth: `true`, // parseSyml doesn't parse booleans
+            },
+          },
+        });
+      }),
+    );
+
+    test(
       `it should support setting JSON values`,
       makeTemporaryEnv({enableColors: false}, async({path, run, source}) => {
         const {stdout} = await run(`config`, `set`, `npmScopes.yarnpkg`, `--json`, JSON.stringify({
