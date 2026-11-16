@@ -592,16 +592,13 @@ pub enum Error {
     #[error("Your version of npm doesn't support workspaces")]
     UnsupportedNpmWorkspaces(zpm_semver::Version),
 
-    #[error("Declining a version bump is only allowed when using the `--deferred` flag or when `preferDeferredVersions` is enabled")]
-    VersionDeclineNotAllowed,
-
     #[error("Cache cleanup is disabled (the `enableCacheClean` setting is `false`)")]
     CacheCleanDisabled,
 
-    #[error("Cannot use {0} as a version bump strategy when using the `--deferred` flag or when `preferDeferredVersions` is enabled and `--immediate` isn't set")]
-    InvalidDeferredVersionBump(String),
+    #[error("Invalid strategy: \"{}\". Expected a valid semver or one of \"major\", \"minor\", \"patch\", \"premajor\", \"preminor\", \"prepatch\", \"prerelease\", \"decline\".{}", .0, .1.as_ref().map(|suggestion| format!(" Did you mean to use \"{}\"?", suggestion)).unwrap_or_default())]
+    InvalidVersionStrategy(String, Option<String>),
 
-    #[error("Can't bump the version if there wasn't a version to begin with - use 0.0.0 as initial version then run the command again.")]
+    #[error("Can't bump the version if there wasn't a version to begin with - set an initial version then run the command again.")]
     NoVersionFoundForActiveWorkspace,
 
     #[error("No existing version found for workspace {}", .0.to_print_string())]
@@ -610,14 +607,11 @@ pub enum Error {
     #[error("Recursive version apply is not implemented yet")]
     RecursiveVersionApplyNotImplemented,
 
-    #[error("Can't bump the version to one that would be lower than the current one (trying to bump {} from version {} to version {})", .0.to_print_string(), .1.to_print_string(), .2.to_print_string())]
+    #[error("Cannot bump {} to a lower version ({}) than the current one ({}); use --force to bypass this check", .0.to_print_string(), .2.to_print_string(), .1.to_print_string())]
     VersionBumpLowerThanCurrent(Ident, zpm_semver::Version, zpm_semver::Version),
 
-    #[error("Can't bump the version to one that would be lower than the current deferred one ({})", .0.to_print_string())]
+    #[error("Can't bump the version to one that would be lower than the current deferred one ({}); use --force to bypass this check", .0.to_print_string())]
     VersionBumpLowerThanDeferred(zpm_semver::Version),
-
-    #[error("The project doesn't seem to require a version bump.")]
-    NoVersionBumpRequiredForProject,
 
     #[error("No versioning file found")]
     VersioningFileNotFound,
