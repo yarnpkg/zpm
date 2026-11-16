@@ -514,6 +514,12 @@ const RELEASE_DATE_PACKAGES: Record<string, Record<string, number | string>> = {
     "1.1.1": new Date().toISOString(),
     "1.1.2": new Date(new Date().getTime() - /* 5 days */ 1000 * 60 * 60 * 24 * 5).toISOString(),
   },
+  // Its newest version is old enough for a gate counted in seconds and too
+  // new for one counted in minutes or more, which lets tests tell the units apart
+  "release-date-hours": {
+    "1.0.0": new Date(new Date().getTime() - /* 2 days */ 1000 * 60 * 60 * 24 * 2).toISOString(),
+    "1.1.0": new Date(new Date().getTime() - /* 2 hours */ 1000 * 60 * 60 * 2).toISOString(),
+  },
 };
 
 const DEFAULT_PACKAGE_TIME = `1984-01-01T00:00:00.000Z`;

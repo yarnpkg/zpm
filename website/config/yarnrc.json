@@ -972,7 +972,7 @@
           "description": "Disable the npm minimum age gate for one package.",
           "value": [{
             "packageFilter": "specific-package",
-            "npmMinimalAgeGate": "0"
+            "npmMinimalAgeGate": "0s"
           }]
         },
         {
@@ -1414,7 +1414,7 @@
     "daemonDefaultWarmupPeriod": {
       "_package": "@yarnpkg/core",
       "title": "Default warm-up period for long-lived daemon tasks.",
-      "description": "After a long-lived task starts, dependents are unblocked once this duration elapses.",
+      "description": "After a long-lived task starts, dependents are unblocked once this duration elapses. Values without unit are in seconds.",
       "type": "string",
       "default": "1s",
       "_examples": [
@@ -1545,7 +1545,7 @@
     "npmMinimalAgeGate": {
       "_package": "@yarnpkg/plugin-npm",
       "title": "Minimum package version age required before installation.",
-      "description": "Versions newer than this duration won't be considered for installation unless they are preapproved. This can reduce exposure to newly-published supply-chain incidents. Durations take a unit (`ms`, `s`, `m`, `h`, `d`, `w`); `0` disables the gate. The value can be overridden per scope (`npmScopes`), per registry (`sourceRules`), and per package (`packageRules`), in increasing order of precedence; `--no-time-gate` on `yarn add` and `yarn up` disables all of them.",
+      "description": "Versions newer than this duration won't be considered for installation unless they are preapproved. This can reduce exposure to newly-published supply-chain incidents.\n\nThe duration accepts the `ms`, `s`, `m`, `h`, `d`, and `w` units; values without unit are in minutes (as in Yarn 4), so `1440` is one day; `0` disables the gate. The value can be overridden per scope (`npmScopes`), per registry (`sourceRules`), and per package (`packageRules`), in increasing order of precedence; `--no-time-gate` on `yarn add` and `yarn up` disables all of them.",
       "type": "string",
       "default": "1d",
       "_examples": [
