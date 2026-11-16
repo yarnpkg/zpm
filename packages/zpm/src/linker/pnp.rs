@@ -236,9 +236,7 @@ pub async fn link_project_pnp<'a>(project: &'a Project, install: &'a Install) ->
     let virtual_folder = project.project_cwd
         .with_join(&project.config.settings.virtual_folder.value);
 
-    if project.config.settings.enable_local_cache_cleanup.value {
-        linker::helpers::fs_remove_nm(nm_path)?;
-    }
+    linker::helpers::fs_remove_nm(nm_path)?;
 
     let dependencies_meta
         = linker::helpers::TopLevelConfiguration::from_project(project);

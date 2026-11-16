@@ -105,7 +105,7 @@
     },
     "enableLocalCacheCleanup": {
       "type": "boolean",
-      "description": "Whether the pnp linker removes the project's root node_modules folder (unused local cache entries are removed whenever cacheFolder is left to its default, regardless of this setting)",
+      "description": "Whether to remove unused packages from the local cache after each install (only applies when `enableGlobalCache` is false and `cacheFolder` is left to its default)",
       "default": true
     },
     "enableImmutableCache": {

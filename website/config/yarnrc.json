@@ -1466,8 +1466,8 @@
     },
     "enableLocalCacheCleanup": {
       "_package": "@yarnpkg/core",
-      "title": "Define whether the `pnp` linker should remove the project's root `node_modules` folder.",
-      "description": "Despite its name, this setting doesn't control the local cache: unused entries are removed from the local cache after each install whenever `cacheFolder` is left to its default. Its only effect is on the `pnp` linker, which removes the project's root `node_modules` folder (preserving hidden folders other than `.bin`) when this setting is enabled.",
+      "title": "Define whether unused packages should be removed from the local cache after installs.",
+      "description": "When enabled, Yarn removes the archives that the project doesn't use anymore from the project-local cache after each install. This only applies when `enableGlobalCache` is disabled and `cacheFolder` is left to its default: a custom cache folder may be shared with other projects, so it is never pruned. Unused entries make installs fail when `enableImmutableCache` is set, unless this setting is disabled.",
       "type": "boolean",
       "default": true,
       "_examples": [
