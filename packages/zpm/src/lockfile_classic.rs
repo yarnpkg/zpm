@@ -393,7 +393,7 @@ chalk@^2.0.0, chalk@^2.4.2:
 
     fn import(data: &str) -> super::ClassicLockfileImport {
         let context = zpm_config::ConfigurationContext {
-            env: Default::default(),
+            env: [("YARN_GLOBAL_FOLDER".to_string(), zpm_utils::Path::temp_root_dir().unwrap().with_join_str("zpm-test").to_file_string())].into(),
             user_cwd: None,
             project_cwd: None,
             package_cwd: None,

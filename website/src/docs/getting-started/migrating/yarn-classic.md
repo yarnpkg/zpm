@@ -19,12 +19,12 @@ The migration needs to rewrite the lockfile, so it can't happen during an immuta
 
 ## What changes
 
-- Yarn Classic projects expect a `node_modules` folder, so Yarn adds [`nodeLinker: node-modules`](/configuration/yarnrc#nodeLinker) to your `.yarnrc.yml`, unless you already configured a linker. You can switch to [Plug'n'Play](/concepts/node-linkers) later on.
+- Yarn Classic projects expect a `node_modules` folder, so Yarn adds [`nodeLinker: node-modules`](/configuration/yarnrc#field-nodelinker) to your `.yarnrc.yml`, unless you already configured a linker. You can switch to [Plug'n'Play](/concepts/node-linkers) later on.
 
-- Some entries can't be imported: git dependencies, packages installed from an arbitrary url, and entries whose version was overridden through the `resolutions` field. Yarn prints a warning for each of them and resolves them again. Note that git dependencies must be allowed through [`approvedGitRepositories`](/configuration/yarnrc#approvedGitRepositories).
+- Some entries can't be imported: git dependencies, packages installed from an arbitrary url, and entries whose version was overridden through the `resolutions` field. Yarn prints a warning for each of them and resolves them again. Note that git dependencies must be allowed through [`approvedGitRepositories`](/configuration/yarnrc#field-approvedgitrepositories).
 
-- Yarn doesn't read the `.npmrc` and `.yarnrc` files. Packages are always fetched from the registry configured through [`npmRegistryServer`](/configuration/yarnrc#npmRegistryServer) and [`npmScopes`](/configuration/yarnrc#npmScopes), even if your lockfile references other urls; Yarn warns you when your lockfile was generated against a registry that isn't the one it's configured to use.
+- Yarn doesn't read the `.npmrc` and `.yarnrc` files. Packages are always fetched from the registry configured through [`npmRegistryServer`](/configuration/yarnrc#field-npmregistryserver) and [`npmScopes`](/configuration/yarnrc#field-npmscopes), even if your lockfile references other urls; Yarn warns you when your lockfile was generated against a registry that isn't the one it's configured to use.
 
 - Yarn Classic checksums aren't reused; Yarn computes its own checksums when it first downloads the packages.
 
-- Postinstall scripts don't run unless you enable [`enableScripts`](/configuration/yarnrc#enableScripts).
+- Postinstall scripts don't run unless you enable [`enableScripts`](/configuration/yarnrc#field-enablescripts).
