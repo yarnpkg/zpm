@@ -1,6 +1,6 @@
 use serde::Serialize;
 
-use crate::{Error, JsonDocument, json_doc::json_provider};
+use crate::{Error, JsonDocument};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum IndentStyle {
@@ -79,8 +79,39 @@ pub enum Value {
 }
 
 impl Value {
+    // Those two functions purposefully go through serde_json (which we build
+    // with preserve_order) rather than json_provider: sonic_rs stores objects
+    // in a randomly seeded hash map (or sorts them when its sort_keys feature
+    // is enabled), which would lose the authored key order. This order is
+    // semantic in fields such as `exports` and `imports`.
     pub fn from_serializable<T: Serialize>(value: &T) -> Result<Self, Error> {
-        Ok(Value::from(&json_provider::to_value(value)?))
+        let json_value
+            = serde_json::to_value(value)
+                .map_err(|err| Error::InvalidSyntax(err.to_string()))?;
+
+        Ok(Value::from(&json_value))
+    }
+
+    pub fn from_json_str(input: &str) -> Result<Self, Error> {
+        let json_value
+            = serde_json::from_str::<serde_json::Value>(input)
+                .map_err(|err| Error::InvalidSyntax(err.to_string()))?;
+
+        Ok(Value::from(&json_value))
+    }
+
+    pub fn get_key(&self, key: &str) -> Option<&Value> {
+        match self {
+            Value::Object(entries) => {
+                entries.iter()
+                    .find(|(entry_key, _)| entry_key == key)
+                    .map(|(_, value)| value)
+            },
+
+            _ => {
+                None
+            },
+        }
     }
 
     pub fn to_json_string(&self) -> String {
@@ -259,6 +290,73 @@ impl From<&sonic_rs::Value> for Value {
             sonic_rs::ValueRef::Object(obj) => {
                 Value::Object(obj.iter().map(|(k, v)| (k.to_string(), From::from(v))).collect())
             },
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn object_keys(value: &Value) -> Vec<&str> {
+        match value {
+            Value::Object(entries) => entries.iter().map(|(key, _)| key.as_str()).collect(),
+            _ => panic!("Expected an object"),
+        }
+    }
+
+    // Neither alphabetical nor reverse-alphabetical; long enough that a
+    // hash map would be very unlikely to preserve it by chance
+    const KEYS: &[&str] = &["types", "node", "browser", "import", "require", "module", "zeta", "alpha", "mid", "default"];
+
+    #[test]
+    fn test_from_json_str_preserves_key_order() {
+        let input
+            = format!("{{\"outer\": {{{}}}}}", KEYS.iter().map(|key| format!("\"{}\": {{\"b\": 1, \"c\": 2, \"a\": 3}}", key)).collect::<Vec<_>>().join(", "));
+
+        let value
+            = Value::from_json_str(&input).unwrap();
+
+        let outer
+            = value.get_key("outer").unwrap();
+
+        assert_eq!(object_keys(outer), KEYS);
+
+        for key in KEYS {
+            assert_eq!(object_keys(outer.get_key(key).unwrap()), ["b", "c", "a"]);
+        }
+    }
+
+    #[test]
+    fn test_from_serializable_preserves_key_order() {
+        #[derive(Serialize)]
+        struct Inner {
+            b: u32,
+            c: u32,
+            a: u32,
+        }
+
+        struct Ordered;
+
+        impl Serialize for Ordered {
+            fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+                use serde::ser::SerializeMap;
+
+                let mut map = serializer.serialize_map(Some(KEYS.len()))?;
+                for key in KEYS {
+                    map.serialize_entry(key, &Inner {b: 1, c: 2, a: 3})?;
+                }
+                map.end()
+            }
+        }
+
+        let value
+            = Value::from_serializable(&Ordered).unwrap();
+
+        assert_eq!(object_keys(&value), KEYS);
+
+        for key in KEYS {
+            assert_eq!(object_keys(value.get_key(key).unwrap()), ["b", "c", "a"]);
         }
     }
 }

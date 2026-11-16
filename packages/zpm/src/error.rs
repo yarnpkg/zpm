@@ -652,7 +652,7 @@ impl From<std::io::Error> for Error {
     fn from(error: std::io::Error) -> Self {
         Error::IoError {
             inner: Arc::new(error),
-            backtrace: Arc::new(std::backtrace::Backtrace::capture()),
+            backtrace: Arc::new(zpm_utils::capture_backtrace()),
         }
     }
 }

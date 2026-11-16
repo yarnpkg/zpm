@@ -361,7 +361,7 @@ impl<'a> SyncTree<'a> {
             });
         }
 
-        let Some(metadata) = path.fs_symlink_metadata().ok_missing()? else {
+        let Some(metadata) = path.fs_symlink_metadata_if_exists()? else {
             return Ok(SyncCheck {
                 must_remove: false,
                 must_create: !matches!(node, SyncNode::Missing),
