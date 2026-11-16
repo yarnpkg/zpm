@@ -46,16 +46,17 @@ impl TopLevelConfiguration {
 }
 
 pub fn fs_remove_nm(nm_path: Path) -> Result<(), Error> {
-    let entries = nm_path.fs_read_dir();
+    // Not going through `fs_read_dir`, as a missing folder is expected and
+    // shouldn't build a `PathError`
+    let entries = std::fs::read_dir(nm_path.to_path_buf())
+        .ok_missing()
+        .map_err(PathError::from)?;
 
     match entries {
-        Err(PathError::IoError {inner, ..}) if inner.kind() == std::io::ErrorKind::NotFound
+        None
             => Ok(()),
 
-        Err(error)
-            => Err(error.into()),
-
-        Ok(entries) => {
+        Some(entries) => {
             let mut has_dot_entries = false;
 
             for entry in entries.flatten() {
@@ -240,8 +241,10 @@ fn is_same_file(target: &Path, source: &Path) -> bool {
     {
         use std::os::unix::fs::MetadataExt;
 
-        let dest_meta = target.fs_symlink_metadata().ok();
-        let source_meta = source.fs_metadata().ok();
+        // The target is usually missing (first install), which mustn't
+        // cost a `PathError`
+        let dest_meta = target.fs_symlink_metadata_if_exists().ok().flatten();
+        let source_meta = source.fs_metadata_if_exists().ok().flatten();
 
         match (&dest_meta, &source_meta) {
             (Some(d), Some(s)) => d.dev() == s.dev() && d.ino() == s.ino(),
@@ -343,6 +346,11 @@ pub fn clonefile_supported(store_root: &Path, project_cwd: &Path) -> bool {
 
     static SUPPORTED: OnceLock<bool> = OnceLock::new();
 
+    // `fs_clonefile` always fails elsewhere; no need to pay for the probe
+    if !cfg!(target_os = "macos") {
+        return false;
+    }
+
     *SUPPORTED.get_or_init(|| {
         let probe = || -> Result<(), Error> {
             store_root.fs_create_dir_all()?;
@@ -353,7 +361,10 @@ pub fn clonefile_supported(store_root: &Path, project_cwd: &Path) -> bool {
                 .with_join_str(format!(".clone-probe-{}", std::process::id()));
 
             source.fs_write([])?;
-            let _ = target.fs_rm_file().ok_missing();
+
+            if target.fs_exists() {
+                let _ = target.fs_rm_file();
+            }
 
             let cloned = source.fs_clonefile(&target);
 
@@ -405,7 +416,11 @@ pub fn ensure_unpacked_store_entry(
     // A crashed run can leave this exact path behind (pids and the
     // nonce both reset, typically in containers); extracting over its
     // leftovers would graft stale files into an immutable store entry.
-    let _ = tmp_path.fs_rm().ok_missing();
+    // (Checked first, as this runs for every package and the path is
+    // normally missing)
+    if tmp_path.fs_exists() {
+        let _ = tmp_path.fs_rm();
+    }
 
     tmp_path.fs_create_dir_all()?;
 
