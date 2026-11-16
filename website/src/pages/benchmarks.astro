@@ -46,6 +46,7 @@ const lastRunDate = lastPoint ? new Date(lastPoint.timestamp * 1000).toISOString
 const allTimestamps = (benchmarkData as BenchEntry[]).flatMap(e => e.points.map(p => p.timestamp));
 const benchMinTs = Math.min(...allTimestamps);
 const benchMaxTs = Math.max(...allTimestamps);
+const benchHistoryDays = Math.round((benchMaxTs - benchMinTs) / 86400);
 
 const INCIDENTS = [
   {
@@ -684,11 +685,11 @@ const INCIDENTS = [
       </div>
       <div>
         <div class="k">Runner</div>
-        <div class="v">ubuntu-22.04 <span class="unit">4 vCPU · 16 GB</span></div>
+        <div class="v">ubuntu-latest <span class="unit">4 vCPU · 16 GB</span></div>
       </div>
       <div>
         <div class="k">Data points</div>
-        <div class="v">90 <span class="unit">days of history</span></div>
+        <div class="v">{benchHistoryDays} <span class="unit">days of history</span></div>
       </div>
     </div>
   </div>
@@ -712,7 +713,7 @@ const INCIDENTS = [
     <p>Every four hours &mdash; and on every push to <code>main</code> &mdash; a GitHub Actions workflow runs the full benchmark matrix. Each combination of scenario, project, and package manager is timed with <a href="https://github.com/sharkdp/hyperfine">Hyperfine</a>, measuring wall-clock duration. The results are published here automatically.</p>
 
     <h3 id="how-benchmarks-run">How benchmarks run</h3>
-    <p>Hyperfine executes each install command a minimum of 10 times after 1 warmup run. Before every timed run, a <em>prepare</em> step resets the environment to match the scenario &mdash; for example, deleting <code>node_modules</code>, the lockfile, or the global cache &mdash; so each measurement starts from the same state. The final result is the median of all timed runs.</p>
+    <p>Hyperfine executes each install command a minimum of 10 times after 1 warmup run. Before every timed run, a <em>prepare</em> step resets the environment to match the scenario &mdash; for example, deleting <code>node_modules</code>, the lockfile, or the global cache &mdash; so each measurement starts from the same state. The final result is the mean of all timed runs.</p>
     <p>The runner is <code>ubuntu-latest</code> on GitHub Actions. zpm is compiled from source with the <code>release-lto</code> profile; all other managers use their latest stable release at the time of each run.</p>
 
     <div class="admonition note">
