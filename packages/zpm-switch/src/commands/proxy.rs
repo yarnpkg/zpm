@@ -15,6 +15,8 @@ pub async fn resolve_proxy_reference() -> Result<PackageManagerReference, Error>
     let mut find_result
         = find_closest_package_manager(&lookup_path)?;
 
+    find_result.check_dev_engines()?;
+
     if let Some(detected_root_path) = find_result.detected_root_path {
         std::env::set_var("YARNSW_DETECTED_ROOT", detected_root_path.to_file_string());
 
