@@ -29,6 +29,8 @@ impl CacheInstallCommand {
             let find_result
                 = find_closest_package_manager(&lookup_path)?;
 
+            find_result.check_dev_engines()?;
+
             let package_manager_field
                 = find_result.detected_package_manager
                     .ok_or_else(|| Error::ProjectNotFound)?;

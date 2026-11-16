@@ -2,6 +2,27 @@ use std::str::FromStr;
 
 use crate::Path;
 
+/// Iterates over a path and each of its ancestors, from the outermost one to
+/// the path itself (or the other way around with `.rev()`).
+///
+/// The iterator works on the normalized string form of the path (`Path`
+/// already resolves `.` and inner `..` segments, and collapses repeated
+/// slashes); it never touches the filesystem. The contract is:
+///
+/// - Absolute paths start with the root: `/a/b` yields `/`, `/a`, `/a/b`.
+/// - Forward relative paths start with the empty path, which stands for the
+///   directory they're relative to: `a/b` yields the empty path, `a`, `a/b`. Callers rely
+///   on it to reach the project root (the root workspace's `rel_path` is
+///   empty, and `node_modules` folders at the top of the project are found
+///   by joining `node_modules` onto the empty path).
+/// - The empty path yields itself exactly once.
+/// - Relative paths that escape their base (`../a`) don't yield the empty
+///   path, since it isn't one of their ancestors: `../a` yields `..`,
+///   `../a`.
+/// - Trailing slashes are ignored: `a/b/` yields the same paths as `a/b`.
+/// - On Windows, drive paths (`/C:/a` in portable form) stop at the drive
+///   root: `/C:/a` yields `/C:`, `/C:/a` (the portable root `/` isn't the
+///   parent of drive roots).
 pub struct PathIterator<'a> {
     path_str: &'a str,
     lookup_idx: Option<(usize, usize)>,
@@ -16,7 +37,7 @@ impl<'a> PathIterator<'a> {
         let lookup_idx
             = Some((0, path_str.len()));
         let emit_empty_path
-            = path.is_relative();
+            = path.is_forward();
 
         // On Windows, the portable root (`/`) isn't the parent of the drive
         // roots (`/C:`); it'd resolve to the root of the current drive.
@@ -71,6 +92,14 @@ impl<'a> PathIterator<'a> {
 
         if lookup_idx == 0 && self.emit_empty_path {
             self.emit_empty_path = false;
+
+            // Nothing is left after the empty path when the path itself is
+            // empty, or when the back iterator already consumed every other
+            // ancestor.
+            if back_idx == 0 {
+                self.lookup_idx = None;
+            }
+
             return Some(Path::new());
         }
 
@@ -141,9 +170,22 @@ mod tests {
     #[rstest]
     #[case("/a/b/c", vec!["/", "/a", "/a/b", "/a/b/c"])]
     #[case("/a/b/c/", vec!["/", "/a", "/a/b", "/a/b/c"])]
-    #[case("a/b/c", vec!["a", "a/b", "a/b/c"])]
+    #[case("a/b/c", vec!["", "a", "a/b", "a/b/c"])]
+    #[case("a/b/c/", vec!["", "a", "a/b", "a/b/c"])]
+    #[case("a", vec!["", "a"])]
     #[case("", vec![""])]
     #[case("/", vec!["/"])]
+    #[case("/a", vec!["/", "/a"])]
+    #[case(".", vec![""])]
+    #[case("./a/b", vec!["", "a", "a/b"])]
+    #[case("a/./b", vec!["", "a", "a/b"])]
+    #[case("a//b", vec!["", "a", "a/b"])]
+    #[case("a/..", vec![""])]
+    #[case("a/../b", vec!["", "b"])]
+    #[case("/a/../b", vec!["/", "/b"])]
+    #[case("..", vec![".."])]
+    #[case("../a", vec!["..", "../a"])]
+    #[case("../../a/", vec!["..", "../..", "../../a"])]
     fn test_path_iterator(#[case] path: Path, #[case] expected: Vec<&'static str>) {
         let yielded_paths = path
             .iter_path()
@@ -159,9 +201,22 @@ mod tests {
     #[rstest]
     #[case("/a/b/c", vec!["/a/b/c", "/a/b", "/a", "/"])]
     #[case("/a/b/c/", vec!["/a/b/c", "/a/b", "/a", "/"])]
-    #[case("a/b/c", vec!["a/b/c", "a/b", "a"])]
+    #[case("a/b/c", vec!["a/b/c", "a/b", "a", ""])]
+    #[case("a/b/c/", vec!["a/b/c", "a/b", "a", ""])]
+    #[case("a", vec!["a", ""])]
     #[case("", vec![""])]
     #[case("/", vec!["/"])]
+    #[case("/a", vec!["/a", "/"])]
+    #[case(".", vec![""])]
+    #[case("./a/b", vec!["a/b", "a", ""])]
+    #[case("a/./b", vec!["a/b", "a", ""])]
+    #[case("a//b", vec!["a/b", "a", ""])]
+    #[case("a/..", vec![""])]
+    #[case("a/../b", vec!["b", ""])]
+    #[case("/a/../b", vec!["/b", "/"])]
+    #[case("..", vec![".."])]
+    #[case("../a", vec!["../a", ".."])]
+    #[case("../../a/", vec!["../../a", "../..", ".."])]
     fn test_path_iterator_reverse(#[case] path: Path, #[case] expected: Vec<&'static str>) {
         let yielded_paths = path
             .iter_path()
@@ -173,6 +228,69 @@ mod tests {
             .collect::<Vec<_>>();
 
         assert_eq!(yielded_path_strs, expected);
+    }
+
+    #[rstest]
+    #[case("a/b/c", &[Front, Back, Front, Back], vec!["", "a/b/c", "a", "a/b"])]
+    #[case("a/b/c", &[Back, Back, Back, Front, Front], vec!["a/b/c", "a/b", "a", ""])]
+    #[case("a", &[Back, Front, Front], vec!["a", ""])]
+    #[case("/a/b", &[Front, Back, Back, Front], vec!["/", "/a/b", "/a"])]
+    fn test_path_iterator_mixed(#[case] path: Path, #[case] steps: &[Step], #[case] expected: Vec<&'static str>) {
+        let mut iterator
+            = path.iter_path();
+
+        let mut yielded_paths
+            = Vec::new();
+
+        for step in steps {
+            let next = match step {
+                Front => iterator.next(),
+                Back => iterator.next_back(),
+            };
+
+            if let Some(next) = next {
+                yielded_paths.push(next);
+            }
+        }
+
+        assert_eq!(iterator.next(), None);
+        assert_eq!(iterator.next_back(), None);
+
+        let yielded_path_strs = yielded_paths.iter()
+            .map(|p| p.as_str())
+            .collect::<Vec<_>>();
+
+        assert_eq!(yielded_path_strs, expected);
+    }
+
+    #[derive(Debug)]
+    enum Step {
+        Front,
+        Back,
+    }
+
+    use Step::*;
+
+    #[cfg(windows)]
+    #[rstest]
+    #[case(r"C:\", vec!["/C:"])]
+    #[case(r"C:\a\", vec!["/C:", "/C:/a"])]
+    fn test_path_iterator_drive_root_edges(#[case] path: &str, #[case] expected: Vec<&'static str>) {
+        let path
+            = Path::from_str(path).unwrap();
+
+        let forward = path.iter_path()
+            .map(|p| p.as_str().to_string())
+            .collect::<Vec<_>>();
+
+        let mut backward = path.iter_path().rev()
+            .map(|p| p.as_str().to_string())
+            .collect::<Vec<_>>();
+
+        backward.reverse();
+
+        assert_eq!(forward, expected);
+        assert_eq!(backward, expected);
     }
 
     #[cfg(windows)]

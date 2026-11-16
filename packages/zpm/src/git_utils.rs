@@ -290,42 +290,22 @@ pub async fn fetch_changed_files_between(project: &Project, since: &str, head: O
     let since = since.to_string();
 
     if let Some(head) = head {
-        let changed_files = ScriptEnvironment::new()?
-            .with_cwd(project.project_cwd.clone())
-            .run_exec("git", ["diff", "--name-only", "--relative", &since, head])
-            .await?
-            .ok()?
-            .stdout_text()?
-            .lines()
-            .filter(|s| !s.is_empty())
-            .map(|s| project.project_cwd.with_join_str(s))
-            .collect::<BTreeSet<_>>();
+        let changed_files
+            = fetch_path_listing(project, &["diff", "-z", "--name-only", "--relative", &since, head]).await?
+                .into_iter()
+                .collect::<BTreeSet<_>>();
 
         return Ok(changed_files);
     }
 
-    let local_stdout = ScriptEnvironment::new()?
-        .with_cwd(project.project_cwd.clone())
-        // --relative makes git print the paths relative to the cwd (and skip
-        // the changes located outside of it), which is exactly the project's
-        // scope; without it a project in a subdirectory gets bogus paths.
-        .run_exec("git", ["diff", "--name-only", "--relative", &since])
-        .await?
-        .ok()?
-        .stdout_text()?
-        .lines()
-        .map(|s| project.project_cwd.with_join_str(s))
-        .collect::<Vec<_>>();
+    // --relative makes git print the paths relative to the cwd (and skip
+    // the changes located outside of it), which is exactly the project's
+    // scope; without it a project in a subdirectory gets bogus paths.
+    let local_stdout
+        = fetch_path_listing(project, &["diff", "-z", "--name-only", "--relative", &since]).await?;
 
-    let untracked_stdout = ScriptEnvironment::new()?
-        .with_cwd(project.project_cwd.clone())
-        .run_exec("git", ["ls-files", "--others", "--exclude-standard"])
-        .await?
-        .ok()?
-        .stdout_text()?
-        .lines()
-        .map(|s| project.project_cwd.with_join_str(s))
-        .collect::<Vec<_>>();
+    let untracked_stdout
+        = fetch_path_listing(project, &["ls-files", "-z", "--others", "--exclude-standard"]).await?;
 
     let changed_files
         = local_stdout.into_iter()
@@ -333,6 +313,53 @@ pub async fn fetch_changed_files_between(project: &Project, since: &str, head: O
             .collect::<BTreeSet<_>>();
 
     Ok(changed_files)
+}
+
+/// Run a git command listing paths relative to the project (it must be
+/// given `-z`) and resolve them against the project root.
+///
+/// Without `-z` git quotes and escapes the paths containing non-ASCII
+/// bytes, quotes, backslashes, or control characters (`core.quotepath`),
+/// so they would never match a workspace; with it the paths are printed
+/// verbatim, each one terminated by a NUL byte.
+async fn fetch_path_listing(project: &Project, args: &[&str]) -> Result<Vec<Path>, Error> {
+    let output = ScriptEnvironment::new()?
+        .with_cwd(project.project_cwd.clone())
+        .run_exec("git", args)
+        .await?
+        .ok()?
+        .output();
+
+    let paths
+        = parse_nul_terminated_paths(&output.stdout).into_iter()
+            .map(|path| project.project_cwd.with_join_str(path))
+            .collect();
+
+    Ok(paths)
+}
+
+/// Split the output of a git command run with `-z` into paths. Our `Path`
+/// type can only represent UTF-8 strings, so the paths that aren't valid
+/// UTF-8 are skipped (and logged) rather than failing the whole command or
+/// being turned into paths that don't exist on disk.
+fn parse_nul_terminated_paths(stdout: &[u8]) -> Vec<&str> {
+    stdout.split(|byte| *byte == 0)
+        .filter(|record| !record.is_empty())
+        .filter_map(|record| match std::str::from_utf8(record) {
+            Ok(path)
+                => Some(path),
+
+            Err(_) => {
+                tracing::debug!(
+                    target: "yarn::git",
+                    path = %String::from_utf8_lossy(record),
+                    "Skipping a path reported by git that isn't valid UTF-8",
+                );
+
+                None
+            },
+        })
+        .collect()
 }
 
 /// Range of changes to consider for change detection.
@@ -434,4 +461,40 @@ pub async fn fetch_affected_workspaces(project: &Project, range: &ChangesetRange
         = fetch_changed_workspaces_in_range(project, range).await?;
 
     Ok(project.workspaces_with_dependents(&changed))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parses_nul_terminated_paths() {
+        assert_eq!(
+            parse_nul_terminated_paths(b"packages/a/package.json\0packages/b/index.js\0"),
+            vec!["packages/a/package.json", "packages/b/index.js"],
+        );
+    }
+
+    #[test]
+    fn parses_empty_nul_terminated_output() {
+        assert_eq!(parse_nul_terminated_paths(b""), Vec::<&str>::new());
+    }
+
+    #[test]
+    fn parses_nul_terminated_paths_verbatim() {
+        // Git quotes and escapes the non-ASCII bytes, quotes, backslashes,
+        // and control characters unless `-z` is set
+        assert_eq!(
+            parse_nul_terminated_paths("packages/caf\u{e9}/package.json\0packages/with space/a.js\0packages/with\"quote/a.js\0packages/back\\slash/a.js\0packages/new\nline/a.js\0 leading-space.js\0".as_bytes()),
+            vec!["packages/caf\u{e9}/package.json", "packages/with space/a.js", "packages/with\"quote/a.js", "packages/back\\slash/a.js", "packages/new\nline/a.js", " leading-space.js"],
+        );
+    }
+
+    #[test]
+    fn skips_non_utf8_paths() {
+        assert_eq!(
+            parse_nul_terminated_paths(b"packages/a/\xff.js\0packages/b/index.js\0"),
+            vec!["packages/b/index.js"],
+        );
+    }
 }

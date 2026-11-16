@@ -377,6 +377,7 @@ pub async fn resolve_versions(context: &InstallContext<'_>, registry: &Registry)
 
             #[derive(Deserialize)]
             struct RegistryMetadata {
+                #[serde(deserialize_with = "crate::npm::deserialize_packument_versions")]
                 versions: BTreeMap<zpm_semver::Version, IgnoredAny>,
             }
 

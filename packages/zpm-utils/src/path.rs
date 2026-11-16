@@ -215,9 +215,19 @@ impl Path {
 
     pub fn home_dir() -> Result<Option<Path>, PathError> {
         // Same lookup order as Node's os.homedir(): Windows shells such as
-        // Git Bash set HOME, but native ones only set USERPROFILE.
-        let home = std::env::var("HOME").ok()
-            .or_else(|| cfg!(windows).then(|| std::env::var("USERPROFILE").ok()).flatten());
+        // Git Bash set HOME, but native ones only set USERPROFILE. Empty
+        // values don't name a folder, so we ignore them.
+        Path::home_dir_from(
+            std::env::var("HOME").ok(),
+            std::env::var("USERPROFILE").ok(),
+            cfg!(windows),
+        )
+    }
+
+    fn home_dir_from(home: Option<String>, user_profile: Option<String>, is_windows: bool) -> Result<Option<Path>, PathError> {
+        let home = home
+            .filter(|home| !home.is_empty())
+            .or_else(|| user_profile.filter(|home| is_windows && !home.is_empty()));
 
         Ok(home
             .map(|s| Path::try_from(s))
@@ -245,6 +255,9 @@ impl Path {
         self.path.split('/')
     }
 
+    /// Iterates over the path and each of its ancestors; see [`PathIterator`]
+    /// for the exact contract.
+    ///
     /// ```
     /// use zpm_utils::p;
     ///
@@ -617,24 +630,42 @@ impl Path {
         Ok(std::fs::metadata(self.sys_path())?)
     }
 
+    /// Same as `fs_symlink_metadata`, but returns `None` if the path
+    /// doesn't exist. Prefer it when probing the filesystem: a missing path
+    /// is an expected outcome, so it doesn't go through `PathError` (whose
+    /// backtrace is expensive to capture when `RUST_BACKTRACE` is set).
+    pub fn fs_symlink_metadata_if_exists(&self) -> Result<Option<std::fs::Metadata>, PathError> {
+        Ok(std::fs::symlink_metadata(self.sys_path()).ok_missing()?)
+    }
+
+    /// Same as `fs_metadata`, but returns `None` if the path doesn't exist
+    /// (see `fs_symlink_metadata_if_exists`).
+    pub fn fs_metadata_if_exists(&self) -> Result<Option<std::fs::Metadata>, PathError> {
+        Ok(std::fs::metadata(self.sys_path()).ok_missing()?)
+    }
+
+    // The probes below discard the errors, so they query the filesystem
+    // directly instead of building a `PathError` (and its backtrace) that
+    // would be thrown away.
+
     pub fn fs_exists(&self) -> bool {
-        self.fs_metadata().is_ok()
+        std::fs::metadata(self.sys_path()).is_ok()
     }
 
     pub fn fs_is_symlink(&self) -> bool {
-        self.fs_symlink_metadata().map(|m| m.file_type().is_symlink()).unwrap_or(false)
+        std::fs::symlink_metadata(self.sys_path()).map(|m| m.file_type().is_symlink()).unwrap_or(false)
     }
 
     pub fn fs_is_file(&self) -> bool {
-        self.fs_metadata().map(|m| m.is_file()).unwrap_or(false)
+        std::fs::metadata(self.sys_path()).map(|m| m.is_file()).unwrap_or(false)
     }
 
     pub fn fs_is_dir(&self) -> bool {
-        self.fs_metadata().map(|m| m.is_dir()).unwrap_or(false)
+        std::fs::metadata(self.sys_path()).map(|m| m.is_dir()).unwrap_or(false)
     }
 
     pub fn fs_is_real_dir(&self) -> bool {
-        self.fs_symlink_metadata().map(|m| m.is_dir()).unwrap_or(false)
+        std::fs::symlink_metadata(self.sys_path()).map(|m| m.is_dir()).unwrap_or(false)
     }
 
     pub fn if_exists(&self) -> Option<Path> {
@@ -953,7 +984,9 @@ impl Path {
     pub fn fs_change<T: AsRef<[u8]>>(&self, data: T, is_exec: bool) -> Result<&Self, PathError> {
         let path_buf = self.to_path_buf();
 
-        let update_content = self.fs_read()
+        // The file is often missing; work on the io::Result so that this
+        // doesn't build a `PathError`
+        let update_content = std::fs::read(&path_buf)
             .ok_missing()
             .map(|current| current.map(|current| current.ne(data.as_ref())).unwrap_or(true))?;
 
@@ -1126,7 +1159,7 @@ impl Path {
     fn fs_is_dir_link(&self) -> bool {
         use std::os::windows::fs::FileTypeExt;
 
-        self.fs_symlink_metadata()
+        std::fs::symlink_metadata(self.sys_path())
             .map(|metadata| metadata.file_type().is_symlink_dir())
             .unwrap_or(false)
     }
@@ -1448,6 +1481,25 @@ mod tests {
         assert_eq!(Path::from_str("/foo/").unwrap().without_trailing_separators().as_str(), "/foo");
         assert_eq!(Path::from_str("/").unwrap().without_trailing_separators().as_str(), "/");
         assert_eq!(Path::new().without_trailing_separators().as_str(), "");
+    }
+
+    #[test]
+    fn home_dir_ignores_empty_values() {
+        let home_dir = |home: Option<&str>, user_profile: Option<&str>, is_windows: bool| {
+            Path::home_dir_from(home.map(str::to_string), user_profile.map(str::to_string), is_windows)
+                .unwrap()
+                .map(|path| path.as_str().to_string())
+        };
+
+        assert_eq!(home_dir(Some("/home/user"), Some("/profile"), true), Some("/home/user".to_string()));
+        assert_eq!(home_dir(None, Some("/profile"), true), Some("/profile".to_string()));
+        assert_eq!(home_dir(Some(""), Some("/profile"), true), Some("/profile".to_string()));
+        assert_eq!(home_dir(Some(""), Some(""), true), None);
+        assert_eq!(home_dir(None, None, true), None);
+
+        assert_eq!(home_dir(Some("/home/user"), None, false), Some("/home/user".to_string()));
+        assert_eq!(home_dir(Some(""), Some("/profile"), false), None);
+        assert_eq!(home_dir(None, Some("/profile"), false), None);
     }
 }
 

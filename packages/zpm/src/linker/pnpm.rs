@@ -361,6 +361,9 @@ pub async fn link_project_pnpm<'a>(project: &'a Project, install: &'a Install) -
         }
     }
 
+    let fallbacks
+        = linker::helpers::CopyFallbacks::new();
+
     tokio::task::block_in_place(|| {
         extractions.par_iter().try_for_each(|(package_store_path, physical_locator)| -> Result<(), Error> {
             let package_data = install.package_data
@@ -373,11 +376,13 @@ pub async fn link_project_pnpm<'a>(project: &'a Project, install: &'a Install) -
                 package_store_path.fs_rm()?;
             }
 
-            linker::helpers::fs_extract_archive_with_cas(package_store_path, package_data, &cas_index_root, false)?;
+            linker::helpers::fs_extract_archive_with_cas(package_store_path, package_data, &cas_index_root, false, &fallbacks)?;
 
             Ok(())
         })
     })?;
+
+    fallbacks.warn_if_any(Some(&cas_index_root), &project.project_cwd);
 
     let hoist_patterns
         = project.config.settings.pnpm_hoist_patterns
