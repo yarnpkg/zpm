@@ -1,0 +1,10 @@
+{
+  "name": "optional-native-string",
+  "version": "1.0.0",
+  "optionalDependencies": {
+    "native-string-os-bar": "1.0.0",
+    "native-string-cpu-x86": "1.0.0",
+    "native-string-libc-glibc": "1.0.0",
+    "native-string-libc-musl": "1.0.0"
+  }
+}
