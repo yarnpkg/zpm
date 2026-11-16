@@ -7,7 +7,7 @@ description: Official specification for Yarn Plug'n'Play.
 
 ## About this document
 
-To make interoperability easier for third-party projects, this document describes the specification we follow when installing files on disk under the [Plug'n'Play install strategy](/features/pnp). It also means:
+To make interoperability easier for third-party projects, this document describes the specification we follow when installing files on disk under the [Plug'n'Play install strategy](/concepts/pnp). It also means:
 
 - any change we make to this document will follow semver rules
 - we'll do our best to preserve backward compatibility
@@ -93,7 +93,7 @@ The `__virtual__` folder name appeared with Yarn 3.0. Earlier releases used `$$v
 
 ## Manifest reference
 
-When [`pnpEnableInlining`](/configuration/yarnrc#pnpEnableInlining) is explicitly set to `false`, Yarn will generate an additional `.pnp.data.json` file containing the following fields.
+When [`pnpEnableInlining`](/configuration/yarnrc#field-pnpenableinlining) is explicitly set to `false`, Yarn will generate an additional `.pnp.data.json` file containing the following fields.
 
 This document only covers the data file itself - you should define your own in-memory data structures, populated at runtime with the information from the manifest. For example, Yarn turns the `packageRegistryData` table into two separate memory tables: one that maps a path to a package, and another that maps a package to a path.
 
@@ -220,7 +220,7 @@ GET_PACKAGE(manifest, locator)
 
 3. Return `pkg`
 
-   1. Note: `pkg` cannot be **undefined** here; all packages referenced in any of the Plug'n'Play data tables [**MUST**](#must) have a corresponding entry inside `packageRegistryData`.
+   1. Note: `pkg` cannot be **undefined** here; all packages referenced in any of the Plug'n'Play data tables **MUST** have a corresponding entry inside `packageRegistryData`.
 
 ### FIND_LOCATOR
 

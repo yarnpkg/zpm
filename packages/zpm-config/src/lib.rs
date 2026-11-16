@@ -1,7 +1,7 @@
 use std::{cell::Cell, collections::{BTreeMap, BTreeSet}, fmt::Display, ops::Deref, sync::Arc, time::UNIX_EPOCH};
 
 use serde::{Deserialize, Deserializer, Serialize, Serializer, de};
-use zpm_utils::{AbstractValue, Container, Cpu, DataType, FromFileString, IoResultExt, LastModifiedAt, Libc, Os, Path, RawString, Serialized, System, SystemSet, ToFileString, ToHumanString, tree};
+use zpm_utils::{AbstractValue, Container, Cpu, DataType, FromFileString, LastModifiedAt, Libc, Os, Path, RawString, Serialized, System, SystemSet, ToFileString, ToHumanString, tree};
 
 #[derive(Debug, Clone)]
 pub struct ConfigurationContext {
@@ -937,6 +937,9 @@ impl Settings {
     pub fn disable_age_gate(&mut self) {
         self.npm_minimal_age_gate.force(std::time::Duration::ZERO, Source::Cli);
 
+        for scope in self.npm_scopes.values_mut() {
+            scope.npm_minimal_age_gate.value = None;
+        }
         for rule in &mut self.source_rules {
             rule.npm_minimal_age_gate.value = None;
         }
@@ -1064,6 +1067,9 @@ pub enum ConfigurationError {
 
     #[error("Invalid configuration: {0}")]
     ValidationError(String),
+
+    #[error("Couldn't find a home directory to compute the default global folder; set the globalFolder setting (or the YARN_GLOBAL_FOLDER environment variable)")]
+    MissingGlobalFolder,
 
     #[error("{}", format_invalid_source(.origin, .location.as_ref(), .setting.as_deref(), .message))]
     InvalidSource {
@@ -1429,8 +1435,7 @@ impl RcFile {
             = dir.with_join_str(rc_filename);
 
         let metadata
-            = path.fs_metadata()
-                .ok_missing()?;
+            = path.fs_metadata_if_exists()?;
 
         let Some(metadata) = metadata else {
             return Ok(Some(RcFile {path, text: None}));
@@ -1515,8 +1520,7 @@ impl Configuration {
                 = project_cwd.with_join_str(actual_path);
 
             let metadata
-                = full_path.fs_metadata()
-                    .ok_missing()?;
+                = full_path.fs_metadata_if_exists()?;
 
             match metadata {
                 Some(metadata) => {
@@ -1618,6 +1622,12 @@ impl Configuration {
 
         settings.validate()?;
 
+        // The default is empty when we couldn't find a home directory to
+        // compute it from; it's only an error if nothing overrode it.
+        if settings.global_folder.value.is_empty() {
+            return Err(ConfigurationError::MissingGlobalFolder);
+        }
+
         apply_hardened_mode(&mut settings);
 
         Ok(Configuration {
@@ -1644,6 +1654,8 @@ fn apply_hardened_mode(settings: &mut Settings) {
         settings.enable_immutable_installs.force(true, Source::Hardened);
     }
 }
+
+mod duration;
 
 mod fns;
 pub use fns::*;

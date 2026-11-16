@@ -11,7 +11,7 @@ sidebar:
 
 | Software | How to install |
 | --- | --- |
-| Yarn | [https://yarnpkg.com/getting-started/install](/getting-started/install) |
+| Yarn | [Installation guide](/getting-started) |
 | Rust / Rustup | https://rust-lang.org/tools/install |
 
 ## Building Yarn
@@ -59,5 +59,5 @@ yarn test:integration commands/install.test.ts
 Ecosystem end-to-end tests are shell scenarios under `tests/e2e`. Run them by name, without the `.sh` suffix:
 
 ```bash
-yarn test:e2e <e2e test name>
+yarn e2e <e2e test name>
 ```

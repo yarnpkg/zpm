@@ -33,5 +33,89 @@ describe(`Protocols`, () => {
         },
       ),
     );
+
+    test(
+      `it should allow installing packages whose registry metadata lists versions with components above 2^32`,
+      makeTemporaryEnv(
+        {
+          dependencies: {[`large-version`]: `1.0.0`},
+        },
+        async ({path, run, source}) => {
+          await run(`install`);
+
+          await expect(source(`require('large-version')`)).resolves.toMatchObject({
+            name: `large-version`,
+            version: `1.0.0`,
+          });
+        },
+      ),
+    );
+
+    test(
+      `it should allow semver ranges and versions with components above 2^32`,
+      makeTemporaryEnv(
+        {
+          dependencies: {[`one-large-range-dep`]: `1.0.0`},
+        },
+        async ({path, run, source}) => {
+          await run(`install`);
+
+          await expect(source(`require('one-large-range-dep')`)).resolves.toMatchObject({
+            name: `one-large-range-dep`,
+            version: `1.0.0`,
+            dependencies: {
+              [`large-version`]: {
+                name: `large-version`,
+                version: `1.99999999204721.0`,
+              },
+            },
+          });
+        },
+      ),
+    );
+
+    test(
+      `it should treat an empty range as "*"`,
+      makeTemporaryEnv(
+        {
+          dependencies: {[`no-deps`]: ``},
+        },
+        async ({path, run, source}) => {
+          await run(`install`);
+
+          await expect(source(`require('no-deps')`)).resolves.toMatchObject({
+            name: `no-deps`,
+            version: `2.0.0`,
+          });
+
+          await run(`install`, `--immutable`);
+        },
+      ),
+    );
+
+    test(
+      `it should treat an empty range as "*" in transitive dependencies`,
+      makeTemporaryEnv(
+        {
+          dependencies: {[`one-empty-range-dep`]: `1.0.0`},
+        },
+        async ({path, run, source}) => {
+          await run(`install`);
+
+          await expect(source(`require('one-empty-range-dep')`)).resolves.toMatchObject({
+            name: `one-empty-range-dep`,
+            version: `1.0.0`,
+            dependencies: {
+              [`no-deps`]: {
+                name: `no-deps`,
+                version: `2.0.0`,
+              },
+            },
+          });
+
+          await run(`install`, `--immutable`);
+        },
+      ),
+    );
   });
 });

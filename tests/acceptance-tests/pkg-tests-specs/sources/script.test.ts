@@ -535,6 +535,92 @@ describe(`Scripts tests`, () => {
       );
 
       test(
+        `it shouldn't add node-gyp rebuild script if gypfile is set to false`,
+        makeTemporaryEnv(
+          {
+            dependencies: {[`binding-gyp-scripts-gypfile-false`]: `1.0.0`},
+          },
+          {
+            ...config,
+            enableScripts: true,
+          },
+          async ({path, run, source}) => {
+            await run(`install`);
+
+            await expect(source(`require('binding-gyp-scripts-gypfile-false')`)).resolves.toMatchObject({
+              name: `binding-gyp-scripts-gypfile-false`,
+            });
+
+            await expect(source(`require.resolve('binding-gyp-scripts-gypfile-false/build.node')`)).rejects.toMatchObject({
+              externalException: {
+                code: `MODULE_NOT_FOUND`,
+              },
+            });
+          },
+        ),
+      );
+
+      test(
+        `it should add node-gyp rebuild script if gypfile is set to true`,
+        makeTemporaryEnv(
+          {
+            dependencies: {[`binding-gyp-scripts-gypfile-true`]: `1.0.0`},
+          },
+          {
+            ...config,
+            enableScripts: true,
+          },
+          async ({path, run, source}) => {
+            await run(`install`);
+
+            await expect(source(`require.resolve('binding-gyp-scripts-gypfile-true/build.node')`)).resolves.toEqual(expect.any(String));
+          },
+        ),
+      );
+
+      test(
+        `it shouldn't report packages with gypfile set to false as having build scripts`,
+        makeTemporaryEnv(
+          {
+            dependencies: {
+              [`binding-gyp-scripts`]: `1.0.0`,
+              [`binding-gyp-scripts-gypfile-false`]: `1.0.0`,
+            },
+          },
+          {
+            ...config,
+            enableScripts: false,
+          },
+          async ({path, run, source}) => {
+            const {stdout} = await run(`install`, `--inline-builds`);
+
+            expect(stdout).toMatch(/binding-gyp-scripts@npm:1\.0\.0 lists build scripts, but its build has been explicitly disabled/);
+            expect(stdout).not.toMatch(/binding-gyp-scripts-gypfile-false@npm:1\.0\.0 lists build scripts/);
+          },
+        ),
+      );
+
+      if (config.nodeLinker === `pnp`) {
+        test(
+          `it shouldn't unplug packages with gypfile set to false`,
+          makeTemporaryEnv(
+            {
+              dependencies: {[`binding-gyp-scripts-gypfile-false`]: `1.0.0`},
+            },
+            {
+              ...config,
+              enableScripts: true,
+            },
+            async ({path, run, source}) => {
+              await run(`install`);
+
+              await expect(xfs.existsPromise(ppath.join(path, `.yarn/unplugged`))).resolves.toEqual(false);
+            },
+          ),
+        );
+      }
+
+      test(
         `it shouldn't call the postinstall on every install`,
         makeTemporaryEnv({
           dependencies: {

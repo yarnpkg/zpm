@@ -26,7 +26,7 @@ Taking the example above:
 - The `web` node will be connected to `my-react-component#1`, itself connected to `react@19`
 - The `mobile` node will be connected to `my-react-component#2`, itself connected to `react@18`
 
-Those virtual packages have different representations on disk depending on your [linker](/concepts/linkers):
+Those virtual packages have different representations on disk depending on your [linker](/concepts/node-linkers):
 
 - The node-modules and pnpm linkers will duplicate those packages on disk.
 
@@ -35,7 +35,7 @@ Those virtual packages have different representations on disk depending on your 
 :::note
 You may wonder *"why is this so complicated in Yarn? Why doesn't it work just like npm and pnpm, which don't need all that complexity?"* - that's because their only partially support peer deps!
 
-Due to the reliance on the filesystem, both node-modules and pnpm installs are unable to enforce the peer dependency contract with workspaces. This limitation is referred to as the nm / peer deps issue, which is documented [here](/appendix/nm-peer-deps).
+Due to the reliance on the filesystem, both node-modules and pnpm installs are unable to enforce the peer dependency contract with workspaces. This limitation is referred to as the nm / peer deps issue, which is documented [here](/appendix/workspaces-and-peer-deps).
 :::
 
 ## Package duplication

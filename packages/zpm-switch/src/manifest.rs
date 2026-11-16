@@ -1,7 +1,7 @@
 use std::mem::take;
 
 use rkyv::Archive;
-use serde::Deserialize;
+use serde::{de::IgnoredAny, Deserialize};
 use zpm_macro_enum::zpm_enum;
 use zpm_parsers::JsonDocument;
 use zpm_utils::{impl_file_string_from_str, impl_file_string_serialization, FromFileString, IoResultExt, Path, ToFileString, ToHumanString};
@@ -63,7 +63,7 @@ impl PackageManagerField {
         if self.name == expected_name {
             Ok(self.reference)
         } else {
-            Err(Error::UnsupportedProject(expected_name))
+            Err(Error::UnsupportedProject {field: "packageManager", name: self.name})
         }
     }
 
@@ -71,7 +71,7 @@ impl PackageManagerField {
         if self.name == expected_name {
             Ok(&self.reference)
         } else {
-            Err(Error::UnsupportedProject(expected_name))
+            Err(Error::UnsupportedProject {field: "packageManager", name: self.name.clone()})
         }
     }
 }
@@ -116,6 +116,64 @@ impl_file_string_serialization!(PackageManagerField);
 struct Manifest {
     package_manager: Option<PackageManagerField>,
     package_manager_migration: Option<PackageManagerField>,
+    dev_engines: Option<DevEngines>,
+}
+
+/// The `devEngines` field, as described by
+/// https://docs.npmjs.com/cli/configuring-npm/package-json#devengines.
+///
+/// We only care about the package manager names it lists, so anything that
+/// doesn't match the expected shape is ignored rather than turned into a
+/// manifest parse error; validating `devEngines` is the job of the tools that
+/// implement it.
+#[derive(Debug, Deserialize)]
+#[serde(untagged)]
+enum DevEngines {
+    Valid {
+        #[serde(rename = "packageManager")]
+        package_manager: Option<DevPackageManagers>,
+    },
+
+    Invalid(IgnoredAny),
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(untagged)]
+enum DevPackageManagers {
+    // Must come first, as `DevPackageManager::Invalid` would match an array
+    Multiple(Vec<DevPackageManager>),
+    Single(DevPackageManager),
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(untagged)]
+enum DevPackageManager {
+    Named {
+        name: String,
+    },
+
+    Invalid(IgnoredAny),
+}
+
+impl DevEngines {
+    fn into_package_manager_names(self) -> Vec<String> {
+        let entries = match self {
+            DevEngines::Valid {package_manager: Some(DevPackageManagers::Single(entry))}
+                => vec![entry],
+
+            DevEngines::Valid {package_manager: Some(DevPackageManagers::Multiple(entries))}
+                => entries,
+
+            _ => vec![],
+        };
+
+        entries.into_iter()
+            .filter_map(|entry| match entry {
+                DevPackageManager::Named {name} => Some(name),
+                DevPackageManager::Invalid(_) => None,
+            })
+            .collect()
+    }
 }
 
 #[derive(Debug)]
@@ -123,6 +181,47 @@ pub struct FindResult {
     pub detected_root_path: Option<Path>,
     pub detected_package_manager: Option<PackageManagerField>,
     pub detected_package_manager_migration: Option<PackageManagerField>,
+    /// Names listed in `devEngines.packageManager` (a single entry or an
+    /// array of alternatives); entries without a string `name` are skipped.
+    pub detected_dev_package_manager_names: Vec<String>,
+}
+
+impl FindResult {
+    /// Checks that the detected project may be run with Yarn as far as
+    /// `devEngines` is concerned. Every command that picks the Yarn version
+    /// of the project must call this before looking at links or falling back
+    /// to the default Yarn version, so that a nested `devEngines` claim is
+    /// never silently treated as an unconfigured project.
+    ///
+    /// Other package managers may declare themselves in `devEngines`, so we
+    /// recognize those declarations to avoid running Yarn on their projects.
+    /// Yarn itself is only ever selected through the `packageManager` field,
+    /// so a Yarn entry in `devEngines` is an error rather than a declaration.
+    pub fn check_dev_engines(&self) -> Result<(), Error> {
+        let dev_package_manager_names
+            = &self.detected_dev_package_manager_names;
+
+        if dev_package_manager_names.iter().any(|name| name == "yarn") {
+            // If the project is explicitly configured for another package manager,
+            // report that rather than suggesting to switch it over to Yarn.
+            if let Some(package_manager) = &self.detected_package_manager {
+                package_manager.reference("yarn")?;
+            }
+
+            let manifest_path = self.detected_root_path
+                .as_ref()
+                .map(|detected_root_path| detected_root_path.with_join_str("package.json"))
+                .expect("A devEngines declaration always comes from a detected manifest");
+
+            return Err(Error::DevEnginesYarnUnsupported(manifest_path));
+        }
+
+        if !dev_package_manager_names.is_empty() {
+            return Err(Error::UnsupportedProject {field: "devEngines.packageManager.name", name: dev_package_manager_names.join(", ")});
+        }
+
+        Ok(())
+    }
 }
 
 const ROOT_FILES: &[&'static str] = &[
@@ -132,7 +231,7 @@ const ROOT_FILES: &[&'static str] = &[
 /// Resolves the detected-root path: prefers `YARNSW_DETECTED_ROOT` when set
 /// (the switch binary stashes it before delegating to a package-manager
 /// version), otherwise walks up from `cwd` looking for the closest manifest
-/// with a `packageManager` field.
+/// with a `packageManager` field or a named `devEngines.packageManager` entry.
 pub fn resolve_detected_root(cwd: &Path) -> Result<Path, Error> {
     if let Ok(env_root) = std::env::var("YARNSW_DETECTED_ROOT") {
         return Ok(Path::try_from(&env_root)?);
@@ -159,11 +258,16 @@ pub fn find_closest_package_manager(path: &Path) -> Result<FindResult, Error> {
             let parsed_manifest: Manifest = JsonDocument::hydrate_from_str(&manifest)
                 .map_err(|err| Error::FailedToParseManifest(err))?;
 
-            if let Some(package_manager) = parsed_manifest.package_manager {
+            let dev_package_manager_names = parsed_manifest.dev_engines
+                .map(|dev_engines| dev_engines.into_package_manager_names())
+                .unwrap_or_default();
+
+            if parsed_manifest.package_manager.is_some() || !dev_package_manager_names.is_empty() {
                 return Ok(FindResult {
                     detected_root_path: Some(parent),
-                    detected_package_manager: Some(package_manager),
+                    detected_package_manager: parsed_manifest.package_manager,
                     detected_package_manager_migration: parsed_manifest.package_manager_migration,
+                    detected_dev_package_manager_names: dev_package_manager_names,
                 });
             }
         }
@@ -177,6 +281,7 @@ pub fn find_closest_package_manager(path: &Path) -> Result<FindResult, Error> {
                     detected_root_path: Some(parent),
                     detected_package_manager: None,
                     detected_package_manager_migration: None,
+                    detected_dev_package_manager_names: vec![],
                 });
             }
         }
@@ -190,5 +295,6 @@ pub fn find_closest_package_manager(path: &Path) -> Result<FindResult, Error> {
         detected_root_path: last_package_folder,
         detected_package_manager: None,
         detected_package_manager_migration: None,
+        detected_dev_package_manager_names: vec![],
     })
 }

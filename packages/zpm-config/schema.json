@@ -38,7 +38,7 @@
     },
     "compressionLevel": {
       "type": ["zpm_formats::CompressionAlgorithm", "null"],
-      "description": "The compression level to use for the packed file"
+      "description": "The Deflate compression level (0-9) used for the cache archives; archives are stored uncompressed when unset"
     },
     "daemonOutputBufferMaxLines": {
       "type": "usize",
@@ -54,7 +54,8 @@
     },
     "daemonDefaultWarmupPeriod": {
       "type": "std::time::Duration",
-      "description": "Default warm-up period for long-lived tasks in the daemon. After a long-lived task starts, dependents are unblocked once this period elapses.",
+      "unit": "s",
+      "description": "Default warm-up period for long-lived tasks in the daemon. After a long-lived task starts, dependents are unblocked once this period elapses. Values without unit are in seconds.",
       "affectsInstall": false,
       "default": "1s"
     },
@@ -105,7 +106,7 @@
     },
     "enableLocalCacheCleanup": {
       "type": "boolean",
-      "description": "Whether to remove unused packages from the local cache after each install",
+      "description": "Whether to remove unused packages from the local cache after each install (only applies when `enableGlobalCache` is false and `cacheFolder` is left to its default)",
       "default": true
     },
     "enableImmutableCache": {
@@ -181,12 +182,12 @@
     },
     "globalFolder": {
       "type": "zpm_utils::Path",
-      "description": "The folder where the global cache will be stored",
-      "default": "Path::home_dir().unwrap().unwrap().with_join_str(\".yarn/zpm\")"
+      "description": "The folder where global files (package cache, metadata cache, content-addressed store, ...) will be stored",
+      "default": "crate::compute_global_folder(context)"
     },
     "initScope": {
       "type": "string",
-      "description": "Scope used when creating packages via the init command",
+      "description": "Scope used when creating packages via the init command (not currently used)",
       "default": "yarnpkg"
     },
     "injectEnvironmentFiles": {
@@ -262,7 +263,7 @@
     },
     "networkSettings": {
       "type": "object",
-      "description": "Configuration specific to each network setting",
+      "description": "Network settings overriding the global ones for the hostnames matching each glob pattern",
       "additionalKeys": {
         "type": "zpm_utils::Glob"
       },
@@ -354,7 +355,8 @@
     },
     "npmMinimalAgeGate": {
       "type": "std::time::Duration",
-      "description": "Minimum age of a package version to be considered for installation. Can be used to prevent installing very new packages, either because they tend to be more likely to include accidental bugs, or because of supply-chain security concerns.",
+      "unit": "m",
+      "description": "Minimum age of a package version to be considered for installation. Can be used to prevent installing very new packages, either because they tend to be more likely to include accidental bugs, or because of supply-chain security concerns. Values without unit are in minutes, as in Yarn 4.",
       "default": "1d"
     },
     "npmPreapprovedPackages": {
@@ -374,7 +376,7 @@
     },
     "npmPublishProvenance": {
       "type": "boolean",
-      "description": "Whether to generate and publish provenance information when publishing packages",
+      "description": "Whether to generate and publish provenance information when publishing packages (not currently used; use --provenance or publishConfig.provenance)",
       "default": false
     },
     "npmPublishAccess": {
@@ -447,7 +449,8 @@
     },
     "pypiMinimalAgeGate": {
       "type": "std::time::Duration",
-      "description": "Minimum age of a PyPI release file (based on its upload time) to be considered for installation. Files whose index doesn't report an upload time are never filtered.",
+      "unit": "m",
+      "description": "Minimum age of a PyPI release file (based on its upload time) to be considered for installation. Files whose index doesn't report an upload time are never filtered. Values without unit are in minutes, like for `npmMinimalAgeGate`.",
       "default": "0s"
     },
     "pypiMacosTarget": {
@@ -486,6 +489,11 @@
           "npmAuthToken": {
             "type": ["zpm_utils::Secret<String>", "null"],
             "description": "The token to use for authentication when querying the npm registry"
+          },
+          "npmMinimalAgeGate": {
+            "type": ["std::time::Duration", "null"],
+            "unit": "m",
+            "description": "Minimum age of an npm package version to be considered for packages of this scope (values without unit are in minutes)"
           }
         }
       }
@@ -519,7 +527,8 @@
           },
           "pypiMinimalAgeGate": {
             "type": ["std::time::Duration", "null"],
-            "description": "Minimum age of a PyPI release file to be considered for matching packages"
+            "unit": "m",
+            "description": "Minimum age of a PyPI release file to be considered for matching packages (values without unit are in minutes)"
           },
           "pypiAuthToken": {
             "type": ["zpm_utils::Secret<String>", "null"],
@@ -531,7 +540,8 @@
           },
           "npmMinimalAgeGate": {
             "type": ["std::time::Duration", "null"],
-            "description": "Minimum age of an npm package version to be considered for matching packages"
+            "unit": "m",
+            "description": "Minimum age of an npm package version to be considered for matching packages (values without unit are in minutes)"
           },
           "npmAlwaysAuth": {
             "type": ["boolean", "null"],
@@ -561,15 +571,17 @@
           },
           "registryFilter": {
             "type": ["string", "null"],
-            "description": "The normalized registry URL this rule applies to"
+            "description": "The registry URL this rule applies to, with or without its protocol"
           },
           "npmMinimalAgeGate": {
             "type": ["std::time::Duration", "null"],
-            "description": "Minimum age of an npm package version to be considered from matching sources"
+            "unit": "m",
+            "description": "Minimum age of an npm package version to be considered from matching sources (values without unit are in minutes)"
           },
           "pypiMinimalAgeGate": {
             "type": ["std::time::Duration", "null"],
-            "description": "Minimum age of a PyPI release file to be considered from matching indexes"
+            "unit": "m",
+            "description": "Minimum age of a PyPI release file to be considered from matching indexes (values without unit are in minutes)"
           },
           "pypiAuthToken": {
             "type": ["zpm_utils::Secret<String>", "null"],
@@ -596,7 +608,7 @@
     },
     "packageExtensions": {
       "type": "object",
-      "description": "Configuration specific to each package extension",
+      "description": "Dependencies and peer dependencies to add to the packages matching each descriptor",
       "additionalKeys": {
         "type": "zpm_primitives::SemverDescriptor"
       },
@@ -703,12 +715,12 @@
     },
     "preferInteractive": {
       "type": "boolean",
-      "description": "Whether to use interactive prompts by default when running yarn commands",
+      "description": "Whether to use interactive prompts by default when running yarn commands (not currently used)",
       "default": false
     },
     "preferTruncatedLines": {
       "type": "boolean",
-      "description": "Whether to prefer truncating lines in the terminal output",
+      "description": "Whether to prefer truncating lines in the terminal output (not currently used)",
       "default": false
     },
     "preferReuse": {
@@ -785,14 +797,14 @@
     },
     "unsafeHttpWhitelist": {
       "type": "array",
-      "description": "The patterns to whitelist when using unsafe HTTP",
+      "description": "Hostname glob patterns for which plain HTTP requests are allowed",
       "items": {
         "type": "zpm_utils::Glob"
       }
     },
     "virtualFolder": {
       "type": "zpm_utils::Path",
-      "description": "The folder to use for the virtual folder",
+      "description": "The folder where virtual packages are stored",
       "default": ".yarn/__virtual__"
     },
     "workspaceProfiles": {
@@ -804,14 +816,14 @@
         "properties": {
           "extends": {
             "type": "array",
-            "description": "The extends to add to the workspace profile",
+            "description": "Other workspace profiles to apply along with this one",
             "items": {
               "type": "string"
             }
           },
           "devDependencies": {
             "type": "object",
-            "description": "The dev dependencies to add to the workspace profile",
+            "description": "The dev dependencies added to the workspaces using this profile",
             "additionalKeys": {
               "type": "zpm_primitives::Ident"
             },

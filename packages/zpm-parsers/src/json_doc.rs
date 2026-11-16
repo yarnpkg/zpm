@@ -309,7 +309,7 @@ impl JsonDocument {
 
         push_string(&mut injected_content, &new_key);
         injected_content.extend_from_slice(b": ");
-        injected_content.extend_from_slice(&value.to_indented_json_string(indent).as_bytes());
+        injected_content.extend_from_slice(&value.to_indented_json_string(indent.increment()).as_bytes());
         injected_content.extend_from_slice(b",");
         injected_content.extend_from_slice(&prior_whitespaces);
 
@@ -347,7 +347,7 @@ impl JsonDocument {
 
         push_string(&mut injected_content, &new_key);
         injected_content.extend_from_slice(b": ");
-        injected_content.extend_from_slice(&value.to_indented_json_string(indent).as_bytes());
+        injected_content.extend_from_slice(&value.to_indented_json_string(indent.increment()).as_bytes());
 
         self.replace_range(scanner.offset..scanner.offset, &injected_content)
     }
@@ -385,7 +385,7 @@ impl JsonDocument {
 
         push_string(&mut new_content, &new_key);
         new_content.extend_from_slice(b": ");
-        new_content.extend_from_slice(&value.to_indented_json_string(indent.clone()).as_bytes());
+        new_content.extend_from_slice(&value.to_indented_json_string(indent.increment()).as_bytes());
 
         if indent.child_indent.is_some() {
             new_content.push(b'\n');
@@ -531,7 +531,9 @@ impl JsonDocument {
                 }
             },
 
-            _ => Ok(None),
+            // Scalars have no children to infer the indent from; if they get
+            // replaced by an object or array, use the suggested indent
+            _ => Ok(default_if_empty),
         }
     }
 
@@ -1023,6 +1025,18 @@ mod tests {
 
     // Deeply nested with tab indentation
     #[case(b"{\n\t\"a\": {\n\t\t\"b\": {}\n\t}\n}", vec!["a", "b", "c"], Value::String("deep".to_string()), b"{\n\t\"a\": {\n\t\t\"b\": {\n\t\t\t\"c\": \"deep\"\n\t\t}\n\t}\n}")]
+
+    // Nested values of inserted keys are indented relative to their key
+    #[case(b"{\n  \"name\": \"pkg\"\n}", vec!["exports"], Value::Object(vec![(".".to_string(), Value::Object(vec![("import".to_string(), Value::String("./a.mjs".to_string()))]))]), b"{\n  \"exports\": {\n    \".\": {\n      \"import\": \"./a.mjs\"\n    }\n  },\n  \"name\": \"pkg\"\n}")]
+    #[case(b"{\n    \"name\": \"pkg\"\n}", vec!["zzz"], Value::Object(vec![(".".to_string(), Value::Object(vec![("import".to_string(), Value::String("./a.mjs".to_string()))]))]), b"{\n    \"name\": \"pkg\",\n    \"zzz\": {\n        \".\": {\n            \"import\": \"./a.mjs\"\n        }\n    }\n}")]
+    #[case(b"{\n\t\"name\": \"pkg\"\n}", vec!["exports"], Value::Object(vec![(".".to_string(), Value::Object(vec![("import".to_string(), Value::String("./a.mjs".to_string()))]))]), b"{\n\t\"exports\": {\n\t\t\".\": {\n\t\t\t\"import\": \"./a.mjs\"\n\t\t}\n\t},\n\t\"name\": \"pkg\"\n}")]
+    #[case(b"{\n  \"parent\": {\n    \"existing\": \"value\"\n  }\n}", vec!["parent", "new_child"], Value::Object(vec![(".".to_string(), Value::Object(vec![("import".to_string(), Value::String("./a.mjs".to_string()))]))]), b"{\n  \"parent\": {\n    \"existing\": \"value\",\n    \"new_child\": {\n      \".\": {\n        \"import\": \"./a.mjs\"\n      }\n    }\n  }\n}")]
+    #[case(b"{\n    \"parent\": {}\n}", vec!["parent", "new_child"], Value::Object(vec![(".".to_string(), Value::Object(vec![("import".to_string(), Value::String("./a.mjs".to_string()))]))]), b"{\n    \"parent\": {\n        \"new_child\": {\n            \".\": {\n                \"import\": \"./a.mjs\"\n            }\n        }\n    }\n}")]
+    #[case(b"{\"name\": \"pkg\"}", vec!["exports"], Value::Object(vec![(".".to_string(), Value::Object(vec![("import".to_string(), Value::String("./a.mjs".to_string()))]))]), b"{\"exports\": {\".\": {\"import\": \"./a.mjs\"}}, \"name\": \"pkg\"}")]
+
+    // Deeply nested values keep the same step between levels
+    #[case(b"{\n    \"exports\": \"./a.js\"\n}", vec!["exports"], Value::Object(vec![(".".to_string(), Value::Object(vec![("import".to_string(), Value::Object(vec![("default".to_string(), Value::String("./a.mjs".to_string()))]))]))]), b"{\n    \"exports\": {\n        \".\": {\n            \"import\": {\n                \"default\": \"./a.mjs\"\n            }\n        }\n    }\n}")]
+    #[case(b"{\n\t\"exports\": \"./a.js\"\n}", vec!["exports"], Value::Object(vec![(".".to_string(), Value::Object(vec![("import".to_string(), Value::Object(vec![("default".to_string(), Value::String("./a.mjs".to_string()))]))]))]), b"{\n\t\"exports\": {\n\t\t\".\": {\n\t\t\t\"import\": {\n\t\t\t\t\"default\": \"./a.mjs\"\n\t\t\t}\n\t\t}\n\t}\n}")]
 
     // CRLF line endings (as checked out by Git on Windows) are preserved
     #[case(b"{\r\n  \"existing\": \"value\"\r\n}\r\n", vec!["new_key"], Value::String("another".to_string()), b"{\r\n  \"existing\": \"value\",\r\n  \"new_key\": \"another\"\r\n}\r\n")]

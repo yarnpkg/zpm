@@ -2,7 +2,7 @@ use std::{io::IsTerminal, process::{ExitStatus, Stdio}};
 
 use clipanion::cli;
 use clipanion::core::{Completion, CompletionContext};
-use zpm_utils::{DataType, Note, ToFileString};
+use zpm_utils::{DataType, FromFileString, Note, ToFileString};
 
 use crate::{config::validate_yarn_version, cwd::{get_fake_cwd, get_final_cwd}, errors::Error, install::install_package_manager, ipc::YARNSW_PATH_ENV, links::{LinkTarget, get_link, unset_link}, manifest::{LocalPackageManagerReference, PackageManagerField, PackageManagerReference, find_closest_package_manager}, yarn::get_default_yarn_version, yarn_enums::ReleaseLine};
 
@@ -14,6 +14,8 @@ pub async fn resolve_proxy_reference() -> Result<PackageManagerReference, Error>
 
     let mut find_result
         = find_closest_package_manager(&lookup_path)?;
+
+    find_result.check_dev_engines()?;
 
     if let Some(detected_root_path) = find_result.detected_root_path {
         std::env::set_var("YARNSW_DETECTED_ROOT", detected_root_path.to_file_string());
@@ -28,6 +30,14 @@ pub async fn resolve_proxy_reference() -> Result<PackageManagerReference, Error>
 
                     find_result.detected_package_manager
                         = Some(PackageManagerField::new_yarn(LocalPackageManagerReference {path: bin_path}.into()));
+                },
+
+                // Setting `YARN_ENABLE_MIGRATION_MODE=0` lets users who opted-in
+                // to the migration run the mainstream version for a single
+                // command (for example to update the checked-in lockfile);
+                // older releases don't know the setting and would reject it
+                LinkTarget::Migration if find_result.detected_package_manager_migration.is_some() && is_migration_mode_disabled() => {
+                    std::env::remove_var("YARN_ENABLE_MIGRATION_MODE");
                 },
 
                 LinkTarget::Migration => {
@@ -55,6 +65,13 @@ pub async fn resolve_proxy_reference() -> Result<PackageManagerReference, Error>
     }?;
 
     Ok(reference)
+}
+
+fn is_migration_mode_disabled() -> bool {
+    let value
+        = std::env::var("YARN_ENABLE_MIGRATION_MODE").ok();
+
+    value.and_then(|value| bool::from_file_string(&value).ok()) == Some(false)
 }
 
 pub fn proxy_completer(ctx: &CompletionContext) -> Vec<Completion> {
