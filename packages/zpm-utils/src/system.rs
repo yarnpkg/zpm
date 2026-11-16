@@ -418,15 +418,63 @@ pub struct Requirements {
     #[serde(default)]
     #[serde(rename = "cpu")]
     #[serde(skip_serializing_if = "Vec::is_empty")]
+    #[serde(deserialize_with = "deserialize_requirement_list")]
     arch: Vec<RequirementEntry<Cpu>>,
 
     #[serde(default)]
     #[serde(skip_serializing_if = "Vec::is_empty")]
+    #[serde(deserialize_with = "deserialize_requirement_list")]
     os: Vec<RequirementEntry<Os>>,
 
     #[serde(default)]
     #[serde(skip_serializing_if = "Vec::is_empty")]
+    #[serde(deserialize_with = "deserialize_requirement_list")]
     libc: Vec<RequirementEntry<Libc>>,
+}
+
+/// The `os`, `cpu`, and `libc` fields are meant to be arrays, but npm also
+/// accepts a single string (its documentation even uses that form for
+/// `libc`), so some packages are published with `"libc": "musl"`. We treat
+/// such strings as one-element lists, and `null` as an absent field.
+fn deserialize_requirement_list<'de, D, T>(deserializer: D) -> Result<Vec<T>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    T: Deserialize<'de>,
+{
+    struct RequirementListVisitor<T>(std::marker::PhantomData<T>);
+
+    impl<'de, T: Deserialize<'de>> serde::de::Visitor<'de> for RequirementListVisitor<T> {
+        type Value = Vec<T>;
+
+        fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
+            formatter.write_str("a string or a sequence of strings")
+        }
+
+        fn visit_str<E: serde::de::Error>(self, value: &str) -> Result<Self::Value, E> {
+            let value
+                = T::deserialize(serde::de::value::StrDeserializer::<E>::new(value))?;
+
+            Ok(vec![value])
+        }
+
+        fn visit_unit<E: serde::de::Error>(self) -> Result<Self::Value, E> {
+            Ok(vec![])
+        }
+
+        fn visit_none<E: serde::de::Error>(self) -> Result<Self::Value, E> {
+            Ok(vec![])
+        }
+
+        fn visit_some<D2: serde::Deserializer<'de>>(self, deserializer: D2) -> Result<Self::Value, D2::Error> {
+            deserialize_requirement_list(deserializer)
+        }
+
+        fn visit_seq<A: serde::de::SeqAccess<'de>>(self, seq: A) -> Result<Self::Value, A::Error> {
+            Vec::<T>::deserialize(serde::de::value::SeqAccessDeserializer::new(seq))
+        }
+    }
+
+    deserializer.deserialize_any(RequirementListVisitor(std::marker::PhantomData))
 }
 
 impl Requirements {
@@ -517,6 +565,59 @@ mod requirements_tests {
 
     fn parse(input: &str) -> Requirements {
         serde_json::from_str(input).unwrap()
+    }
+
+    #[test]
+    fn deserialize_accepts_strings_as_single_element_lists() {
+        assert_eq!(parse(r#"{"os": "linux", "cpu": "x64", "libc": "musl"}"#), parse(r#"{"os": ["linux"], "cpu": ["x64"], "libc": ["musl"]}"#));
+        assert_eq!(parse(r#"{"os": "!win32"}"#), parse(r#"{"os": ["!win32"]}"#));
+    }
+
+    #[test]
+    fn deserialize_treats_null_as_absent() {
+        assert_eq!(parse(r#"{"os": null, "cpu": null, "libc": null}"#), Requirements::default());
+    }
+
+    #[test]
+    fn deserialize_still_rejects_other_shapes() {
+        assert!(serde_json::from_str::<Requirements>(r#"{"libc": 42}"#).is_err());
+        assert!(serde_json::from_str::<Requirements>(r#"{"libc": {"musl": true}}"#).is_err());
+        assert!(serde_json::from_str::<Requirements>(r#"{"libc": ["musl", 42]}"#).is_err());
+    }
+
+    #[test]
+    fn deserialize_works_when_flattened() {
+        #[derive(Deserialize)]
+        struct Manifest {
+            #[allow(dead_code)]
+            name: String,
+
+            #[serde(flatten)]
+            requirements: Requirements,
+        }
+
+        let manifest: Manifest
+            = serde_json::from_str(r#"{"name": "sass-embedded-linux-musl-x64", "os": ["linux"], "cpu": "x64", "libc": "musl"}"#).unwrap();
+
+        assert_eq!(manifest.requirements, parse(r#"{"os": ["linux"], "cpu": ["x64"], "libc": ["musl"]}"#));
+    }
+
+    #[test]
+    fn string_libc_is_validated_like_a_list() {
+        let requirements
+            = parse(r#"{"os": "linux", "libc": "musl"}"#);
+
+        assert!(requirements.validate_system(&System::new(Some(Cpu::X86_64), Some(Os::Linux), Some(Libc::Musl))));
+        assert!(!requirements.validate_system(&System::new(Some(Cpu::X86_64), Some(Os::Linux), Some(Libc::Glibc))));
+        assert!(!requirements.validate_system(&System::new(Some(Cpu::X86_64), Some(Os::Linux), None)));
+    }
+
+    #[test]
+    fn serialize_always_emits_lists() {
+        let serialized
+            = serde_json::to_string(&parse(r#"{"libc": "musl"}"#)).unwrap();
+
+        assert_eq!(serialized, r#"{"libc":["musl"]}"#);
     }
 
     fn os_system(os: Os) -> System {

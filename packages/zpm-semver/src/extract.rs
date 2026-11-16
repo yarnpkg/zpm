@@ -6,7 +6,7 @@ use crate::{
     MAX_SAFE_INTEGER,
 };
 
-pub fn extract_number(str: &mut std::iter::Peekable<std::str::Chars>) -> Option<u32> {
+pub fn extract_number(str: &mut std::iter::Peekable<std::str::Chars>) -> Option<u64> {
     let mut num: u64 = 0;
     let mut valid = false;
     let mut digits = 0usize;
@@ -32,13 +32,7 @@ pub fn extract_number(str: &mut std::iter::Peekable<std::str::Chars>) -> Option<
     }
 
     match valid {
-        true => {
-            if num > u32::MAX as u64 {
-                None
-            } else {
-                Some(num as u32)
-            }
-        }
+        true => Some(num),
         false => None
     }
 }

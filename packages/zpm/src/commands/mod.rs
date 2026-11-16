@@ -84,6 +84,9 @@ pub enum YarnCli {
     NpmStageList(npm::stage::list::List),
     NpmStageApprove(npm::stage::approve::Approve),
     NpmStageReject(npm::stage::reject::Reject),
+    NpmTagAdd(npm::tag::add::Add),
+    NpmTagList(npm::tag::list::List),
+    NpmTagRemove(npm::tag::remove::Remove),
     Whoami(npm::whoami::Whoami),
 
     VersionApply(version::apply::VersionApply),

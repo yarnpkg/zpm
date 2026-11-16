@@ -86,7 +86,8 @@
       "description": "A Node.js v13.x [option](https://nodejs.org/api/esm.html#esm_package_json_type_field). Possible values are `commonjs` (the default) and `module`. Yarn 3+ will generate a `.pnp.cjs` file when using PnP regardless of this option.",
       "type": ["string", "null"],
       "enum": ["commonjs", "module", null],
-      "default": "commonjs"
+      "default": "commonjs",
+      "examples": ["module"]
     },
     "extends": {
       "title": "Workspace profile names to apply to this workspace.",
@@ -115,8 +116,18 @@
     },
     "license": {
       "title": "SPDX identifier defining the license under which the package is distributed.",
+      "description": "Yarn doesn't interpret this field; it's published along with the rest of the manifest for registries and other tools to consume. License files (`LICENSE`, `LICENCE`, and their variants) are always included in the published tarball, regardless of `files`.",
       "type": "string",
-      "examples": ["MIT"]
+      "_examples": [
+        {
+          "description": "Distribute the package under the MIT license.",
+          "value": "MIT"
+        },
+        {
+          "description": "Let consumers pick between two licenses.",
+          "value": "(MIT OR Apache-2.0)"
+        }
+      ]
     },
     "os": {
       "title": "Set of platforms on which this package works.",
@@ -283,7 +294,7 @@
     },
     "languageName": {
       "title": "Arbitrary value selecting the linker to use when installing the dependency.",
-      "description": "This is an internal package setting that shouldn't be touched unless you really know what you're doing.",
+      "description": "Accepted for compatibility with earlier Yarn versions, but not currently read by Yarn.",
       "type": "string",
       "default": "node",
       "examples": ["node"]
@@ -480,18 +491,21 @@
       "properties": {
         "packages": {
           "title": "Workspace package globs.",
+          "description": "Folder glob patterns referencing the workspaces of the project, used when `workspaces` is written in its legacy object form. Equivalent to the array form of the `workspaces` field.",
           "type": "array",
           "items": {
             "type": "string"
-          }
+          },
+          "examples": [["packages/*"]]
         },
         "nohoist": {
           "title": "Deprecated workspace globs that should not be hoisted.",
-          "description": "This legacy field is accepted so Yarn can warn about it, but it isn't honored.",
+          "description": "This legacy field is accepted so Yarn can warn about it, but it isn't honored. Use `installConfig.hoistingLimits` instead.",
           "type": "array",
           "items": {
             "type": "string"
-          }
+          },
+          "examples": [["**/react-native"]]
         }
       },
       "exampleItems": ["packages/*"],
@@ -510,7 +524,7 @@
     },
     "dependenciesMeta": {
       "title": "Extra settings affecting how the `dependencies` and `devDependencies` fields are interpreted.",
-      "description": "In the context of a workspaced project most of these settings will affect *all workspaces* and as such must be specified at the *root* of the project. Unless noted otherwise, the `dependenciesMeta` field will be ignored if found within a workspace.",
+      "description": "In the context of a workspaced project most of these settings will affect *all workspaces* and as such must be specified at the *root* of the project. Unless noted otherwise, the `dependenciesMeta` field will be ignored if found within a workspace.\n\nEach key is a package name (glob patterns such as `@babel/*` are accepted), optionally followed by `@` and a semver range to only cover some versions of the package (`yarn unplug` writes keys such as `nan@2.17.0`).",
       "type": "object",
       "patternProperties": {
         "^(?:@([^/]+?)/)?([^/]+?)$": {
@@ -518,7 +532,7 @@
           "properties": {
             "built": {
               "title": "Define whether to run the postinstall script or not.",
-              "description": "If false, the package will never be built (deny-list). This behavior is reversed when the `enableScripts` yarnrc setting is toggled off - when that happens, only packages with `built` explicitly set to `true` will be built (allow-list); as for those with `built` explicitly set to `false`, they will simply see their build script warnings downgraded into simple notices.",
+              "description": "If true, the build scripts of the package run even though the `enableScripts` yarnrc setting is disabled (which is the default), making `built` an allow-list. If false, they never run, even when `enableScripts` is enabled. When omitted, `enableScripts` decides. The scripts of workspaces always run.",
               "type": ["boolean", "null"],
               "examples": [false]
             },
@@ -548,6 +562,14 @@
           "value": {
             "nan": {
               "unplugged": true
+            }
+          }
+        },
+        {
+          "description": "Allow the build scripts of a specific version range.",
+          "value": {
+            "esbuild@^0.25.0": {
+              "built": true
             }
           }
         }
@@ -651,9 +673,15 @@
       "type": ["boolean", "null"],
       "examples": [false]
     },
+    "gypfile": {
+      "title": "Define whether Yarn should run `node-gyp rebuild` for a package with a `binding.gyp` file.",
+      "description": "When a package has a `binding.gyp` file at its root but no `preinstall`, `install`, or `postinstall` script, Yarn builds it by running `node-gyp rebuild`, as npm does.\n\nThe `gypfile` field lets you skip this by setting it to `false`, for example when your package ships prebuilt binaries. Any other value keeps the default behavior.",
+      "type": ["boolean", "null"],
+      "examples": [false]
+    },
     "files": {
       "title": "Array of file glob patterns that will be included within the published tarball.",
-      "description": "File patterns follow a similar syntax to `.gitignore`, but reversed: including a file, directory, or glob pattern (`*`, `**/*`, and such) will make it so that file is included in the tarball when it’s packed. Omitting the field will make it default to `[\"*\"]`, which means it will include all files.\n\nIf this field is missing, Yarn will use the project's `.gitignore` to generate the pack list, or the `.npmignore` file instead if available.\n\nSome special files and directories are also [included](https://github.com/yarnpkg/berry/blob/ab2e84588b1eacb2ec60a751f12b168415224a19/packages/plugin-pack/sources/packUtils.ts#L11) or [excluded](https://github.com/yarnpkg/berry/blob/ab2e84588b1eacb2ec60a751f12b168415224a19/packages/plugin-pack/sources/packUtils.ts#L27) regardless of whether they exist in the `files` array.",
+      "description": "File patterns follow a similar syntax to `.gitignore`, but reversed: including a file, directory, or glob pattern (`*`, `**/*`, and such) will make it so that file is included in the tarball when it’s packed. Patterns starting with `!` exclude the matching files instead. Omitting the field will make it default to `[\"*\"]`, which means it will include all files.\n\nIf this field is missing, Yarn will use the project's `.gitignore` to generate the pack list, or the `.npmignore` file instead if available.\n\nSome files are handled regardless of the `files` array: `package.json`, the readme, license, and changelog files, and the entry points referenced by `main`, `module`, `exports`, `imports`, `browser`, `bin`, `publishConfig.types`, and `publishConfig.typings` are always included, while `.gitignore`, `.npmignore`, `.yarnrc`, `yarn.lock`, `.pnp.*`, `*.tsbuildinfo`, `.DS_Store`, and `.#*` files are always excluded.",
       "type": ["array", "null"],
       "items": {
         "type": "string",
@@ -673,6 +701,7 @@
     },
     "publishConfig": {
       "title": "Extra settings affecting how the package is published.",
+      "description": "The `bin`, `browser`, `exports`, `imports`, `main`, `module`, `type`, `types`, and `typings` fields replace the top-level fields of the same name in the manifest stored in the tarball generated by `yarn pack` and `yarn npm publish`. The other fields configure the packing and publishing process itself.",
       "type": "object",
       "properties": {
         "access": {
@@ -684,6 +713,7 @@
         },
         "bin": {
           "title": "Replacement of the package's `bin` field, used in the published tarball over the main one.",
+          "description": "Accepts the same formats as the top-level `bin` field.",
           "type": ["string", "object", "null"],
           "format": "uri-reference",
           "patternProperties": {
@@ -696,6 +726,7 @@
         },
         "browser": {
           "title": "Replacement of the package's `browser` field, used in the published tarball over the main one.",
+          "description": "Accepts the same formats as the top-level `browser` field.",
           "type": ["string", "object", "null"],
           "format": "uri-reference",
           "patternProperties": {
@@ -708,15 +739,18 @@
         },
         "executableFiles": {
           "title": "Set of files that must be marked as executable (+x) in the published tarball.",
+          "description": "Paths are relative to the package folder. The files referenced by the `bin` field are always marked as executable, so they don't need to be listed here.",
           "type": ["array", "null"],
           "items": {
             "type": "string",
             "format": "uri-reference"
           },
-          "exampleItems": ["./dist/shim.js"]
+          "exampleItems": ["./dist/shim.js"],
+          "examples": [["dist/shim.js"]]
         },
         "exports": {
           "title": "Replacement of the package's `exports` field, used in the published tarball over the main one.",
+          "description": "Accepts the same formats as the top-level `exports` field.",
           "type": ["string", "object", "array", "null"],
           "patternProperties": {
             "^(.+)$": {
@@ -730,6 +764,7 @@
         },
         "imports": {
           "title": "Replacement of the package's `imports` field, used in the published tarball over the main one.",
+          "description": "Accepts the same formats as the top-level `imports` field.",
           "type": ["string", "object", "null"],
           "patternProperties": {
             "^(.+)$": {
@@ -741,22 +776,26 @@
         },
         "main": {
           "title": "Replacement of the package's `main` field, used in the published tarball over the main one.",
+          "description": "Typically used to point consumers to the build output while the workspace's own `main` field points to the sources.",
           "type": ["string", "null"],
           "format": "uri-reference",
           "examples": ["./build/index.js"]
         },
         "module": {
           "title": "Replacement of the package's `module` field, used in the published tarball over the main one.",
+          "description": "Typically used to point consumers to the build output while the workspace's own `module` field points to the sources.",
           "type": ["string", "null"],
           "format": "uri-reference",
           "examples": ["./build/index.mjs"]
         },
         "provenance": {
           "title": "Define whether to produce a provenance statement for the package when publishing. Overrides all other provenance settings.",
+          "description": "If set, it takes precedence over the `--provenance` flag of `yarn npm publish`. Generating a provenance statement requires an OIDC identity token, such as the one GitHub Actions provides to workflows with the `id-token: write` permission.",
           "type": ["boolean", "null"],
           "examples": [true]
         },
         "registry": {
+          "title": "Registry to which the package is published.",
           "description": "If present, will replace whatever registry is defined in the configuration when the package is about to be pushed to a remote location.",
           "type": ["string", "null"],
           "format": "uri",
@@ -764,18 +803,21 @@
         },
         "type": {
           "title": "Replacement of the package's `type` field, used in the published tarball over the main one.",
+          "description": "Useful when the published build uses a different module format than the sources.",
           "type": ["string", "null"],
           "enum": ["commonjs", "module", null],
           "examples": ["module"]
         },
         "types": {
           "title": "Replacement of the package's `types` field, used in the published tarball over the main one.",
+          "description": "The referenced file is always included in the tarball, regardless of the `files` field.",
           "type": ["string", "null"],
           "format": "uri-reference",
           "examples": ["./build/index.d.ts"]
         },
         "typings": {
           "title": "Replacement of the package's `typings` field, used in the published tarball over the main one.",
+          "description": "The referenced file is always included in the tarball, regardless of the `files` field.",
           "type": ["string", "null"],
           "format": "uri-reference",
           "examples": ["./build/index.d.ts"]

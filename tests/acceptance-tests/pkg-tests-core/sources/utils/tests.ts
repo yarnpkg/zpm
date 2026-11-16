@@ -266,7 +266,9 @@ function majorCheck(test: (major: number) => boolean) {
 }
 
 export const FEATURE_CHECKS = {
-  forEachWorktree: majorCheck(major => major <= 4),
+  // Berry gates `yarn workspaces foreach --worktree` to 4.x and older; zpm
+  // supports it again, so it's available whatever the major under test
+  forEachWorktree: true,
   forEachVerboseDone: majorCheck(major => major >= 5),
   jsonLockfile: majorCheck(major => major >= 5),
   prologConstraints: majorCheck(major => major <= 4),
@@ -275,6 +277,10 @@ export const FEATURE_CHECKS = {
   // `lib/pythonX.Y/site-packages`, symlinked interpreter); see the
   // "Limitations" section of the pypi protocol documentation
   venvLinker: process.platform !== `win32`,
+  // The fake Yarn 6.x release served by the test registry (see
+  // `RequestType.YarnSwitchTarball`) is a shell script; Yarn Switch installs
+  // it as `yarn-bin.exe` on Windows, which can't execute it (os error 216)
+  runnableFakeYarnRelease: process.platform !== `win32`,
 } as const;
 
 // Testing things inside a big-endian container takes forever
@@ -315,6 +321,9 @@ export enum RequestType {
   StageApprove = `stageApprove`,
   StageReject = `stageReject`,
   StagePublish = `stagePublish`,
+  DistTagList = `distTagList`,
+  DistTagAdd = `distTagAdd`,
+  DistTagRemove = `distTagRemove`,
   NodeDistIndex = `nodeDistIndex`,
   NodeDistTarball = `nodeDistTarball`,
   OtelTraces = `otelTraces`,
@@ -387,6 +396,23 @@ export type Request = {
   type: RequestType.StagePublish;
   scope?: string;
   localName: string;
+} | {
+  registry?: string;
+  type: RequestType.DistTagList;
+  scope?: string;
+  localName: string;
+} | {
+  registry?: string;
+  type: RequestType.DistTagAdd;
+  scope?: string;
+  localName: string;
+  tag: string;
+} | {
+  registry?: string;
+  type: RequestType.DistTagRemove;
+  scope?: string;
+  localName: string;
+  tag: string;
 } | {
   type: RequestType.NodeDistIndex;
 } | {
@@ -977,6 +1003,33 @@ interface StagedPackageEntry {
 
 const stagedPackages = new Map<string, StagedPackageEntry>();
 
+// Dist-tags changed through the `/-/package/:name/dist-tags` endpoints, keyed
+// by registry and package name. They only affect these endpoints (not the
+// package metadata), so that tests changing them don't affect other tests.
+const distTagOverrides = new Map<string, Record<string, string>>();
+
+const getDistTagsKey = (registry: string | undefined, name: string) => {
+  return `${registry ?? ``}:${name}`;
+};
+
+const getDistTags = async (registry: string | undefined, name: string): Promise<Record<string, string> | null> => {
+  const override = distTagOverrides.get(getDistTagsKey(registry, name));
+  if (typeof override !== `undefined`)
+    return override;
+
+  const packageEntry = await getPackageEntry(name);
+  if (!packageEntry)
+    return null;
+
+  const versions = Array.from(packageEntry.keys());
+  const firstVersionEntry = packageEntry.get(versions[0]!);
+
+  return {
+    latest: semver.maxSatisfying(versions, `*`)!,
+    ...firstVersionEntry?.packageJson[`dist-tags`],
+  };
+};
+
 const packageServerUrls: {
   http: Promise<string> | null;
   https: Promise<string> | null;
@@ -1482,6 +1535,86 @@ export const startPackageServer = ({type}: {type: keyof typeof packageServerUrls
       });
     },
 
+    async [RequestType.DistTagList](parsedRequest, _, response) {
+      if (parsedRequest.type !== RequestType.DistTagList)
+        throw new Error(`Assertion failed: Invalid request type`);
+
+      const {registry, scope, localName} = parsedRequest;
+      const name = scope ? `${scope}/${localName}` : localName;
+
+      const distTags = await getDistTags(registry, name);
+      if (distTags === null) {
+        processError(response, 404, `Package not found: ${name}`);
+        return;
+      }
+
+      response.writeHead(200, {[`Content-Type`]: `application/json`});
+      response.end(JSON.stringify(distTags));
+    },
+
+    async [RequestType.DistTagAdd](parsedRequest, request, response) {
+      if (parsedRequest.type !== RequestType.DistTagAdd)
+        throw new Error(`Assertion failed: Invalid request type`);
+
+      const {registry, scope, localName, tag} = parsedRequest;
+      const name = scope ? `${scope}/${localName}` : localName;
+
+      let rawData = ``;
+
+      request.on(`data`, chunk => rawData += chunk);
+      request.on(`end`, () => void (async () => {
+        let version;
+        try {
+          version = JSON.parse(rawData);
+        } catch {
+          return processError(response, 400, `Invalid`);
+        }
+
+        const sendJsonError = (statusCode: number, error: string) => {
+          response.writeHead(statusCode, {[`Content-Type`]: `application/json`});
+          response.end(JSON.stringify({error}));
+        };
+
+        const distTags = await getDistTags(registry, name);
+        if (distTags === null)
+          return sendJsonError(404, `Package not found: ${name}`);
+
+        const packageEntry = await getPackageEntry(name);
+        if (typeof version !== `string` || !packageEntry?.has(version))
+          return sendJsonError(404, `Version not found: ${name}@${version}`);
+
+        distTagOverrides.set(getDistTagsKey(registry, name), {...distTags, [tag]: version});
+
+        response.writeHead(200, {[`Content-Type`]: `application/json`});
+        return response.end(JSON.stringify({ok: `dist-tags updated`}));
+      })());
+    },
+
+    async [RequestType.DistTagRemove](parsedRequest, _, response) {
+      if (parsedRequest.type !== RequestType.DistTagRemove)
+        throw new Error(`Assertion failed: Invalid request type`);
+
+      const {registry, scope, localName, tag} = parsedRequest;
+      const name = scope ? `${scope}/${localName}` : localName;
+
+      const distTags = await getDistTags(registry, name);
+      if (distTags === null) {
+        processError(response, 404, `Package not found: ${name}`);
+        return;
+      }
+
+      if (!Object.hasOwn(distTags, tag)) {
+        processError(response, 404, `Tag not found: ${tag}`);
+        return;
+      }
+
+      const {[tag]: _removed, ...remainingDistTags} = distTags;
+      distTagOverrides.set(getDistTagsKey(registry, name), remainingDistTags);
+
+      response.writeHead(200, {[`Content-Type`]: `application/json`});
+      response.end(JSON.stringify({ok: `dist-tags updated`}));
+    },
+
     async [RequestType.BulkAdvisories](parsedRequest, request, response) {
       if (parsedRequest.type !== RequestType.BulkAdvisories)
         throw new Error(`Assertion failed: Invalid request type`);
@@ -1759,6 +1892,31 @@ exit 0
           scope,
           localName: localName!,
         };
+      } else if ((match = url.match(/^\/-\/package\/(?:(@[^/]+)\/)?([^@/][^/]*)\/dist-tags(?:\/([^/]+))?$/))) {
+        const [, scope, localName, tag] = match;
+
+        if (typeof tag === `undefined`) {
+          if (method !== `GET`)
+            return null;
+
+          return {
+            ...registry,
+            type: RequestType.DistTagList,
+            scope,
+            localName: localName!,
+          };
+        }
+
+        if (method !== `PUT` && method !== `DELETE`)
+          return null;
+
+        return {
+          ...registry,
+          type: method === `PUT` ? RequestType.DistTagAdd : RequestType.DistTagRemove,
+          scope,
+          localName: localName!,
+          tag: decodeURIComponent(tag),
+        };
       } else if ((match = url.match(/^\/(?:(@[^/]+)\/)?([^@/][^/]*)$/)) && method == `PUT`) {
         const [, scope, localName] = match;
 
@@ -1814,10 +1972,13 @@ exit 0
       case RequestType.StagePublish:
       case RequestType.Publish:
       case RequestType.Whoami:
+      case RequestType.DistTagAdd:
+      case RequestType.DistTagRemove:
         return true;
 
       case RequestType.PackageInfo:
-      case RequestType.PackageTarball: {
+      case RequestType.PackageTarball:
+      case RequestType.DistTagList: {
         if (parsedRequest.scope && parsedRequest.scope.startsWith(`@private`)) {
           return true;
         } else {
@@ -1863,7 +2024,8 @@ exit 0
             }
 
             const skipOtp = parsedRequest.type === RequestType.StageList
-              || parsedRequest.type === RequestType.StagePublish;
+              || parsedRequest.type === RequestType.StagePublish
+              || parsedRequest.type === RequestType.DistTagList;
 
             if (!skipOtp && !applyOtpValidation(req, res, user))
               return;

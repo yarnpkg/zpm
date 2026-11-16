@@ -1,8 +1,16 @@
 const {
   fs: {writeFile, writeJson},
   exec: {execFile},
-  tests: {setPackageWhitelist},
+  tests: {setPackageWhitelist, testIf},
 } = require(`pkg-tests-core`);
+
+// Git quotes and escapes these names in its default output (`core.quotepath`)
+const SPECIAL_WORKSPACE_FOLDERS = [
+  {description: `a non-ASCII character`, folder: `caf\u00e9`, supportedOnWindows: true},
+  {description: `a space`, folder: `with space`, supportedOnWindows: true},
+  // Windows doesn't allow double quotes in file names
+  {description: `a double quote`, folder: `with"quote`, supportedOnWindows: false},
+];
 
 describe(`Commands`, () => {
   describe(`version check`, () => {
@@ -158,6 +166,35 @@ describe(`Commands`, () => {
       }),
     );
 
+    for (const {description, folder, supportedOnWindows} of SPECIAL_WORKSPACE_FOLDERS) {
+      testIf(
+        () => supportedOnWindows || process.platform !== `win32`,
+        `it should detect that a workspace whose folder name contains ${description} changed vs master`,
+        makeVersionCheckEnv(async ({path, run, git}) => {
+          await writeJson(`${path}/packages/${folder}/package.json`, {
+            name: `pkg-special`,
+            version: `1.0.0`,
+          });
+
+          await run(`install`);
+
+          await git(`add`, `.`);
+          await git(`commit`, `-m`, `Add pkg-special`);
+
+          await git(`checkout`, `-b`, `my-feature`);
+
+          await writeJson(`${path}/packages/${folder}/wip.json`, {});
+
+          await expect(run(`version`, `check`)).rejects.toMatchObject({
+            stdout: expect.stringContaining(`pkg-special`),
+          });
+
+          await run(`packages/${folder}`, `version`, `patch`, `--deferred`);
+          await run(`version`, `check`);
+        }),
+      );
+    }
+
     test(
       `it shouldn't throw if changes were reverted`,
       makeVersionCheckEnv(async ({path, run, source, git}) => {
@@ -223,6 +260,9 @@ function makeVersionCheckEnv(cb, {rootManifest = {}, packageWhitelist = null, gi
     await git(`config`, `user.name`, `John Doe`);
     await git(`config`, `user.email`, `john.doe@example.org`);
     await git(`config`, `commit.gpgSign`, `false`);
+
+    // Make sure git quotes the paths, whatever the user configuration
+    await git(`config`, `core.quotepath`, `true`);
 
     await git(`add`, `.`);
     await git(`commit`, `-m`, `First commit`);

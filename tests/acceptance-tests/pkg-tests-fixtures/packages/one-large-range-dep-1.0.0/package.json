@@ -1,0 +1,7 @@
+{
+    "name": "one-large-range-dep",
+    "version": "1.0.0",
+    "dependencies": {
+        "large-version": "^1.99999999150214.0"
+    }
+}

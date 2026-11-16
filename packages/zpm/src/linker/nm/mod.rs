@@ -5,7 +5,7 @@ use zpm_sync::{PreserveExtra, SyncItem, SyncTemplate, SyncTree};
 use zpm_utils::{FromFileString, IoResultExt, Path, ToHumanString};
 
 use crate::{
-    build::{self, BuildRequest, BuildRequests}, content_flags, error::Error, fetchers::PackageData, install::Install, linker::{self, LinkResult, helpers::PackageMeta, nm::hoist::{Hoister, WorkTree}, package_map::{self, NodeModulesPackageMapBuilder, PackageMap, persist_package_map, persist_package_map_at}}, project::Project, shims::{make_relative_cmd_shim, make_relative_sh_shim, RelativeShimTarget}
+    build::{self, BuildRequest, BuildRequests}, content_flags, error::Error, fetchers::PackageData, install::Install, linker::{self, LinkResult, helpers::PackageMeta, nm::hoist::{Hoister, WorkTree}, package_map::{self, NodeModulesPackageMapBuilder, PackageMap, persist_package_map, persist_package_map_at}}, project::Project, shims::{make_relative_cmd_shim, make_relative_sh_shim, read_shebang, RelativeShimTarget}
 };
 
 pub mod hoist;
@@ -76,7 +76,10 @@ fn collect_workspace_binaries(install: &Install, workspace_node: &hoist::WorkNod
 /// (relative to the `.bin` folder). It's a symlink on Unix; Windows ignores
 /// shebangs (and restricts symlinks), so we instead generate a `.cmd` shim
 /// for cmd and PowerShell, plus a shell shim for Git Bash, like npm does.
-fn register_bin_entry(workspace_nm_tree: &mut SyncTree, bin_rel_path: Path, target_path: Path) -> Result<(), Error> {
+/// The shims depend on the target's shebang, so they're only queued in
+/// `bin_shims` here, and written by `write_bin_shims` once the packages
+/// are on disk.
+fn register_bin_entry(workspace_nm_tree: &mut SyncTree, bin_shims: &mut Vec<(Path, Path)>, bin_rel_path: Path, target_path: Path) -> Result<(), Error> {
     if !cfg!(windows) {
         workspace_nm_tree.register_entry(bin_rel_path, SyncItem::Symlink {
             target_path,
@@ -85,19 +88,52 @@ fn register_bin_entry(workspace_nm_tree: &mut SyncTree, bin_rel_path: Path, targ
         return Ok(());
     }
 
-    let cmd_rel_path
-        = bin_rel_path.dirname().unwrap_or_default()
-            .with_join_str(format!("{}.cmd", bin_rel_path.basename().unwrap_or_default()));
+    workspace_nm_tree.register_entry(get_cmd_shim_path(&bin_rel_path), SyncItem::Any)?;
+    workspace_nm_tree.register_entry(bin_rel_path.clone(), SyncItem::Any)?;
 
-    workspace_nm_tree.register_entry(cmd_rel_path, SyncItem::File {
-        data: make_relative_cmd_shim(&target_path, &RelativeShimTarget::Node).into_bytes().into(),
-        is_exec: true,
-    })?;
+    bin_shims.push((bin_rel_path, target_path));
 
-    workspace_nm_tree.register_entry(bin_rel_path, SyncItem::File {
-        data: make_relative_sh_shim(&target_path, &RelativeShimTarget::Node).into_bytes().into(),
-        is_exec: true,
-    })?;
+    Ok(())
+}
+
+fn get_cmd_shim_path(bin_path: &Path) -> Path {
+    bin_path.dirname().unwrap_or_default()
+        .with_join_str(format!("{}.cmd", bin_path.basename().unwrap_or_default()))
+}
+
+/// Writes the `.bin` shims queued by `register_bin_entry`. Like cmd-shim, we
+/// pick the interpreter from the target's shebang, falling back to its
+/// extension.
+fn write_bin_shims(bin_shims: &[(Path, Path)]) -> Result<(), Error> {
+    use rayon::prelude::*;
+
+    bin_shims.par_iter().try_for_each(|(bin_abs_path, target_path)| -> Result<(), Error> {
+        let target_abs_path
+            = bin_abs_path.dirname().unwrap_or_default()
+                .with_join(target_path);
+
+        let target
+            = RelativeShimTarget::new(target_path, read_shebang(&target_abs_path));
+
+        write_bin_shim(&get_cmd_shim_path(bin_abs_path), make_relative_cmd_shim(target_path, &target))?;
+        write_bin_shim(bin_abs_path, make_relative_sh_shim(target_path, &target))?;
+
+        Ok(())
+    })
+}
+
+fn write_bin_shim(path: &Path, data: String) -> Result<(), Error> {
+    // Writing through a symlink (say, from a previous install made from
+    // WSL) would overwrite the target
+    let is_file
+        = path.fs_symlink_metadata().ok_missing()?
+            .map(|metadata| metadata.is_file());
+
+    if is_file == Some(false) {
+        path.fs_rm()?;
+    }
+
+    path.fs_change(data, true)?;
 
     Ok(())
 }
@@ -105,7 +141,7 @@ fn register_bin_entry(workspace_nm_tree: &mut SyncTree, bin_rel_path: Path, targ
 /// Registers bin symlinks in the sync tree for a given node_modules subfolder.
 /// `node_rel_path` is the path within node_modules where dependencies are located
 /// (e.g., "" for top-level, or "foo/node_modules" for nested).
-fn register_bin_symlinks_at_path(workspace_nm_tree: &mut SyncTree, node_rel_path: &Path, binaries: &BTreeMap<String, (Ident, Path)>) -> Result<(), Error> {
+fn register_bin_symlinks_at_path(workspace_nm_tree: &mut SyncTree, bin_shims: &mut Vec<(Path, Path)>, node_rel_path: &Path, binaries: &BTreeMap<String, (Ident, Path)>) -> Result<(), Error> {
     for (bin_name, (dep_ident, bin_path)) in binaries {
         // The symlink will be at <node_rel_path>/.bin/<bin_name>
         // It needs to point to ../<dep_name>/<bin_path>
@@ -118,7 +154,7 @@ fn register_bin_symlinks_at_path(workspace_nm_tree: &mut SyncTree, node_rel_path
             .with_join_str(&dep_ident.as_str())
             .with_join(bin_path);
 
-        register_bin_entry(workspace_nm_tree, bin_symlink_path, target_path)?;
+        register_bin_entry(workspace_nm_tree, bin_shims, bin_symlink_path, target_path)?;
     }
 
     Ok(())
@@ -214,7 +250,7 @@ fn register_workspace_symlinks_at(
     Ok(())
 }
 
-fn register_workspace_bin_symlinks(workspace_nm_tree: &mut SyncTree, workspace_path: &Path, binaries: &BTreeMap<String, (Ident, Path)>) -> Result<(), Error> {
+fn register_workspace_bin_symlinks(workspace_nm_tree: &mut SyncTree, bin_shims: &mut Vec<(Path, Path)>, workspace_path: &Path, binaries: &BTreeMap<String, (Ident, Path)>) -> Result<(), Error> {
     for (bin_name, (_ident, bin_path)) in binaries {
         let target_abs_path
             = workspace_path
@@ -233,7 +269,7 @@ fn register_workspace_bin_symlinks(workspace_nm_tree: &mut SyncTree, workspace_p
             .with_join_str("..")
             .with_join(bin_path);
 
-        register_bin_entry(workspace_nm_tree, bin_symlink_path, target_path)?;
+        register_bin_entry(workspace_nm_tree, bin_shims, bin_symlink_path, target_path)?;
     }
 
     Ok(())
@@ -305,6 +341,7 @@ fn generate_workspace_node_modules(
     force_rebuild_locators: &mut BTreeSet<Locator>,
     cas_extractions: &mut Vec<(Path, Locator, bool)>,
     clone_extractions: &mut Vec<(Path, Locator)>,
+    bin_shims: &mut Vec<(Path, Path)>,
 ) -> Result<(SyncTree<'static>, Path), Error> {
     let mut package_map_builder
         = package_map_builder;
@@ -345,13 +382,16 @@ fn generate_workspace_node_modules(
     let mut workspace_nm_tree: SyncTree<'static>
         = SyncTree::new();
 
+    let mut workspace_bin_shims
+        = Vec::new();
+
     workspace_nm_tree.dry_run = false;
     workspace_nm_tree.link_type = project.config.settings.win_link_type.value.into();
 
     let workspace_binaries
         = collect_workspace_binaries(install, &work_tree.nodes[workspace_node_idx]);
 
-    register_workspace_bin_symlinks(&mut workspace_nm_tree, &workspace_dir, &workspace_binaries)?;
+    register_workspace_bin_symlinks(&mut workspace_nm_tree, &mut workspace_bin_shims, &workspace_dir, &workspace_binaries)?;
 
     // Berry's `nmSelfReferences` puts every workspace into the
     // project root's node_modules. Nested workspaces don't get a
@@ -628,8 +668,12 @@ fn generate_workspace_node_modules(
             }
         }
 
-        register_bin_symlinks_at_path(&mut workspace_nm_tree, &node_rel_path, &binaries)?;
+        register_bin_symlinks_at_path(&mut workspace_nm_tree, &mut workspace_bin_shims, &node_rel_path, &binaries)?;
     }
+
+    bin_shims.extend(workspace_bin_shims.into_iter().map(|(bin_rel_path, target_path)| {
+        (workspace_abs_path.with_join(&bin_rel_path), target_path)
+    }));
 
     Ok((workspace_nm_tree, workspace_abs_path))
 }
@@ -644,6 +688,7 @@ fn run_workspace_trees(
     cas_extractions: &[(Path, Locator, bool)],
     clone_store: Option<&Path>,
     clone_extractions: &[(Path, Locator)],
+    bin_shims: &[(Path, Path)],
 ) -> Result<(), Error> {
     tokio::task::block_in_place(|| {
         use rayon::prelude::*;
@@ -696,7 +741,9 @@ fn run_workspace_trees(
             })?;
         }
 
-        run_cas_extractions(project, install, cas_extractions)
+        run_cas_extractions(project, install, cas_extractions)?;
+
+        write_bin_shims(bin_shims)
     })
 }
 
@@ -784,6 +831,8 @@ pub async fn link_island_nm(
         = Vec::new();
     let mut clone_extractions
         = Vec::new();
+    let mut bin_shims
+        = Vec::new();
     let mut package_maps
         = Vec::new();
     let mut workspace_trees
@@ -831,6 +880,7 @@ pub async fn link_island_nm(
             &mut force_rebuild_locators,
             &mut cas_extractions,
             &mut clone_extractions,
+            &mut bin_shims,
         )?);
 
         package_maps.push((
@@ -839,7 +889,7 @@ pub async fn link_island_nm(
         ));
     }
 
-    run_workspace_trees(project, install, workspace_trees, &cas_extractions, clone_store.as_ref(), &clone_extractions)?;
+    run_workspace_trees(project, install, workspace_trees, &cas_extractions, clone_store.as_ref(), &clone_extractions, &bin_shims)?;
 
     for (package_map_path, package_map) in package_maps {
         persist_package_map_at(&package_map_path, &package_map)?;
@@ -897,6 +947,9 @@ fn run_cas_extractions(
 
     use rayon::prelude::*;
 
+    let fallbacks
+        = linker::helpers::CopyFallbacks::new();
+
     match project.config.settings.nm_mode.value {
         zpm_config::NmMode::HardlinksLocal => {
             let local_index = linker::helpers::LocalDedupIndex::new();
@@ -911,8 +964,11 @@ fn run_cas_extractions(
                     package_data,
                     &local_index,
                     *skip_node_modules,
+                    &fallbacks,
                 ).map(|_| ())
             })?;
+
+            fallbacks.warn_if_any(None, &project.project_cwd);
         },
         zpm_config::NmMode::HardlinksGlobal => {
             let index_root = project.config.settings.global_folder.value
@@ -923,9 +979,11 @@ fn run_cas_extractions(
                     .get(&locator.physical_locator())
                     .unwrap_or_else(|| panic!("Expected package_data for {}", locator.to_print_string()));
 
-                linker::helpers::fs_extract_archive_with_cas(dest_abs_path, package_data, &index_root, *skip_node_modules)
+                linker::helpers::fs_extract_archive_with_cas(dest_abs_path, package_data, &index_root, *skip_node_modules, &fallbacks)
                     .map(|_| ())
             })?;
+
+            fallbacks.warn_if_any(Some(&index_root), &project.project_cwd);
         },
         zpm_config::NmMode::Classic => {},
     }
@@ -1097,6 +1155,8 @@ pub async fn link_project_nm(project: &Project, install: &Install) -> Result<Lin
         = Vec::new();
     let mut clone_extractions
         = Vec::new();
+    let mut bin_shims
+        = Vec::new();
 
     hoister.hoist();
 
@@ -1135,12 +1195,13 @@ pub async fn link_project_nm(project: &Project, install: &Install) -> Result<Lin
             &mut force_rebuild_locators,
             &mut cas_extractions,
             &mut clone_extractions,
+            &mut bin_shims,
         )?);
 
         project_queue.extend_from_slice(&work_tree.nodes[workspace_node_idx].workspaces_idx);
     }
 
-    run_workspace_trees(project, install, workspace_trees, &cas_extractions, clone_store.as_ref(), &clone_extractions)?;
+    run_workspace_trees(project, install, workspace_trees, &cas_extractions, clone_store.as_ref(), &clone_extractions, &bin_shims)?;
 
     persist_package_map(project, &package_map_builder.build()?)?;
 
