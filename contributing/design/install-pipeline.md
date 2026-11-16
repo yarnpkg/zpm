@@ -24,6 +24,7 @@ The install is implemented in three different files:
 
 `Project` exposes preparation separately from finalizing an install:
 
+- `prepare_install_settings` applies legacy lockfile settings before constructing the package cache or resolving dependencies. Check-only commands apply these settings in memory; normal installs also persist the migration configuration.
 - `prepare_install` validates the project, loads its lockfile, and resolves and fetches dependencies. It can recover lockfile conflicts using the regular install rules.
 - `prepare_install_from_lockfile` resolves and fetches from an in-memory lockfile, allowing callers to apply enforced resolutions without writing an intermediate lockfile.
 - `Install::link_and_build` finalizes the result according to the selected install mode. It writes the lockfile and, when linking is enabled, cleans the package cache and attaches the installed state.

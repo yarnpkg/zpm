@@ -1835,10 +1835,29 @@ impl Project {
         Ok(true)
     }
 
-    pub async fn run_install(&mut self, mut options: RunInstallOptions) -> Result<InstallResult, Error> {
-        let migrated_classic_settings
-            = self.migrate_classic_project_settings()?;
+    /// Apply migration settings before constructing the cache or resolving.
+    /// Checks use the legacy defaults in memory without rewriting project files.
+    pub(crate) fn prepare_install_settings(&mut self, read_only: bool) -> Result<(), Error> {
+        if read_only {
+            if let Some(migration) = LockfileMigration::detect(&self.config, &self.project_cwd)? {
+                migration.apply(&mut self.config.settings, Source::Project);
+            }
+            return Ok(());
+        }
 
+        let migrated_classic_settings = self.migrate_classic_project_settings()?;
+        migrate_legacy_lockfile_settings(self)?;
+
+        if migrated_classic_settings {
+            crate::report::if_active(|report| {
+                report.info(format!("Set {} in your configuration, since Yarn Classic projects expect a node_modules folder", DataType::Code.colorize("nodeLinker: node-modules")));
+            });
+        }
+
+        Ok(())
+    }
+
+    pub async fn run_install(&mut self, mut options: RunInstallOptions) -> Result<InstallResult, Error> {
         let report = StreamReport::new(StreamReportConfig {
             include_version: true,
             json: options.json,
@@ -1847,16 +1866,7 @@ impl Project {
         });
 
         with_report_result(report, async {
-            // Must run before anything reads the settings it may change (git
-            // approvals, age gate, build scripts), since the legacy lockfile
-            // gets replaced at the end of this install.
-            migrate_legacy_lockfile_settings(self)?;
-
-            if migrated_classic_settings {
-                crate::report::if_active(|report| {
-                    report.info(format!("Set {} in your configuration, since Yarn Classic projects expect a node_modules folder", DataType::Code.colorize("nodeLinker: node-modules")));
-                });
-            }
+            self.prepare_install_settings(false)?;
 
             let package_cache
                 = self.package_cache()?;

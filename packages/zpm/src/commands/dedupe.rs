@@ -130,6 +130,8 @@ impl Dedupe {
                     .collect();
             }
 
+            project.prepare_install_settings(self.check)?;
+
             // Check freshness before creating cache directories: recreating a
             // missing directory would hide the need to restore its archives.
             let package_cache
