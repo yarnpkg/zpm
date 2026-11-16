@@ -17,14 +17,25 @@ During this first install, Yarn reads your Yarn 1.x `yarn.lock` and keeps the ex
 The migration needs to rewrite the lockfile, so it can't happen during an immutable install: `yarn install --immutable` (which is the default on most CI providers) will fail until the migrated lockfile has been committed.
 :::
 
+## Settings added to `.yarnrc.yml`
+
+Some Yarn 6 defaults would change how your project installs, so the first install adds the following settings to your project `.yarnrc.yml` and lists them in its output:
+
+| Setting | Value | Why |
+| --- | --- | --- |
+| [`nodeLinker`](/configuration/yarnrc#field-nodelinker) | `node-modules` | Yarn Classic projects expect a `node_modules` folder |
+| [`approvedGitRepositories`](/configuration/yarnrc#field-approvedgitrepositories) | `["**"]` | Yarn Classic fetched git dependencies from any repository |
+| [`enableScripts`](/configuration/yarnrc#field-enablescripts) | `true` | Yarn Classic ran the build scripts of dependencies |
+| [`npmMinimalAgeGate`](/configuration/yarnrc#field-npmminimalagegate) | `0s` | Yarn Classic installed freshly published versions right away |
+
+Settings you already defined in the project `.yarnrc.yml`, the home `.yarnrc.yml`, or through their environment variable (for example `YARN_NODE_LINKER`) are left untouched. Once your project works with Yarn 6, you can remove them to opt into the stricter defaults described in the [breaking changes](/getting-started/breaking-changes#configuration-defaults), and switch to [Plug'n'Play](/concepts/node-linkers).
+
+Under the [migration mode](/getting-started/migration-mode), the root lockfile stays in the Yarn Classic format, so Yarn uses those settings for every command without writing them.
+
 ## What changes
 
-- Yarn Classic projects expect a `node_modules` folder, so Yarn adds [`nodeLinker: node-modules`](/configuration/yarnrc#field-nodelinker) to your `.yarnrc.yml`, unless you already configured a linker. You can switch to [Plug'n'Play](/concepts/node-linkers) later on.
-
-- Some entries can't be imported: git dependencies, packages installed from an arbitrary url, and entries whose version was overridden through the `resolutions` field. Yarn prints a warning for each of them and resolves them again. Note that git dependencies must be allowed through [`approvedGitRepositories`](/configuration/yarnrc#field-approvedgitrepositories).
+- Some entries can't be imported: git dependencies, packages installed from an arbitrary url, and entries whose version was overridden through the `resolutions` field. Yarn prints a warning for each of them and resolves them again.
 
 - Yarn doesn't read the `.npmrc` and `.yarnrc` files. Packages are always fetched from the registry configured through [`npmRegistryServer`](/configuration/yarnrc#field-npmregistryserver) and [`npmScopes`](/configuration/yarnrc#field-npmscopes), even if your lockfile references other urls; Yarn warns you when your lockfile was generated against a registry that isn't the one it's configured to use.
 
 - Yarn Classic checksums aren't reused; Yarn computes its own checksums when it first downloads the packages.
-
-- Postinstall scripts don't run unless you enable [`enableScripts`](/configuration/yarnrc#field-enablescripts).
