@@ -7,7 +7,6 @@ mod debug;
 mod npm;
 mod tasks;
 
-mod help;
 mod rc_helpers;
 
 mod add;
@@ -175,15 +174,6 @@ pub async fn run_default(args: Option<Vec<String>>) -> ExitCode {
             .with_binary_name("yarn".to_string())
             .with_version(version)
             .with_argv(args);
-
-    run_cli(env).await
-}
-
-/// Runs the command `env.argv` selects, or prints the help it asks for.
-pub async fn run_cli(env: Environment) -> ExitCode {
-    if let Some(exit_code) = help::print_command_help(&env) {
-        return exit_code;
-    }
 
     YarnCli::run(env).await
 }
