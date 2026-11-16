@@ -20,7 +20,9 @@ use globset::GlobMatcher;
 use regex::Regex;
 use zpm_utils::ToFileString;
 
+use crate::lockfile::catalogs_from_config;
 use crate::resolvers::catalog::lookup_catalog_entry;
+use crate::resolvers::catalog::lookup_catalog_peer_range_in;
 use crate::resolvers::jsr::npm_ident_for_jsr_ident;
 use crate::script::ScriptEnvironment;
 use crate::{
@@ -536,8 +538,17 @@ pub fn pack_manifest(project: &Project, workspace: &Workspace, options: &PackOpt
         }
     }
 
+    let catalogs
+        = catalogs_from_config(&project.config.settings.catalogs);
+
     let updated_peer_dependencies = manifest.remote.peer_dependencies.iter().filter_map(|(ident, peer_range)| {
         match peer_range {
+            PeerRange::Catalog(params) => {
+                Some(lookup_catalog_peer_range_in(&catalogs, params, &workspace.locator(), ident, |_| {}).map(|peer_range| {
+                    Descriptor::new(ident.clone(), peer_range.to_range())
+                }))
+            },
+
             PeerRange::WorkspaceMagic(params) => {
                 let workspace
                     = project.workspace_by_ident(ident);
