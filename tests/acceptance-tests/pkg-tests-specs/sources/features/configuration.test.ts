@@ -48,6 +48,33 @@ describe(`Features`, () => {
       });
     }));
 
+    test(`it should support relative paths in the path settings from the environment`, makeTemporaryEnv({
+      dependencies: {
+        [`peer-deps`]: `1.0.0`,
+        [`no-deps`]: `1.0.0`,
+        [`no-deps-scripted`]: `1.0.0`,
+      },
+      dependenciesMeta: {
+        [`no-deps-scripted`]: {
+          unplugged: true,
+        },
+      },
+    }, {
+      cacheFolder: `relative/cache`,
+      deferredVersionFolder: `relative/versions`,
+      globalFolder: `relative/global`,
+      patchFolder: `relative/patches`,
+      pnpUnpluggedFolder: `relative/unplugged`,
+      virtualFolder: `relative/__virtual__`,
+    }, async ({path, run, source}) => {
+      await expect(run(`install`)).resolves.toMatchObject({code: 0});
+
+      await expect(xfs.readdirPromise(ppath.join(path, `relative/cache` as PortablePath))).resolves.toContainEqual(expect.stringMatching(/^no-deps-npm-1\.0\.0-/));
+      await expect(xfs.readdirPromise(ppath.join(path, `relative/unplugged` as PortablePath))).resolves.toContainEqual(expect.stringMatching(/^no-deps-scripted-npm-1\.0\.0-/));
+
+      await expect(run(`install`, `--immutable`, `--immutable-cache`)).resolves.toMatchObject({code: 0});
+    }));
+
     test(`it should skip the home configuration if onConflict: reset is set in the project configuration`, makeTemporaryEnv({
     }, async ({path, run, source}) => {
       await xfs.mkdirPromise(ppath.join(path, `..`), {recursive: true});

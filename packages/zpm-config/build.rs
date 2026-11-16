@@ -197,6 +197,17 @@ impl Field {
                         panic!("Field {} can't set affectsInstall; only top-level settings can", name);
                     }
 
+                    // Scalar fields with neither a default nor a null value must be set by the
+                    // rc file declaring their parent; the runtime checks that via FindMissingSetting
+                    let required
+                        = field.default.is_none()
+                            && !field.types.contains(&Type::Null)
+                            && matches!(field.get_type().kind, InternalTypeKind::Native(_));
+
+                    if required && is_root {
+                        panic!("Field {} must have a default value; only nested settings can be required", name);
+                    }
+
                     fields.push(GeneratorField {
                         name: name.to_string(),
                         description: field.description.clone().unwrap_or_else(|| panic!("Field {} must have a description", name)),
@@ -206,6 +217,7 @@ impl Field {
                         one_or_many: field.one_or_many.unwrap_or(false),
                         affects_install: field.affects_install.unwrap_or(true),
                         duration_unit,
+                        required,
                     });
                 }
 
@@ -333,6 +345,7 @@ struct GeneratorField {
     one_or_many: bool,
     affects_install: bool,
     duration_unit: Option<String>,
+    required: bool,
 }
 
 struct Generator {
@@ -389,6 +402,32 @@ impl Generator {
             }
 
             writeln!(writer, "    }}").unwrap();
+            writeln!(writer).unwrap();
+            writeln!(writer, "    impl FindMissingSetting for {} {{", name).unwrap();
+            writeln!(writer, "        fn find_missing_setting(&self) -> Option<String> {{").unwrap();
+
+            for field in fields {
+                let name = &field.name;
+
+                let lc_snake_name
+                    = name.to_case(Case::Snake);
+
+                if field.required {
+                    writeln!(writer, "            if matches!(self.{lc_snake_name}, Partial::Missing) {{").unwrap();
+                    writeln!(writer, "                return Some(\"{name}\".to_string());").unwrap();
+                    writeln!(writer, "            }}").unwrap();
+                }
+
+                if !matches!(field.type_.kind, InternalTypeKind::Native(_)) {
+                    writeln!(writer, "            if let Some(path) = self.{lc_snake_name}.find_missing_setting() {{").unwrap();
+                    writeln!(writer, "                return Some(join_setting_path(\"{name}\", &path));").unwrap();
+                    writeln!(writer, "            }}").unwrap();
+                }
+            }
+
+            writeln!(writer, "            None").unwrap();
+            writeln!(writer, "        }}").unwrap();
+            writeln!(writer, "    }}").unwrap();
         }
 
         writeln!(writer, "}}").unwrap();
@@ -436,7 +475,7 @@ impl Generator {
             writeln!(writer, "impl MergeSettings for {struct_name} {{").unwrap();
             writeln!(writer, "    type Intermediate = intermediate::{struct_name};").unwrap();
             writeln!(writer).unwrap();
-            writeln!(writer, "    fn from_env_string(_value: &str, _from_config: Option<Self>) -> Result<Self, HydrateError> {{").unwrap();
+            writeln!(writer, "    fn from_env_string(_context: &ConfigurationContext, _value: &str, _from_config: Option<Self>) -> Result<Self, HydrateError> {{").unwrap();
             writeln!(writer, "        unimplemented!(\"Configuration records cannot be returned directly just yet\");").unwrap();
             writeln!(writer, "    }}").unwrap();
             writeln!(writer).unwrap();
@@ -637,7 +676,7 @@ impl Generator {
                 if let Some(duration_unit) = &field.duration_unit {
                     writeln!(writer, "            Some((env_name, env_value)) => crate::duration::DurationSetting::from_env_string_with_unit(env_value, zpm_utils::DurationUnit::{duration_unit})").unwrap();
                 } else {
-                    writeln!(writer, "            Some((env_name, env_value)) => MergeSettings::from_env_string(env_value, Some({lc_snake_name}))").unwrap();
+                    writeln!(writer, "            Some((env_name, env_value)) => MergeSettings::from_env_string(context, env_value, Some({lc_snake_name}))").unwrap();
                 }
 
                 writeln!(writer, "                .map_err(|error| env_override_error(env_name, \"{name}\", error))?,").unwrap();
