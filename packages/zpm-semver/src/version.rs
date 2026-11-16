@@ -49,6 +49,23 @@ impl Version {
         }
     }
 
+    /// Parses a version using the same grammar as node-semver's strict mode
+    /// (`new SemVer(version)`), which is what Yarn 4 uses to filter the
+    /// versions listed by a registry. Unlike `from_file_string`, it rejects
+    /// the loose forms (`1.0`, `1.x`, `01.2.3`, `1.2.3-01`, ...) that the
+    /// general parser coerces into a version. Like node-semver, it ignores
+    /// surrounding whitespace.
+    pub fn from_strict_str(src: &str) -> Option<Version> {
+        let src
+            = src.trim();
+
+        if !is_strict_version(src) {
+            return None;
+        }
+
+        Version::from_file_string(src).ok()
+    }
+
     pub fn next_major(&self) -> Version {
         Version {
             major: self.major + 1,
@@ -253,6 +270,89 @@ impl PartialOrd for Version {
     fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
         Some(self.cmp(other))
     }
+}
+
+/// Checks a version against node-semver's strict grammar:
+/// `v?N.N.N(-ID(.ID)*)?(+BUILD(.BUILD)*)?`, where numbers (including numeric
+/// prerelease identifiers) can't have leading zeros.
+fn is_strict_version(src: &str) -> bool {
+    let bytes
+        = src.as_bytes();
+
+    let mut index
+        = usize::from(bytes.first() == Some(&b'v'));
+
+    // Consumes the longest run of bytes matching `predicate` and returns it
+    let consume = |index: &mut usize, predicate: fn(&u8) -> bool| -> Option<&[u8]> {
+        let start
+            = *index;
+
+        while bytes.get(*index).is_some_and(predicate) {
+            *index += 1;
+        }
+
+        (*index > start).then(|| &bytes[start..*index])
+    };
+
+    let identifier
+        = |index: &mut usize| consume(index, |c| c.is_ascii_alphanumeric() || *c == b'-');
+
+    let is_number
+        = |id: &[u8]| id.iter().all(u8::is_ascii_digit);
+    let has_leading_zero
+        = |id: &[u8]| id.len() > 1 && id[0] == b'0';
+
+    for component in 0..3 {
+        if component > 0 {
+            if bytes.get(index) != Some(&b'.') {
+                return false;
+            }
+
+            index += 1;
+        }
+
+        match consume(&mut index, u8::is_ascii_digit) {
+            Some(id) if !has_leading_zero(id)
+                => {},
+
+            _
+                => return false,
+        }
+    }
+
+    if bytes.get(index) == Some(&b'-') {
+        loop {
+            index += 1;
+
+            match identifier(&mut index) {
+                Some(id) if !is_number(id) || !has_leading_zero(id)
+                    => {},
+
+                _
+                    => return false,
+            }
+
+            if bytes.get(index) != Some(&b'.') {
+                break;
+            }
+        }
+    }
+
+    if bytes.get(index) == Some(&b'+') {
+        loop {
+            index += 1;
+
+            if identifier(&mut index).is_none() {
+                return false;
+            }
+
+            if bytes.get(index) != Some(&b'.') {
+                break;
+            }
+        }
+    }
+
+    index == bytes.len()
 }
 
 impl FromFileString for Version {
