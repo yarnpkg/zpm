@@ -1,5 +1,6 @@
 use std::{collections::BTreeSet, fs::{FileType, Metadata}};
 
+use zpm_switch::get_bin_version;
 use zpm_utils::Path;
 
 use crate::{diff_finder::{CacheState, DiffController, DiffFinder}, error::Error, manifest::{helpers::read_manifest_with_size, Manifest}};
@@ -33,15 +34,24 @@ impl CachedManifestFinder {
         let save_state_path
             = root_path.with_join_str(".yarn/ignore/manifests");
 
+        // The cached manifests are discarded when Yarn gets upgraded, as
+        // the new version may parse some of their fields differently
         let save_state
             = save_state_path
                 .fs_read_prealloc()
                 .ok()
                 .and_then(|save_data| CacheState::from_slice(&save_data).ok())
+                .filter(|save_state: &CacheState<Manifest>| save_state.version == get_bin_version())
                 .unwrap_or_default();
 
+        let mut diff_finder
+            = DiffFinder::new(root_path, roots, save_state);
+
+        diff_finder.state.version
+            = get_bin_version();
+
         Self {
-            diff_finder: DiffFinder::new(root_path, roots, save_state),
+            diff_finder,
             save_state_path,
         }
     }

@@ -2,7 +2,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use zpm_parsers::JsonDocument;
 use zpm_primitives::Locator;
-use zpm_utils::{CollectHash, Hash64, IoResultExt, Path, ToFileString, ToHumanString};
+use zpm_utils::{CollectHash, Hash64, Path, ToFileString, ToHumanString};
 use rkyv::Archive;
 use futures::{future::BoxFuture, stream::FuturesUnordered, FutureExt, StreamExt};
 use serde::{ser::SerializeMap, Deserialize, Deserializer, Serialize};
@@ -214,9 +214,9 @@ impl BuildRequest {
                 let (_has_changed, diff_list)
                     = artifact_finder.rsync()?;
 
-                build_cache_folder
-                    .fs_rm()
-                    .ok_missing()?;
+                if build_cache_folder.fs_exists() {
+                    build_cache_folder.fs_rm()?;
+                }
 
                 build_cache_folder
                     .fs_create_parent()?
@@ -274,8 +274,9 @@ impl BuildState {
         let build_state_path = project
             .build_state_path();
 
-        let build_state_text = build_state_path
-            .fs_read_text_async()
+        // Not going through `fs_read_text_async`: the errors are discarded,
+        // and the file is missing until the first build
+        let build_state_text = tokio::fs::read_to_string(build_state_path.to_path_buf())
             .await
             .unwrap_or_else(|_| "{}".to_owned());
 

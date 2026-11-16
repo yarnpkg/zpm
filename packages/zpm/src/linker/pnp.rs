@@ -257,9 +257,12 @@ pub async fn link_project_pnp<'a>(project: &'a Project, install: &'a Install) ->
     let unplugged_path
         = project.unplugged_path();
 
+    // Not going through `fs_read_dir`, as the folder is often missing and
+    // that shouldn't build a `PathError`
     let mut extraneous_unplugged_packages
-        = unplugged_path.fs_read_dir()
-            .ok_missing()?
+        = std::fs::read_dir(unplugged_path.to_path_buf())
+            .ok_missing()
+            .map_err(zpm_utils::PathError::from)?
             .into_iter()
             .flatten()
             .filter_map(|entry| entry.ok())
