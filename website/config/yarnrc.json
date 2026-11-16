@@ -810,7 +810,7 @@
     "npmScopes": {
       "_package": "@yarnpkg/plugin-npm",
       "title": "Per-scope registry configurations.",
-      "description": "Legacy-compatible per-scope npm registry and authentication settings. New configurations may prefer `packageRules`.\n\nEach key is a scope name, without the leading `@`. Each entry accepts `npmRegistryServer`, `npmPublishRegistry`, `npmAlwaysAuth`, `npmAuthIdent`, and `npmAuthToken`, which apply to the packages of that scope.",
+      "description": "Legacy-compatible per-scope npm registry, authentication, and `npmMinimalAgeGate` settings. New configurations may prefer `packageRules`.\n\nEach key is a scope name, without the leading `@`. Each entry accepts `npmRegistryServer`, `npmPublishRegistry`, `npmAlwaysAuth`, `npmAuthIdent`, `npmAuthToken`, and `npmMinimalAgeGate`, which apply to the packages of that scope. A scope's `npmMinimalAgeGate` replaces the global value for the packages of that scope, and can be stricter or looser (`0` disables the gate); `sourceRules` and `packageRules` still take precedence over it.",
       "type": "object",
       "patternProperties": {
         "^\\S+$": {
@@ -836,6 +836,10 @@
             "npmAuthToken": {
               "_hidden": true,
               "$ref": "#/properties/npmAuthToken"
+            },
+            "npmMinimalAgeGate": {
+              "_hidden": true,
+              "anyOf": [{"$ref": "#/properties/npmMinimalAgeGate"}, {"type": "null"}]
             }
           }
         }
@@ -858,6 +862,15 @@
             "my-company": {
               "npmPublishRegistry": "https://npm.pkg.github.com",
               "npmRegistryServer": "https://registry.npmjs.org"
+            }
+          }
+        },
+        {
+          "description": "Install fresh releases of an internal scope immediately.",
+          "value": {
+            "my-company": {
+              "npmRegistryServer": "https://npm.pkg.github.com",
+              "npmMinimalAgeGate": "0"
             }
           }
         }
@@ -1532,7 +1545,7 @@
     "npmMinimalAgeGate": {
       "_package": "@yarnpkg/plugin-npm",
       "title": "Minimum package version age required before installation.",
-      "description": "Versions newer than this duration won't be considered for installation unless they are preapproved. This can reduce exposure to newly-published supply-chain incidents.",
+      "description": "Versions newer than this duration won't be considered for installation unless they are preapproved. This can reduce exposure to newly-published supply-chain incidents. Durations take a unit (`ms`, `s`, `m`, `h`, `d`, `w`); `0` disables the gate. The value can be overridden per scope (`npmScopes`), per registry (`sourceRules`), and per package (`packageRules`), in increasing order of precedence; `--no-time-gate` on `yarn add` and `yarn up` disables all of them.",
       "type": "string",
       "default": "1d",
       "_examples": [

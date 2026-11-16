@@ -902,6 +902,9 @@ impl Settings {
     pub fn disable_age_gate(&mut self) {
         self.npm_minimal_age_gate.force(std::time::Duration::ZERO, Source::Cli);
 
+        for scope in self.npm_scopes.values_mut() {
+            scope.npm_minimal_age_gate.value = None;
+        }
         for rule in &mut self.source_rules {
             rule.npm_minimal_age_gate.value = None;
         }

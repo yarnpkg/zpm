@@ -304,6 +304,12 @@ pub fn get_minimal_age_gate(config: &Configuration, registry: &str, ident: &Iden
     let mut value
         = config.settings.npm_minimal_age_gate.value;
 
+    if let Some(scope_settings) = legacy_scope_settings(config, Some(ident)) {
+        if let Some(next) = scope_settings.npm_minimal_age_gate.value {
+            value = next;
+        }
+    }
+
     for rule in &config.settings.source_rules {
         if source_rule_matches(rule, EcosystemFilter::Npm, registry) {
             if let Some(next) = rule.npm_minimal_age_gate.value {

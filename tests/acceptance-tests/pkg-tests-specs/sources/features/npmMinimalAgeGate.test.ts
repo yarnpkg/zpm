@@ -1,5 +1,5 @@
 const {
-  fs: {writeFile},
+  fs: {writeFile, writeJson},
   tests: {startPackageServer},
 } = require(`pkg-tests-core`);
 
@@ -514,6 +514,311 @@ describe(`Features`, () => {
           await expect(source(`require('@scoped/release-date/package.json')`)).resolves.toMatchObject({
             name: `@scoped/release-date`,
             version: `1.1.0`,
+          });
+        }),
+      );
+    });
+
+    // The global npmMinimalAgeGate is passed through the environment (rather
+    // than written in the rc file) because the test environment already sets
+    // YARN_NPM_MINIMAL_AGE_GATE, which would take precedence over the file.
+    describe(`npmScopes override`, () => {
+      test(
+        `scope override tightens the gate beyond the global value`,
+        makeTemporaryEnv({}, {
+          npmMinimalAgeGate: `1m`,
+        }, async ({path, run}) => {
+          const registryUrl = await startPackageServer();
+          await writeJson(`${path}/.yarnrc.yml`, {
+            npmScopes: {
+              scoped: {
+                npmRegistryServer: registryUrl,
+                npmMinimalAgeGate: `1d`,
+              },
+            },
+          });
+
+          await expect(run(`add`, `@scoped/release-date@1.1.1`)).rejects.toThrowError(`No candidates found`);
+        }),
+      );
+
+      test(
+        `scope override loosens the gate below the global value`,
+        makeTemporaryEnv({}, {
+          npmMinimalAgeGate: `1d`,
+        }, async ({path, run, source}) => {
+          const registryUrl = await startPackageServer();
+          await writeJson(`${path}/.yarnrc.yml`, {
+            npmScopes: {
+              scoped: {
+                npmRegistryServer: registryUrl,
+                npmMinimalAgeGate: 0,
+              },
+            },
+          });
+
+          await run(`add`, `@scoped/release-date@^1.0.0`);
+
+          await expect(source(`require('@scoped/release-date/package.json')`)).resolves.toMatchObject({
+            name: `@scoped/release-date`,
+            version: `1.1.2`,
+          });
+        }),
+      );
+
+      test(
+        `scope override does not affect unscoped packages`,
+        makeTemporaryEnv({}, {
+          npmMinimalAgeGate: `1d`,
+        }, async ({path, run, source}) => {
+          await writeJson(`${path}/.yarnrc.yml`, {
+            npmScopes: {
+              scoped: {
+                npmMinimalAgeGate: 0,
+              },
+            },
+          });
+
+          await run(`add`, `release-date@^1.0.0`);
+
+          await expect(source(`require('release-date/package.json')`)).resolves.toMatchObject({
+            name: `release-date`,
+            version: `1.1.0`,
+          });
+        }),
+      );
+
+      test(
+        `override on a different scope does not leak`,
+        makeTemporaryEnv({}, {
+          npmMinimalAgeGate: `1d`,
+        }, async ({path, run}) => {
+          await writeJson(`${path}/.yarnrc.yml`, {
+            npmScopes: {
+              other: {
+                npmMinimalAgeGate: 0,
+              },
+            },
+          });
+
+          await expect(run(`add`, `@scoped/release-date@1.1.1`)).rejects.toThrowError(`No candidates found`);
+        }),
+      );
+
+      test(
+        `scope override tightens the gate even when the global is disabled`,
+        makeTemporaryEnv({}, {
+          npmMinimalAgeGate: 0,
+        }, async ({path, run}) => {
+          const registryUrl = await startPackageServer();
+          await writeJson(`${path}/.yarnrc.yml`, {
+            npmScopes: {
+              scoped: {
+                npmRegistryServer: registryUrl,
+                npmMinimalAgeGate: `1d`,
+              },
+            },
+          });
+
+          await expect(run(`add`, `@scoped/release-date@1.1.1`)).rejects.toThrowError(`No candidates found`);
+        }),
+      );
+
+      test(
+        `--no-time-gate bypasses scope override`,
+        makeTemporaryEnv({}, {
+          npmMinimalAgeGate: `1d`,
+        }, async ({path, run, source}) => {
+          const registryUrl = await startPackageServer();
+          await writeJson(`${path}/.yarnrc.yml`, {
+            npmScopes: {
+              scoped: {
+                npmRegistryServer: registryUrl,
+                npmMinimalAgeGate: `7d`,
+              },
+            },
+          });
+
+          await run(`add`, `--no-time-gate`, `@scoped/release-date@1.1.2`);
+
+          await expect(source(`require('@scoped/release-date/package.json')`)).resolves.toMatchObject({
+            name: `@scoped/release-date`,
+            version: `1.1.2`,
+          });
+        }),
+      );
+
+      test(
+        `it should expose the scope override through yarn config get`,
+        makeTemporaryEnv({}, async ({path, run}) => {
+          await writeFile(`${path}/.yarnrc.yml`, [
+            `npmScopes:`,
+            `  scoped:`,
+            `    npmMinimalAgeGate: 7d`,
+          ].join(`\n`));
+
+          await expect(run(`config`, `get`, `npmScopes.scoped.npmMinimalAgeGate`)).resolves.toMatchObject({
+            stdout: `604800s\n`,
+          });
+        }),
+      );
+
+      test(
+        `package rules take precedence over the scope override`,
+        makeTemporaryEnv({}, {
+          npmMinimalAgeGate: `1d`,
+        }, async ({path, run, source}) => {
+          await writeJson(`${path}/.yarnrc.yml`, {
+            npmScopes: {
+              scoped: {
+                npmMinimalAgeGate: `7d`,
+              },
+            },
+            packageRules: [{
+              packageFilter: `@scoped/*`,
+              npmMinimalAgeGate: 0,
+            }],
+          });
+
+          await run(`add`, `@scoped/release-date@^1.0.0`);
+
+          await expect(source(`require('@scoped/release-date/package.json')`)).resolves.toMatchObject({
+            name: `@scoped/release-date`,
+            version: `1.1.2`,
+          });
+        }),
+      );
+
+      test(
+        `source rules take precedence over the scope override`,
+        makeTemporaryEnv({}, {
+          npmMinimalAgeGate: `1d`,
+        }, async ({path, run}) => {
+          await writeJson(`${path}/.yarnrc.yml`, {
+            npmScopes: {
+              scoped: {
+                npmMinimalAgeGate: 0,
+              },
+            },
+            sourceRules: [{
+              ecosystemFilter: `npm`,
+              npmMinimalAgeGate: `1d`,
+            }],
+          });
+
+          await expect(run(`add`, `@scoped/release-date@1.1.1`)).rejects.toThrowError(`No candidates found`);
+        }),
+      );
+    });
+
+    describe(`packageRules override`, () => {
+      test(
+        `package rule tightens the gate beyond the global value`,
+        makeTemporaryEnv({}, {
+          npmMinimalAgeGate: `1m`,
+        }, async ({path, run}) => {
+          await writeJson(`${path}/.yarnrc.yml`, {
+            packageRules: [{
+              packageFilter: `@scoped/*`,
+              npmMinimalAgeGate: `1d`,
+            }],
+          });
+
+          await expect(run(`add`, `@scoped/release-date@1.1.1`)).rejects.toThrowError(`No candidates found`);
+        }),
+      );
+
+      test(
+        `package rule loosens the gate below the global value`,
+        makeTemporaryEnv({}, {
+          npmMinimalAgeGate: `1d`,
+        }, async ({path, run, source}) => {
+          await writeJson(`${path}/.yarnrc.yml`, {
+            packageRules: [{
+              packageFilter: `@scoped/*`,
+              npmMinimalAgeGate: 0,
+            }],
+          });
+
+          await run(`add`, `@scoped/release-date@^1.0.0`);
+
+          await expect(source(`require('@scoped/release-date/package.json')`)).resolves.toMatchObject({
+            name: `@scoped/release-date`,
+            version: `1.1.2`,
+          });
+        }),
+      );
+
+      test(
+        `package rule does not affect packages it doesn't match`,
+        makeTemporaryEnv({}, {
+          npmMinimalAgeGate: `1d`,
+        }, async ({path, run, source}) => {
+          await writeJson(`${path}/.yarnrc.yml`, {
+            packageRules: [{
+              packageFilter: `@scoped/*`,
+              npmMinimalAgeGate: 0,
+            }],
+          });
+
+          await run(`add`, `release-date@^1.0.0`);
+
+          await expect(source(`require('release-date/package.json')`)).resolves.toMatchObject({
+            name: `release-date`,
+            version: `1.1.0`,
+          });
+        }),
+      );
+
+      test(
+        `package rule on a different scope does not leak`,
+        makeTemporaryEnv({}, {
+          npmMinimalAgeGate: `1d`,
+        }, async ({path, run}) => {
+          await writeJson(`${path}/.yarnrc.yml`, {
+            packageRules: [{
+              packageFilter: `@other/*`,
+              npmMinimalAgeGate: 0,
+            }],
+          });
+
+          await expect(run(`add`, `@scoped/release-date@1.1.1`)).rejects.toThrowError(`No candidates found`);
+        }),
+      );
+
+      test(
+        `package rule tightens the gate even when the global is disabled`,
+        makeTemporaryEnv({}, {
+          npmMinimalAgeGate: 0,
+        }, async ({path, run}) => {
+          await writeJson(`${path}/.yarnrc.yml`, {
+            packageRules: [{
+              packageFilter: `@scoped/*`,
+              npmMinimalAgeGate: `1d`,
+            }],
+          });
+
+          await expect(run(`add`, `@scoped/release-date@1.1.1`)).rejects.toThrowError(`No candidates found`);
+        }),
+      );
+
+      test(
+        `--no-time-gate bypasses package rules`,
+        makeTemporaryEnv({}, {
+          npmMinimalAgeGate: `1d`,
+        }, async ({path, run, source}) => {
+          await writeJson(`${path}/.yarnrc.yml`, {
+            packageRules: [{
+              packageFilter: `@scoped/*`,
+              npmMinimalAgeGate: `7d`,
+            }],
+          });
+
+          await run(`add`, `--no-time-gate`, `@scoped/release-date@1.1.2`);
+
+          await expect(source(`require('@scoped/release-date/package.json')`)).resolves.toMatchObject({
+            name: `@scoped/release-date`,
+            version: `1.1.2`,
           });
         }),
       );
