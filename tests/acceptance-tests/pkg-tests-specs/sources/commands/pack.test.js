@@ -579,6 +579,47 @@ describe(`Commands`, () => {
       }),
     );
 
+    for (const [indentName, indent] of [[`2 spaces`, 2], [`4 spaces`, 4], [`tabs`, `\t`]]) {
+      test(
+        `it should indent the publishConfig overrides like the rest of the manifest (${indentName})`,
+        makeTemporaryEnv({}, async ({path, run, source}) => {
+          await xfs.writeFilePromise(`${path}/package.json`, `${JSON.stringify({
+            name: `pkg`,
+            version: `1.0.0`,
+            main: `./src/index.ts`,
+            exports: `./src/index.ts`,
+            bin: {pkg: `./src/cli.ts`},
+            publishConfig: {
+              main: `./lib/index.js`,
+              exports: {[`.`]: {import: {default: `./lib/index.mjs`}}},
+              bin: {pkg: `./lib/cli.js`},
+              browser: {[`./lib/node.js`]: `./lib/browser.js`},
+            },
+          }, null, indent)}\n`);
+
+          await run(`install`);
+          await run(`pack`);
+
+          await fsUtils.unpackToDirectory(path, `${path}/package.tgz`);
+
+          await expect(xfs.readFilePromise(`${path}/package/package.json`, `utf8`)).resolves.toEqual(`${JSON.stringify({
+            name: `pkg`,
+            version: `1.0.0`,
+            main: `./lib/index.js`,
+            browser: {[`./lib/node.js`]: `./lib/browser.js`},
+            exports: {[`.`]: {import: {default: `./lib/index.mjs`}}},
+            bin: {pkg: `./lib/cli.js`},
+            publishConfig: {
+              main: `./lib/index.js`,
+              exports: {[`.`]: {import: {default: `./lib/index.mjs`}}},
+              bin: {pkg: `./lib/cli.js`},
+              browser: {[`./lib/node.js`]: `./lib/browser.js`},
+            },
+          }, null, indent)}\n`);
+        }),
+      );
+    }
+
     test(
       `it should preserve the authored key order of the fields overridden from publishConfig`,
       makeTemporaryEnv({

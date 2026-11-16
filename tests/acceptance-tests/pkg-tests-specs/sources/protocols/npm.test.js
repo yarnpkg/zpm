@@ -20,6 +20,23 @@ describe(`Protocols`, () => {
     );
 
     test(
+      `it should ignore unrelated \`requirements\` fields in the package manifests`,
+      makeTemporaryEnv(
+        {
+          dependencies: {[`requirements-field`]: `1.0.0`},
+        },
+        async ({path, run, source}) => {
+          await run(`install`);
+
+          await expect(source(`require('requirements-field')`)).resolves.toMatchObject({
+            name: `requirements-field`,
+            version: `1.0.0`,
+          });
+        },
+      ),
+    );
+
+    test(
       `it should allow prefixing semver ranges with "v"`,
       makeTemporaryEnv(
         {

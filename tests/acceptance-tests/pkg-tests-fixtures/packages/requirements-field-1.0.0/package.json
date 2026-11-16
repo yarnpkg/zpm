@@ -1,0 +1,5 @@
+{
+    "name": "requirements-field",
+    "version": "1.0.0",
+    "requirements": ["python>=3.8"]
+}

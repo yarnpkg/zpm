@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 use serde_with::{DefaultOnError, serde_as};
 use zpm_parsers::JsonDocument;
 use zpm_primitives::{Ident, Locator, Reference};
-use zpm_utils::{Path, Requirements};
+use zpm_utils::Path;
 
 use crate::{
     build, error::Error, fetchers::PackageData, manifest::bin::BinField
@@ -91,9 +91,6 @@ struct Manifest {
 
     #[serde(default)]
     bin: Option<BinField>,
-
-    #[serde(default)]
-    requirements: Requirements,
 
     #[serde(default)]
     prefer_unplugged: Option<bool>,
