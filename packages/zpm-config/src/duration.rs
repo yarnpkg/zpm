@@ -76,7 +76,7 @@ deserialize_in_unit!(deserialize_in_weeks, DurationUnit::Weeks);
 pub(crate) trait DurationSetting: Sized {
     fn from_env_string_with_unit(value: &str, unit: DurationUnit) -> Result<Self, HydrateError>;
 
-    fn hydrate_with_unit(&self, path: &[&str], value_str: &str, unit: DurationUnit) -> Result<AbstractValue<'_>, HydrateError>;
+    fn hydrate_with_unit(path: &[&str], value_str: &str, unit: DurationUnit) -> Result<AbstractValue<'static>, HydrateError>;
 }
 
 impl DurationSetting for Setting<std::time::Duration> {
@@ -91,7 +91,7 @@ impl DurationSetting for Setting<std::time::Duration> {
         })
     }
 
-    fn hydrate_with_unit(&self, path: &[&str], value_str: &str, unit: DurationUnit) -> Result<AbstractValue<'_>, HydrateError> {
+    fn hydrate_with_unit(path: &[&str], value_str: &str, unit: DurationUnit) -> Result<AbstractValue<'static>, HydrateError> {
         if let Some(key) = path.first() {
             return Err(HydrateError::KeyNotFound(key.to_string()));
         }
@@ -100,7 +100,7 @@ impl DurationSetting for Setting<std::time::Duration> {
             = parse_duration_with_unit(value_str, unit)
                 .map_err(|e| HydrateError::InvalidValue(e.to_string()))?;
 
-        Ok(AbstractValue::new(value))
+        Ok(AbstractValue::new(crate::FileString(value)))
     }
 }
 
@@ -117,7 +117,7 @@ impl DurationSetting for Setting<Option<std::time::Duration>> {
         })
     }
 
-    fn hydrate_with_unit(&self, path: &[&str], value_str: &str, unit: DurationUnit) -> Result<AbstractValue<'_>, HydrateError> {
+    fn hydrate_with_unit(path: &[&str], value_str: &str, unit: DurationUnit) -> Result<AbstractValue<'static>, HydrateError> {
         if let Some(key) = path.first() {
             return Err(HydrateError::KeyNotFound(key.to_string()));
         }
@@ -127,7 +127,7 @@ impl DurationSetting for Setting<Option<std::time::Duration>> {
             value_str => Some(parse_duration_with_unit(value_str, unit).map_err(|e| HydrateError::InvalidValue(e.to_string()))?),
         };
 
-        Ok(AbstractValue::new(value))
+        Ok(AbstractValue::new(value.map(crate::FileString)))
     }
 }
 
@@ -162,7 +162,8 @@ mod tests {
             Partial::Missing,
             Partial::Value(project),
             || panic!("No configuration found"),
-        )
+        ).apply_env_overrides(&context)
+            .expect("The environment should be valid")
     }
 
     #[test]
@@ -251,11 +252,8 @@ mod tests {
 
     #[test]
     fn hydrate_should_use_the_setting_unit() {
-        let settings
-            = settings_from("{}", &[]);
-
         let value
-            = settings.hydrate(&["npmMinimalAgeGate"], "1440").unwrap();
+            = <Settings as MergeSettings>::hydrate(&["npmMinimalAgeGate"], "1440").unwrap();
 
         assert_eq!(value.export(false), zpm_utils::ToHumanString::to_print_string(&(1440 * MINUTE)));
     }

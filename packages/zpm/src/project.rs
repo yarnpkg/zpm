@@ -4,7 +4,7 @@ use colored::Colorize;
 use globset::{GlobBuilder, GlobSetBuilder};
 use zpm_config::{Configuration, ConfigurationContext, IslandLinker, Settings, Source};
 use zpm_macro_enum::zpm_enum;
-use zpm_parsers::JsonDocument;
+use zpm_parsers::{DataDocument, JsonDocument};
 use zpm_primitives::{Descriptor, Ident, Locator, Range, Reference, WorkspaceIdentReference, WorkspaceMagicRange, WorkspacePathReference};
 use zpm_switch::get_bin_version;
 use zpm_tasks::{apply_workspace_defaults, extract_workspace_defaults, parse as parse_taskfile, strip_workspace_defaults, ResolvedTasks, Task, TaskFile, TaskId, TaskName};
@@ -22,6 +22,8 @@ use crate::{
     http_npm,
     install::{InstallContext, InstallManager, InstallResult, InstallState},
     lockfile::{Lockfile, LockfileMetadata, LockfileProject, from_legacy_berry_lockfile, from_pnpm_node_modules},
+    lockfile_classic::{from_classic_lockfile, is_classic_lockfile},
+    lockfile_migration::{LockfileMigration, migrate_legacy_lockfile_settings},
     manifest::{Manifest, helpers::read_manifest_with_size},
     manifest_finder::CachedManifestFinder,
     npm::NpmEntryExt,
@@ -220,6 +222,17 @@ impl Project {
         if config.settings.enable_migration_mode.value {
             config.settings.enable_global_cache.value = true;
             config.settings.enable_global_cache.source = config.settings.enable_migration_mode.source;
+
+            // The root lockfile keeps the format of the release we migrate
+            // from, so we can't persist the lockfile migration settings; we
+            // apply them to every command instead (so that the install config
+            // hash stays stable between installs).
+            if let Some(migration) = LockfileMigration::detect(&config, &project_cwd)? {
+                let source
+                    = config.settings.enable_migration_mode.source;
+
+                migration.apply(&mut config.settings, source);
+            }
         }
 
         let clone_concurrency
@@ -378,7 +391,37 @@ impl Project {
             let source_lockfile
                 = Project::lockfile_from(&source_lockfile_path, &self.config)?;
 
-            lockfile.resolutions.extend(source_lockfile.resolutions.into_iter());
+            // The resolutions from the main lockfile take precedence so that
+            // migrated installs follow the changes made by the other
+            // contributors. They must come with their entries, or with a
+            // lockfile version that tells the install to only use them as
+            // pins (lockfiles from other Yarn releases don't have usable
+            // entries).
+            let source_has_entries
+                = source_lockfile.metadata.version == lockfile.metadata.version;
+
+            let mut requires_pinning
+                = false;
+
+            for (descriptor, locator) in source_lockfile.resolutions {
+                if !lockfile.entries.contains_key(&locator) {
+                    match source_lockfile.entries.get(&locator) {
+                        Some(entry) if source_has_entries => {
+                            lockfile.entries.insert(locator.clone(), entry.clone());
+                        },
+
+                        _ => {
+                            requires_pinning = true;
+                        },
+                    }
+                }
+
+                lockfile.resolutions.insert(descriptor, locator);
+            }
+
+            if requires_pinning {
+                lockfile.metadata.version = source_lockfile.metadata.version;
+            }
         }
 
         Ok(lockfile)
@@ -404,6 +447,27 @@ impl Project {
 
         if src.is_empty() {
             return Ok(Lockfile::new());
+        }
+
+        if is_classic_lockfile(&src) {
+            // Migrating the lockfile is a modification like any other, but
+            // we prefer to explain why it happens rather than show a diff
+            if config.settings.enable_immutable_installs.value {
+                return Err(Error::ClassicLockfileImmutableMigration);
+            }
+
+            let import
+                = from_classic_lockfile(&src, config)?;
+
+            crate::report::if_active(|report| {
+                report.info(format!("Migrating from a Yarn Classic lockfile; {} descriptors will keep the version they were locked to", import.pinned_count));
+
+                for warning in import.warnings {
+                    report.warn(warning);
+                }
+            });
+
+            return Ok(import.lockfile);
         }
 
         if src.starts_with('#') {
@@ -483,9 +547,11 @@ impl Project {
         let lockfile_path
             = self.lockfile_path();
 
-        let current_content = lockfile_path
-            .fs_read()
-            .ok_missing()?;
+        // The lockfile is missing on first install; work on the io::Result
+        // so that this doesn't build an error
+        let current_content
+            = std::fs::read(lockfile_path.to_path_buf())
+                .ok_missing()?;
 
         let contents
             = format!("{}\n", JsonDocument::to_string_pretty(lockfile)?);
@@ -499,6 +565,19 @@ impl Project {
 
         if self.config.settings.enable_immutable_installs.value {
             if current_content.as_ref().is_some_and(|current| current.as_slice() == contents.as_bytes()) {
+                return Ok(());
+            }
+
+            // The migration lockfile is derived from the main lockfile (which
+            // may have been updated by other contributors since it was last
+            // written, or may not have been converted yet), so immutable
+            // installs are allowed to refresh it as long as they don't add or
+            // change any resolution
+            if self.config.settings.enable_migration_mode.value && self.is_lockfile_refresh(lockfile)? {
+                lockfile_path
+                    .fs_create_parent()?
+                    .fs_write(contents)?;
+
                 return Ok(());
             }
 
@@ -516,10 +595,28 @@ impl Project {
                 None => Error::ImmutableLockfileCreation,
             });
         } else if current_content.as_deref() != Some(contents.as_bytes()) {
-            lockfile_path.fs_write(contents)?;
+            // The migration lockfile lives in a folder that may not exist yet
+            lockfile_path
+                .fs_create_parent()?
+                .fs_write(contents)?;
         }
 
         Ok(())
+    }
+
+    fn is_lockfile_refresh(&self, lockfile: &Lockfile) -> Result<bool, Error> {
+        let recorded_lockfile
+            = self.lockfile()?;
+
+        // Workspaces are always resolved from the project itself, and
+        // builtin patches follow the resolution of the package they patch
+        // (other Yarn releases also record them in a different format)
+        let is_refresh = lockfile.resolutions.iter()
+            .filter(|(_, locator)| !locator.reference.is_workspace_reference())
+            .filter(|(descriptor, _)| !matches!(&descriptor.range, Range::Patch(params) if params.path == "<builtin>"))
+            .all(|(descriptor, locator)| recorded_lockfile.resolutions.get(descriptor) == Some(locator));
+
+        Ok(is_refresh)
     }
 
     pub fn package_cache(&self) -> Result<CompositeCache, Error> {
@@ -549,8 +646,11 @@ impl Project {
         let enable_immutable_cache
             = self.config.settings.enable_immutable_cache.value;
 
+        // We only prune the local cache when it lives in the folder Yarn picks by
+        // default; a custom cacheFolder may be shared or contain unrelated files.
         let cleanable_local_cache
-            = matches!(self.config.settings.cache_folder.source, Source::Default);
+            = self.config.settings.enable_local_cache_cleanup.value
+                && matches!(self.config.settings.cache_folder.source, Source::Default);
 
         let name_suffix = match compression_algorithm {
             Some(zpm_formats::CompressionAlgorithm::Deflate(_)) => format!("-d{}", compression_algorithm.unwrap().to_file_string()),
@@ -1296,10 +1396,28 @@ impl Project {
         Ok(true)
     }
 
-    /// Modification time of the lockfile, in nanoseconds since the
-    /// epoch; `None` when the lockfile doesn't exist.
+    /// Modification time of the lockfile (in migration mode, the most
+    /// recent of the migration and main lockfiles), in nanoseconds since
+    /// the epoch; `None` when the lockfile doesn't exist.
     pub fn lockfile_changed_at(&self) -> Result<Option<u128>, Error> {
-        let metadata = match self.lockfile_path().fs_metadata() {
+        let Some(changed_at) = Project::file_changed_at(&self.lockfile_path())? else {
+            return Ok(None);
+        };
+
+        // Migrated installs also read the main lockfile, so the install must
+        // be considered stale when it changes (for example after a pull)
+        if self.config.settings.enable_migration_mode.value {
+            let source_changed_at
+                = Project::file_changed_at(&self.project_cwd.with_join_str(LOCKFILE_NAME))?;
+
+            return Ok(Some(changed_at.max(source_changed_at.unwrap_or(0))));
+        }
+
+        Ok(Some(changed_at))
+    }
+
+    fn file_changed_at(path: &Path) -> Result<Option<u128>, Error> {
+        let metadata = match path.fs_metadata() {
             Ok(metadata) => metadata,
             Err(err) => return match err.io_kind() {
                 Some(ErrorKind::NotFound) | Some(ErrorKind::NotADirectory) => Ok(None),
@@ -1451,6 +1569,17 @@ impl Project {
     }
 
     pub fn package_visible_binaries(&self, locator: &Locator) -> Result<BTreeMap<String, Binary>, Error> {
+        let binaries = self.package_visible_binaries_with_providers(locator)?
+            .into_iter()
+            .map(|(name, (_, binary))| (name, binary))
+            .collect();
+
+        Ok(binaries)
+    }
+
+    /// Same as `package_visible_binaries`, but also returns the locator of
+    /// the package that provides each binary.
+    pub fn package_visible_binaries_with_providers(&self, locator: &Locator) -> Result<BTreeMap<String, (Locator, Binary)>, Error> {
         let install_state = self.install_state.as_ref()
             .ok_or(Error::InstallStateNotFound)?;
 
@@ -1464,21 +1593,23 @@ impl Project {
             = BTreeMap::new();
 
         for (ident, descriptor) in &resolution.dependencies {
-            let locator = install_state.resolution_tree.descriptor_to_locator.get(descriptor)
+            let dependency_locator = install_state.resolution_tree.descriptor_to_locator.get(descriptor)
                 .expect("Expected resolution to be found in the resolution tree");
 
             // Packages may be missing from locations_by_package when they
             // haven't been installed due to being unsupported on the current
             // platform. In this case, we ignore its binaries.
             //
-            if let Some(dependency_location) = self.find_visible_dependency_location(package_location, ident, locator)? {
-                all_bins.extend(self.package_binaries_at(locator, &dependency_location)?);
+            if let Some(dependency_location) = self.find_visible_dependency_location(package_location, ident, dependency_locator)? {
+                all_bins.extend(self.package_binaries_at(dependency_locator, &dependency_location)?.into_iter()
+                    .map(|(name, binary)| (name, (dependency_locator.clone(), binary))));
             }
         }
 
-        all_bins.extend(self.package_binaries_at(locator, package_location)?);
+        all_bins.extend(self.package_binaries_at(locator, package_location)?.into_iter()
+            .map(|(name, binary)| (name, (locator.clone(), binary))));
 
-        Ok(BTreeMap::from_iter(all_bins.into_iter()))
+        Ok(all_bins)
     }
 
     pub fn find_binary(&self, name: &str) -> Result<Binary, Error> {
@@ -1665,12 +1796,58 @@ impl Project {
         Ok(())
     }
 
+    /**
+     * Yarn Classic projects aren't expected to be compatible with Plug'n'Play,
+     * so when we migrate them we default to the node-modules linker, unless
+     * they already picked a linker.
+     */
+    fn migrate_classic_project_settings(&mut self) -> Result<bool, Error> {
+        if self.config.settings.enable_immutable_installs.value || !matches!(self.config.settings.node_linker.source, Source::Default) {
+            return Ok(false);
+        }
+
+        let is_classic_project
+            = self.lockfile_path()
+                .fs_read_text()
+                .ok_missing()?
+                .is_some_and(|src| is_classic_lockfile(&src));
+
+        if !is_classic_project {
+            return Ok(false);
+        }
+
+        let Some(rc_path) = self.config.project_config_path.clone() else {
+            return Ok(false);
+        };
+
+        let document = rc_path
+            .fs_read_text()
+            .ok_missing()?
+            .unwrap_or_default();
+
+        let updated_document = DataDocument::update_document_field(
+            &document,
+            zpm_parsers::Path::from(["nodeLinker"]),
+            zpm_parsers::Value::String("node-modules".to_string()),
+        )?;
+
+        rc_path
+            .fs_change(&updated_document, false)?;
+
+        self.config.settings.node_linker.force(zpm_config::NodeLinker::NodeModules, Source::Project);
+
+        Ok(true)
+    }
+
     pub async fn run_install(&mut self, options: RunInstallOptions) -> Result<InstallResult, Error> {
         // Useful for optimization purposes as we can reuse some information such as content flags.
         // Discard errors; worst case scenario we just recompute the whole state from scratch.
         if self.install_state.is_none() {
             let _ = self.import_install_state();
         }
+
+        let migrated_classic_settings
+            = self.migrate_classic_project_settings()?;
 
         let report = StreamReport::new(StreamReportConfig {
             include_version: true,
@@ -1689,6 +1866,17 @@ impl Project {
             = background_writes.clone();
 
         let install_outcome = with_report_result(report, async {
+            // Must run before anything reads the settings it may change (git
+            // approvals, age gate, build scripts), since the legacy lockfile
+            // gets replaced at the end of this install.
+            migrate_legacy_lockfile_settings(self)?;
+
+            if migrated_classic_settings {
+                crate::report::if_active(|report| {
+                    report.info(format!("Set {} in your configuration, since Yarn Classic projects expect a node_modules folder", DataType::Code.colorize("nodeLinker: node-modules")));
+                });
+            }
+
             let package_cache
                 = self.package_cache()?;
 

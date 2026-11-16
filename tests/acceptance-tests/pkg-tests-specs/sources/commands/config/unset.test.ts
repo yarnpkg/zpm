@@ -76,5 +76,59 @@ describe(`Commands`, () => {
         });
       }),
     );
+
+    test(
+      `it should remove the entries left empty by unsetting their last key`,
+      makeTemporaryEnv({}, async ({path, run, source}) => {
+        await run(`config`, `set`, `npmScopes.foo.npmAlwaysAuth`, `true`);
+        await run(`config`, `set`, `npmScopes.bar.npmAlwaysAuth`, `false`);
+        await run(`config`, `set`, `npmRegistries["https://example.org"].npmAuthToken`, `secret`);
+
+        await run(`config`, `unset`, `npmScopes.foo.npmAlwaysAuth`);
+
+        await expect(xfs.readFilePromise(`${path}/.yarnrc.yml` as PortablePath, `utf8`)).resolves.toEqual([
+          `npmRegistries:\n`,
+          `  "https://example.org":\n`,
+          `    npmAuthToken: secret\n`,
+          `npmScopes:\n`,
+          `  bar:\n`,
+          `    npmAlwaysAuth: false\n`,
+        ].join(``));
+
+        await run(`config`, `unset`, `npmRegistries["https://example.org"].npmAuthToken`);
+        await run(`config`, `unset`, `npmScopes.bar.npmAlwaysAuth`);
+
+        await expect(xfs.readFilePromise(`${path}/.yarnrc.yml` as PortablePath, `utf8`)).resolves.toEqual(``);
+      }),
+    );
+
+    test(
+      `it should unset durations and awkward keys written by config set`,
+      makeTemporaryEnv({}, async ({path, run, source}) => {
+        await xfs.writeFilePromise(`${path}/.yarnrc.yml` as PortablePath, `# Keep me\nenableTelemetry: false\n`);
+
+        await run(`config`, `set`, `npmMinimalAgeGate`, `3h`);
+        await run(`config`, `set`, `packageExtensions`, `--json`, JSON.stringify({[`@scoped/no-deps@*`]: {dependencies: {[`no-deps`]: `*`}}}));
+
+        await run(`config`, `unset`, `packageExtensions["@scoped/no-deps@*"]`);
+        await run(`config`, `unset`, `npmMinimalAgeGate`);
+
+        await expect(xfs.readFilePromise(`${path}/.yarnrc.yml` as PortablePath, `utf8`)).resolves.toEqual(`# Keep me\nenableTelemetry: false\n`);
+      }),
+    );
+
+    test(
+      `it should unset nested entries from the home configuration`,
+      makeTemporaryEnv({}, async ({path, run, source}) => {
+        const tmpDir = await xfs.mktempPromise();
+        const homeRc = `${path}/../.yarnrc.yml` as PortablePath;
+
+        await run(`config`, `set`, `-H`, `npmScopes.foo.npmAlwaysAuth`, `true`, {cwd: tmpDir});
+        await expect(xfs.readFilePromise(homeRc, `utf8`)).resolves.toEqual(`npmScopes:\n  foo:\n    npmAlwaysAuth: true\n`);
+
+        await run(`config`, `unset`, `-H`, `npmScopes.foo.npmAlwaysAuth`, {cwd: tmpDir});
+        await expect(xfs.readFilePromise(homeRc, `utf8`)).resolves.toEqual(``);
+      }),
+    );
   });
 });

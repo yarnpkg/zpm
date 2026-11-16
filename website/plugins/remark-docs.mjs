@@ -30,6 +30,10 @@ function slugify(s) {
     .replace(/^-|-$/g, ``);
 }
 
+// Protocols with a page in src/docs/advanced/general-reference/protocols; inline
+// `foo:` codes for any other protocol (such as `virtual:`) aren't turned into links
+const PROTOCOL_PAGES = new Set([`catalog`, `exec`, `file`, `git`, `jsr`, `link`, `npm`, `patch`, `portal`, `pypi`, `workspace`]);
+
 const LANG_ALIASES = {js: `javascript`, ts: `typescript`, sh: `shell`};
 
 let _hlPromise;
@@ -241,7 +245,7 @@ export default function remarkDocs() {
     visit(tree, `inlineCode`, (node, index, parent) => {
       if (!parent || parent.type === `link`) return;
       const match = node.value.match(/^([a-z]+):$/);
-      if (!match) return;
+      if (!match || !PROTOCOL_PAGES.has(match[1])) return;
       parent.children[index] = {
         type: `link`,
         url: `/protocol/${match[1]}.html`,

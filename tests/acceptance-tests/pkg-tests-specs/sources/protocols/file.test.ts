@@ -37,6 +37,31 @@ describe(`Protocols`, () => {
     );
 
     test(
+      `it should ignore unrelated \`requirements\` fields in file:./folder manifests`,
+      makeTemporaryEnv({
+        dependencies: {
+          [`pkg`]: `file:./folder`,
+        },
+      }, async ({path, run, source}) => {
+        await xfs.mkdirPromise(`${path}/folder` as PortablePath);
+
+        await xfs.writeJsonPromise(`${path}/folder/package.json` as PortablePath, {
+          name: `pkg`,
+          version: `1.0.0`,
+          requirements: {os: `any`},
+        });
+
+        await xfs.writeFilePromise(`${path}/folder/index.js` as PortablePath, `
+          module.exports = 42;
+        `);
+
+        await run(`install`);
+
+        await expect(source(`require('pkg')`)).resolves.toEqual(42);
+      }),
+    );
+
+    test(
       `it should reuse a file:./folder cache entry when the cache is immutable`,
       makeTemporaryEnv({
         dependencies: {

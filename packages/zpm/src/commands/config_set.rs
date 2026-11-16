@@ -21,6 +21,10 @@ use crate::{
 ///
 /// With `--json`, the value is always parsed as JSON before it is written.
 ///
+/// Values are written in their canonical form, which `yarn config get` also prints: for example durations always get an explicit unit, using the
+/// largest one that represents them exactly (`3h`, `90m`, `1d`, `0s`). The entries of settings accepting arbitrary keys (such as `npmScopes` or
+/// `npmRegistries`) are created when they don't exist yet.
+///
 #[cli::command]
 #[cli::path("config", "set")]
 #[cli::category("Configuration commands")]
@@ -65,19 +69,41 @@ impl ConfigSet {
         {
             let _scope = RedactionScope::new(false);
 
+            // We write the value as the setting type serializes it rather than
+            // as the user typed it, so that it's in its canonical form (for
+            // example durations always get an explicit unit)
+            let hydrate_canonical = |value_str: &str| -> Result<zpm_parsers::Value, Error> {
+                let abstract_value = config.hydrate(&segments, value_str)?;
+                let json_repr = abstract_value.export(true);
+
+                Ok(match JsonDocument::hydrate_from_str::<RawJsonOwnedValue>(&json_repr) {
+                    Ok(parsed) => zpm_parsers::Value::from(&parsed),
+                    Err(_) => zpm_parsers::Value::String(value_str.to_string()),
+                })
+            };
+
             let value = if self.json {
                 let json_value: RawJsonOwnedValue
                     = JsonDocument::hydrate_from_str(&self.value)?;
 
-                zpm_parsers::Value::from(&json_value)
-            } else {
-                let abstract_value = config.hydrate(&segments, &self.value)?;
-                let json_repr = abstract_value.export(true);
+                let value
+                    = zpm_parsers::Value::from(&json_value);
 
-                match JsonDocument::hydrate_from_str::<RawJsonOwnedValue>(&json_repr) {
-                    Ok(parsed) => zpm_parsers::Value::from(&parsed),
-                    Err(_) => zpm_parsers::Value::String(self.value.clone()),
+                // Scalars go through the setting type as well; containers are
+                // written as-is (they get validated when we reload the file)
+                let scalar_str = match &value {
+                    zpm_parsers::Value::String(s) => Some(s.clone()),
+                    zpm_parsers::Value::Number(n) => Some(n.clone()),
+                    zpm_parsers::Value::Bool(b) => Some(b.to_string()),
+                    _ => None,
+                };
+
+                match scalar_str.map(|s| hydrate_canonical(&s)) {
+                    Some(Ok(canonical)) if !matches!(canonical, zpm_parsers::Value::Object(_) | zpm_parsers::Value::Array(_)) => canonical,
+                    _ => value,
                 }
+            } else {
+                hydrate_canonical(&self.value)?
             };
 
             let document
@@ -92,7 +118,7 @@ impl ConfigSet {
                 value,
             )?;
 
-            Configuration::validate(&updated_document)
+            Configuration::validate(&document_path, &updated_document)
                 .map_err(|e| Error::ConfigurationParseError(Arc::new(e)))?;
 
             document_path

@@ -1,9 +1,12 @@
+mod bump;
 mod error;
 mod extract;
 mod range;
 mod version;
 pub mod pubgrub;
 
+pub use bump::BumpStrategy;
+pub use bump::PrereleasePattern;
 pub use error::Error;
 pub use range::Range;
 pub use range::RangeKind;

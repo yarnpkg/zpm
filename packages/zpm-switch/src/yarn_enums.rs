@@ -84,7 +84,9 @@ pub enum Selector {
         channel: Option<Channel>,
     },
 
-    #[pattern("(?<version>.*)")]
+    // Only complete versions; `Version` would also accept partial ones like
+    // `4` or `4.x` (as `4.0.0`), which must be resolved as ranges instead
+    #[pattern(r"(?<version>v?[0-9]+\.[0-9]+\.[0-9]+(?:[-+].*)?)")]
     #[to_file_string(|params| params.version.to_file_string())]
     #[to_print_string(|params| params.version.to_file_string())]
     Version {
@@ -97,4 +99,32 @@ pub enum Selector {
     Range {
         range: zpm_semver::Range,
     },
+}
+
+#[cfg(test)]
+mod tests {
+    use zpm_utils::FromFileString;
+
+    use super::*;
+
+    #[test]
+    fn complete_versions_are_versions() {
+        for selector in ["4.1.2", "v4.1.2", "4.1.2-rc.1", "6.0.0-rc.23"] {
+            assert!(matches!(Selector::from_file_string(selector), Ok(Selector::Version(_))), "{selector}");
+        }
+    }
+
+    #[test]
+    fn partial_versions_are_ranges() {
+        for selector in ["4", "4.x", "4.*", "4.1", "4.1.x", "^4.1", "~4.1.0", ">=4 <5"] {
+            assert!(matches!(Selector::from_file_string(selector), Ok(Selector::Range(_))), "{selector}");
+        }
+    }
+
+    #[test]
+    fn channels_are_channels() {
+        for selector in ["stable", "canary", "berry", "classic", "berry-canary"] {
+            assert!(matches!(Selector::from_file_string(selector), Ok(Selector::Channel(_))), "{selector}");
+        }
+    }
 }
