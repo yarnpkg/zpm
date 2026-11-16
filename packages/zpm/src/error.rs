@@ -538,6 +538,9 @@ pub enum Error {
     #[error("Invalid diff line ({0})")]
     InvalidDiffLine(String),
 
+    #[error("Invalid path in patch file ({0})")]
+    InvalidPatchPath(String),
+
     #[error("Hunk integrity check failed")]
     HunkIntegrityCheckFailed,
 
