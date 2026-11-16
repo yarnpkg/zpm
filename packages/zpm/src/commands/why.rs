@@ -21,15 +21,29 @@ use crate::{
 /// The range must be a valid semver range; protocols (`npm:^1.0.0`) and tags (`latest`) aren't accepted. The package name itself can be a glob
 /// pattern (`@babel/*`).
 ///
-/// - `yarn why lodash` explains why lodash is used in your project.
-/// - `yarn why lodash@3.3.1` explains why version 3.3.1 of lodash is in your project.
-/// - `yarn why lodash@^3` explains why versions 3.x of lodash are in your project.
-///
 /// By default, it will print all packages that directly depend on the specified package. If you want to see all transitive
 /// paths that lead to the package (going through all workspaces), use the `-R,--recursive` flag.
 ///
 /// Note that the recursive display is optimized to avoid printing the same package subtree multiple times. If you see a
 /// package without children in one branch, it means its subtree was already printed elsewhere in the tree.
+///
+/// ## Examples
+///
+/// Explain why lodash is used in your project
+///
+/// `yarn why lodash`
+///
+/// Explain why version 3.3.1 of lodash is in your project
+///
+/// `yarn why lodash@3.3.1`
+///
+/// Explain why versions 3.x of lodash are in your project
+///
+/// `yarn why lodash@^3`
+///
+/// Print all the dependency paths that lead to lodash
+///
+/// `yarn why lodash -R`
 ///
 #[cli::command]
 #[cli::path("why")]

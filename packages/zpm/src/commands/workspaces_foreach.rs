@@ -78,15 +78,23 @@ pub enum Limit {
 ///
 /// If the command is `run` and the script doesn't exist in a workspace, that workspace is skipped.
 ///
-/// For example:
+/// ## Examples
 ///
-/// - `yarn workspaces foreach -A run build` runs the `build` script in every workspace.
+/// Run the `build` script in every workspace
 ///
-/// - `yarn workspaces foreach -Apt run build` does the same in parallel, building workspace dependencies first.
+/// `yarn workspaces foreach -A run build`
 ///
-/// - `yarn workspaces foreach -Rpt --from '{workspace-a,workspace-b}' run build` builds two workspaces and all their dependencies.
+/// Run the `build` script in every workspace, in parallel, building workspace dependencies first
 ///
-/// - `yarn workspaces foreach -A --no-private npm publish --tolerate-republish` publishes all public workspaces.
+/// `yarn workspaces foreach -Apt run build`
+///
+/// Run the `build` script in two workspaces and all their dependencies, building dependencies first
+///
+/// `yarn workspaces foreach -Rpt --from '{workspace-a,workspace-b}' run build`
+///
+/// Publish all public workspaces
+///
+/// `yarn workspaces foreach -A --no-private npm publish --tolerate-republish`
 ///
 #[cli::command(proxy)]
 #[cli::path("workspaces", "foreach")]

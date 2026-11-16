@@ -16,6 +16,16 @@ use super::immediate::{bump_versions, parse_prerelease_pattern, BumpOptions};
 /// This command only updates the versions of the bumped workspaces; it doesn't update the ranges that other workspaces use to depend on them. Use
 /// the `workspace:^` / `workspace:~` ranges if you need them to follow the version bumps.
 ///
+/// ## Examples
+///
+/// Apply the deferred version change to the current workspace
+///
+/// `yarn version apply`
+///
+/// Apply the deferred version changes to all the workspaces of the project
+///
+/// `yarn version apply --all`
+///
 #[cli::command]
 #[cli::path("version", "apply")]
 #[cli::category("Project management")]

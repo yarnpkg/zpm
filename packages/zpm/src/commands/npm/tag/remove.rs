@@ -19,9 +19,11 @@ use super::{dist_tags_path, get_dist_tags, publish_registry_auth};
 /// the project's workspaces, otherwise `npmPublishRegistry` as configured for its scope or matching package rules) and always requires
 /// authentication. If the registry requires two-factor authentication, use `--otp` or enter the code when prompted.
 ///
-/// For example, to remove the `beta` tag from package `my-pkg`:
+/// ## Examples
 ///
-///   - `yarn npm tag remove my-pkg beta`
+/// Remove the `beta` tag from package `my-pkg`
+///
+/// `yarn npm tag remove my-pkg beta`
 ///
 #[cli::command]
 #[cli::path("npm", "tag", "remove")]
