@@ -83,7 +83,7 @@ impl ConfigUnset {
             Value::Undefined,
         )?;
 
-        Configuration::validate(&updated_document)
+        Configuration::validate(&document_path, &updated_document)
             .map_err(|e| Error::ConfigurationParseError(Arc::new(e)))?;
 
         document_path

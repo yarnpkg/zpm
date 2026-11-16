@@ -50,6 +50,14 @@ Since your CI workflows will likely report errors due to the automatic enablemen
 YARN_ENABLE_MIGRATION_MODE=0 yarn install
 ```
 
+Setting `YARN_ENABLE_MIGRATION_MODE=0` makes Yarn Switch run the version from the `packageManager` field for this command only, so the mainstream lockfile is updated by the release everyone else uses.
+
+### Configuration defaults
+
+Yarn 6 uses stricter defaults than Yarn 4 for `approvedGitRepositories`, `enableScripts`, and `npmMinimalAgeGate` (see the [breaking changes](/getting-started/breaking-changes#configuration-defaults)). Outside of the migration mode, the first install writes the Yarn 4 values into `.yarnrc.yml`.
+
+Under the migration mode the root lockfile stays in the Yarn 4 format, so Yarn instead applies those values to every command without writing them (Yarn 4 releases that don't know a setting such as `approvedGitRepositories` refuse to run when it's in the project `.yarnrc.yml`). Settings you define in the home `.yarnrc.yml` or the environment take precedence. The values get written to `.yarnrc.yml` by the first install that runs outside of the migration mode.
+
 ### Zero-installs
 
 You'll notice an issue when running installs on [zero-install](/concepts/zero-installs)-enabled repositories: Yarn will update the `.pnp.cjs` and associated files, but **you shouldn't commit those changes**.

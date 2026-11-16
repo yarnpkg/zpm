@@ -334,11 +334,12 @@ impl Range {
 
     pub fn to_anonymous_range(&self) -> Range {
         match self {
-            Range::RegistrySemver(params) => {
+            // Aliases (`npm:name@range`) must keep the name they point to
+            Range::RegistrySemver(params) if params.ident.is_none() => {
                 Range::AnonymousSemver(AnonymousSemverRange {range: params.range.clone()})
             },
 
-            Range::RegistryTag(params) => {
+            Range::RegistryTag(params) if params.ident.is_none() => {
                 Range::AnonymousTag(AnonymousTagRange {tag: params.tag.clone()})
             },
 

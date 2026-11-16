@@ -47,9 +47,9 @@ Workspaces are declared in Yarn by adding a `workspaces` field to your `package.
 
 Yarn puts various tools at your disposal to help you manage your project. These includes:
 
-- The special [`catalog:`](/protocols/catalog) protocol lets you share dependency ranges between workspaces. Because this protocol is transparently replaced at publish-time, it's suitable for both public and internal packages.
+- The special [`catalog:`](/protocol/catalog) protocol lets you share dependency ranges between workspaces. Because this protocol is transparently replaced at publish-time, it's suitable for both public and internal packages.
 
-- Another special protocol, [`workspace:`](/protocols/workspace), lets a workspace declare dependencies on other workspaces. Just like `catalog:` it's transparently replaced at publish-time.
+- Another special protocol, [`workspace:`](/protocol/workspace), lets a workspace declare dependencies on other workspaces. Just like `catalog:` it's transparently replaced at publish-time.
 
 - [Constraints](/concepts/constraints) let you ensure that your workspaces follow consistent rules. In a sense they can be seen as a linter / autofixer for monorepos.
 
@@ -57,4 +57,4 @@ Yarn puts various tools at your disposal to help you manage your project. These 
 
 - [Workspace profiles](/concepts/profiles), which let you declare in your configuration dependencies that should be automatically added to your workspaces' dependencies.
 
-Plus various workspace-related commands which you can find in our [CLI reference](http://localhost:4321/cli).
+Plus various workspace-related commands which you can find in our [CLI reference](/cli).

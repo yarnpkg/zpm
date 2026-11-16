@@ -183,8 +183,14 @@ pub enum Reference {
         path: Path,
     },
 
+    // Berry doesn't prefix Git locators with a protocol; we accept the URL
+    // shapes it writes in its lockfiles. The `git://` transport must be
+    // checked before our own `git:` prefix, which would otherwise match it.
+    #[pattern(r"(?<git>git://.*#.*)")]
     #[pattern(r"git:(?<git>.*)")]
     #[pattern(r"(?<git>https?://.*\.git#.*)")]
+    #[pattern(r"(?<git>(?:git\+[^:#]+|ssh)://.*#.*)")]
+    #[pattern(r"(?<git>git@[^#]+#.*)")]
     #[to_file_string(|params| format!("git:{}", params.git.to_file_string()))]
     #[to_print_string(|params| DataType::Reference.colorize(&format!("git:{}", params.git.to_file_string())))]
     Git {
@@ -336,5 +342,72 @@ fn test_patch_references_preserve_path_and_checksum() {
             = reference.to_file_string();
 
         assert_eq!(Reference::from_file_string(&serialized).unwrap(), reference);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use rstest::rstest;
+    use zpm_git::GitSource;
+    use zpm_utils::{FromFileString, ToFileString};
+
+    use super::Reference;
+
+    const COMMIT: &str = "0123456789abcdef0123456789abcdef01234567";
+
+    /// Git locators as Berry writes them in its lockfiles: it normalizes
+    /// `git+https:`, `github:` and GitHub `git://` URLs to `https:` before
+    /// writing them, but keeps the other transports as-is.
+    #[rstest]
+    #[case("git://github.com/user/repo.git#commit={c}", "git:github:user/repo#commit={c}")]
+    #[case("git://example.com/user/repo.git#commit={c}", "git:git://example.com/user/repo.git#commit={c}")]
+    #[case("git://example.com/user/repo.git#workspace=pkg&commit={c}", "git:git://example.com/user/repo.git#commit={c}&workspace=pkg")]
+    #[case("git+ssh://git@github.com/user/repo.git#commit={c}", "git:github:user/repo#commit={c}")]
+    #[case("git+ssh://git@example.com/user/repo.git#commit={c}", "git:git+ssh://git@example.com/user/repo.git#commit={c}")]
+    #[case("git+ssh://git@example.com:2222/user/repo.git#workspace=pkg&commit={c}", "git:git+ssh://git@example.com:2222/user/repo.git#commit={c}&workspace=pkg")]
+    #[case("git+https://github.com/user/repo.git#commit={c}", "git:github:user/repo#commit={c}")]
+    #[case("git+http://example.com/user/repo.git#commit={c}", "git:git+http://example.com/user/repo.git#commit={c}")]
+    #[case("git+file:///srv/repo.git#commit={c}", "git:git+file:///srv/repo.git#commit={c}")]
+    #[case("https://github.com/user/repo.git#commit={c}", "git:github:user/repo#commit={c}")]
+    #[case("https://example.com/user/repo.git#workspace=pkg&commit={c}", "git:https://example.com/user/repo.git#commit={c}&workspace=pkg")]
+    #[case("http://example.com/user/repo.git#commit={c}", "git:http://example.com/user/repo.git#commit={c}")]
+    #[case("ssh://git@github.com/user/repo.git#commit={c}", "git:ssh://git@github.com/user/repo.git#commit={c}")]
+    #[case("ssh://git@example.com/user/repo.git#commit={c}", "git:ssh://git@example.com/user/repo.git#commit={c}")]
+    #[case("git@github.com:user/repo.git#commit={c}", "git:github:user/repo#commit={c}")]
+    #[case("git@example.com:user/repo.git#commit={c}", "git:git@example.com:user/repo.git#commit={c}")]
+    fn test_berry_git_references(#[case] berry: &str, #[case] expected: &str) {
+        let berry
+            = berry.replace("{c}", COMMIT);
+        let expected
+            = expected.replace("{c}", COMMIT);
+
+        let reference
+            = Reference::from_file_string(&berry).unwrap();
+
+        assert_eq!(reference.to_file_string(), expected);
+
+        // What we write back must parse into the very same reference
+        assert_eq!(Reference::from_file_string(&expected).unwrap(), reference);
+    }
+
+    #[test]
+    fn test_git_transport_keeps_its_scheme() {
+        let Reference::Git(params) = Reference::from_file_string(&format!("git://example.com/user/repo.git#commit={COMMIT}")).unwrap() else {
+            panic!("Expected a Git reference");
+        };
+
+        assert_eq!(params.git.repo, GitSource::Url("git://example.com/user/repo.git".to_string()));
+        assert_eq!(params.git.commit, COMMIT);
+    }
+
+    /// Git locators must be pinned to a commit; ranges stay ranges.
+    #[rstest]
+    #[case("git://example.com/user/repo.git#tag=v1.0.0")]
+    #[case("git://example.com/user/repo.git#head=main")]
+    #[case("git+ssh://git@example.com/user/repo.git#workspace=pkg")]
+    #[case("ssh://git@example.com/user/repo.git")]
+    #[case("git@example.com:user/repo.git")]
+    fn test_unpinned_git_urls_are_not_references(#[case] str: &str) {
+        assert!(Reference::from_file_string(str).is_err());
     }
 }

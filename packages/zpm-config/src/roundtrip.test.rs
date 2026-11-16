@@ -149,7 +149,7 @@ fn sample_json(field: &serde_yaml::Value) -> serde_yaml::Value {
 }
 
 fn load(text: &str) -> Settings {
-    Configuration::validate(text)
+    Configuration::validate(&Path::from_file_string("/project/.yarnrc.yml").unwrap(), text)
         .unwrap_or_else(|e| panic!("The configuration should be valid ({e}):\n{text}"));
 
     let context = ConfigurationContext {
@@ -275,7 +275,7 @@ fn leaves_document(leaves: &[Leaf]) -> String {
     for leaf in leaves {
         document = config_set(&document, &leaf.path, sample_value(&leaf.type_name));
 
-        Configuration::validate(&document)
+        Configuration::validate(&Path::from_file_string("/project/.yarnrc.yml").unwrap(), &document)
             .unwrap_or_else(|e| panic!("{:?} made the configuration invalid ({e}):\n{document}", leaf.path));
     }
 

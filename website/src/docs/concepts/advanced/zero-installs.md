@@ -19,7 +19,7 @@ The idea of Zero Installs is extremely simple: what if all install artifacts wer
 
 While simple in appearance, I'm sure you'll quickly raise questions about its feasibility: checking in all install artifacts in a typical Node.js project means checking-in your `node_modules` directory. This can be a significant overhead, especially for large projects with many dependencies. This issue is exacerbated by the way `node_modules` hoisting works, which can lead to files being arbitrarily moved around as you add & remove dependencies, creating massive diffs in your PRs.
 
-That's true, and that's why we don't recommend checking-in your `node_modules` directory. That's where [Yarn Plug'n'Play](https://yarnpkg.com/concepts/pnp) comes to the rescue! Under this mode, Yarn doesn't generate a `node_modules` directory. Instead, a single file is generated called the `.pnp.cjs` file (plus another called `.pnp.loader.mjs` for ESM support).
+That's true, and that's why we don't recommend checking-in your `node_modules` directory. That's where [Yarn Plug'n'Play](/concepts/pnp) comes to the rescue! Under this mode, Yarn doesn't generate a `node_modules` directory. Instead, a single file is generated called the `.pnp.cjs` file (plus another called `.pnp.loader.mjs` for ESM support).
 
 These files are [Node.js loaders](https://nodejs.org/api/module.html#customization-hooks) that contains a mapping of all dependencies to their respective locations on disk, allowing Yarn to resolve dependencies without needing to generate a `node_modules` directory. Their content is deterministic, so they can safely be checked-in to version control.
 
