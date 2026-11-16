@@ -69,6 +69,15 @@ pub enum Error {
     #[error("Invalid npm stage ID ({0}); expected a UUID in the form xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx")]
     InvalidNpmStageId(String),
 
+    #[error("The 'latest' tag cannot be removed.")]
+    CannotRemoveLatestNpmTag,
+
+    #[error("{} is not a tag of package {}", DataType::Code.colorize(tag), ident.to_print_string())]
+    NpmTagNotFound { tag: String, ident: Ident },
+
+    #[error("Missing 'name' field in {}", .0.to_print_string())]
+    MissingWorkspaceName(Path),
+
     #[error("Missing environment variable when creating the provenance payload: {0}")]
     MissingEnvironmentVariableForProvenancePayload(String),
 
@@ -132,7 +141,7 @@ pub enum Error {
     #[error("Request to '{0}' has been blocked because of your configuration settings.")]
     NetworkDisabledError(reqwest::Url),
 
-    #[error("Request to '{0}' has been blocked because it doesn't match any of the patterns in 'approvedGitRepositories'.")]
+    #[error("Request to '{0}' has been blocked because it doesn't match any of the patterns in 'approvedGitRepositories'. To approve it, add a matching pattern (for example '{0}') to 'approvedGitRepositories' in your .yarnrc.yml, or use '**' to approve all git repositories.")]
     ApprovedGitRepositoriesError(String),
 
     #[error("Unsafe http requests must be explicitly whitelisted in your configuration ({}).", .0.host_str().expect("\"http:\" URL should have a host"))]
@@ -177,6 +186,15 @@ pub enum Error {
     #[error("Catalog entry references itself ({catalog}:{})", ident.to_print_string())]
     CatalogCycle { catalog: String, ident: Ident },
 
+    #[error("The {} peer dependency of {} references the {catalog} catalog, which doesn't exist", ident.to_print_string(), locator.to_print_string())]
+    PeerCatalogNotFound { locator: Locator, ident: Ident, catalog: String },
+
+    #[error("The {} peer dependency of {} references the {catalog} catalog, which doesn't have an entry for it", ident.to_print_string(), locator.to_print_string())]
+    PeerCatalogEntryNotFound { locator: Locator, ident: Ident, catalog: String },
+
+    #[error("The {} peer dependency of {} references the {catalog} catalog, whose entry ({range}) can't be used as a peer range", ident.to_print_string(), locator.to_print_string())]
+    InvalidPeerCatalogEntry { locator: Locator, ident: Ident, catalog: String, range: String },
+
     #[error("Package manifest not found ({})", .0.to_print_string())]
     ManifestNotFound(Path),
 
@@ -217,11 +235,23 @@ pub enum Error {
     #[error("Tag not found ({0})")]
     TagNotFound(String),
 
+    #[error("The `{tag}` tag of {ident} points to an invalid semver version ({version})", tag = .1, ident = .0.to_print_string(), version = .2)]
+    InvalidDistTagVersion(Ident, String, String),
+
+    #[error("The registry lists {version} as a version of {ident}, but it isn't a valid semver version", version = .1, ident = .0.to_print_string())]
+    InvalidRegistryVersion(Ident, String),
+
     #[error("Package not found ({})", .0.to_print_string())]
     PackageNotFound(Ident),
 
     #[error("No matching variant found for {}", .0.to_print_string())]
     NoMatchingVariantFound(Locator),
+
+    #[error("Encountered a stack overflow when resolving peer dependencies: the dependency tree is more than {max_depth} levels deep (… → {}). This is usually caused by a dependency cycle through peer dependencies, or by an extremely deep dependency chain.", stack_excerpt.iter().map(|locator| locator.to_print_string()).collect::<Vec<_>>().join(" → "))]
+    StackOverflowResolution {
+        max_depth: usize,
+        stack_excerpt: Vec<Locator>,
+    },
 
     #[error("No candidates found for {}", .0.to_print_string())]
     NoCandidatesFound(Range),
@@ -393,6 +423,9 @@ pub enum Error {
 
     #[error("Binary not found ({0})")]
     BinaryNotFound(String),
+
+    #[error("Usage Error: Couldn't find a binary named \"{}\" for package \"{}\"", .0, .1.to_print_string())]
+    BinaryNotFoundForPackage(String, Locator),
 
     #[error("Task file parse error: {0}")]
     TaskParseError(#[source] zpm_tasks::Error),
@@ -652,7 +685,7 @@ impl From<std::io::Error> for Error {
     fn from(error: std::io::Error) -> Self {
         Error::IoError {
             inner: Arc::new(error),
-            backtrace: Arc::new(std::backtrace::Backtrace::capture()),
+            backtrace: Arc::new(zpm_utils::capture_backtrace()),
         }
     }
 }

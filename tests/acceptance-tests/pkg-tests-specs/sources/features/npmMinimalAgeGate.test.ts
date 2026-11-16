@@ -300,6 +300,50 @@ describe(`Features`, () => {
       );
 
       test(
+        `it should allow source rules with a registry filter written without the protocol to override the minimum release age`,
+        makeTemporaryEnv({
+          dependencies: {[`release-date`]: `1.1.1`},
+        }, {
+          npmMinimalAgeGate: `1d`,
+        }, async ({run, source}) => {
+          const url = await startPackageServer();
+
+          await run(`config`, `set`, `sourceRules`, `--json`, JSON.stringify([{
+            registryFilter: `${url.replace(/^https?:/, ``)}/`,
+            npmMinimalAgeGate: `0`,
+          }]));
+
+          await run(`install`);
+
+          await expect(source(`require('release-date/package.json')`)).resolves.toMatchObject({
+            name: `release-date`,
+            version: `1.1.1`,
+          });
+        }),
+      );
+
+      test(
+        `it shouldn't apply source rules with a registry filter written without the protocol to other registries`,
+        makeTemporaryEnv({
+          dependencies: {[`release-date`]: `1.1.1`},
+        }, {
+          npmMinimalAgeGate: `1d`,
+        }, async ({run}) => {
+          const url = await startPackageServer();
+
+          await run(`config`, `set`, `sourceRules`, `--json`, JSON.stringify([{
+            registryFilter: `${url.replace(/^https?:/, ``)}/other-registry`,
+            npmMinimalAgeGate: `0`,
+          }, {
+            registryFilter: `//registry.example.org`,
+            npmMinimalAgeGate: `0`,
+          }]));
+
+          await expect(run(`install`)).rejects.toThrowError(`No candidates found`);
+        }),
+      );
+
+      test(
         `it should inherit the global minimum release age in rules that don't set it`,
         makeTemporaryEnv({
           dependencies: {[`@scoped/release-date`]: `^1.0.0`},

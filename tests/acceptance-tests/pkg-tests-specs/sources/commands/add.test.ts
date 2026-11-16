@@ -1,6 +1,6 @@
 import {Filename, PortablePath, ppath, xfs} from '@yarnpkg/fslib';
 import {parseSyml}                          from '@yarnpkg/parsers';
-import {tests}                              from 'pkg-tests-core';
+import {tests, yarn}                        from 'pkg-tests-core';
 
 describe(`Commands`, () => {
   describe(`add`, () => {
@@ -13,6 +13,143 @@ describe(`Commands`, () => {
           dependencies: {
             [`no-deps`]: `1.0.0`,
           },
+        });
+      }),
+    );
+
+    test.each([
+      [`no-deps@^1.0.0`, [], `^1.0.0`],
+      [`no-deps@~1.0.0`, [], `~1.0.0`],
+      [`no-deps@1`, [], `1`],
+      [`no-deps@1.x`, [], `1.x`],
+      [`no-deps@>=1.0.0 <1.1.0`, [], `>=1.0.0 <1.1.0`],
+      [`no-deps@^1.0.0`, [`-E`], `^1.0.0`],
+      [`no-deps@^1.0.0`, [`-T`], `^1.0.0`],
+      [`no-deps@~1.0.0`, [`-C`], `~1.0.0`],
+      [`no-deps@1.0.0`, [`-T`], `1.0.0`],
+      [`no-deps@1.0.0`, [`-C`], `1.0.0`],
+    ])(
+      `it should keep explicit semver ranges as-is (%s %j)`,
+      (request, flags, expected) => makeTemporaryEnv({}, async ({path, run, source}) => {
+        await run(`add`, request, ...flags);
+
+        await expect(xfs.readJsonPromise(ppath.join(path, Filename.manifest))).resolves.toMatchObject({
+          dependencies: {
+            [`no-deps`]: expected,
+          },
+        });
+      })(),
+    );
+
+    test(
+      `it should keep explicit semver ranges as-is regardless of defaultSemverRangePrefix`,
+      makeTemporaryEnv({}, async ({path, run, source}) => {
+        await run(`config`, `set`, `defaultSemverRangePrefix`, `~`);
+        await run(`add`, `no-deps@^1.0.0`);
+
+        await expect(xfs.readJsonPromise(ppath.join(path, Filename.manifest))).resolves.toMatchObject({
+          dependencies: {
+            [`no-deps`]: `^1.0.0`,
+          },
+        });
+      }),
+    );
+
+    test(
+      `it should install the highest version matching an explicit semver range`,
+      makeTemporaryEnv({}, async ({path, run, source}) => {
+        await run(`add`, `no-deps@^1.0.0`);
+
+        await expect(source(`require('no-deps')`)).resolves.toMatchObject({
+          name: `no-deps`,
+          version: `1.1.0`,
+        });
+      }),
+    );
+
+    test(
+      `it should keep explicit semver ranges as-is (npm: protocol)`,
+      makeTemporaryEnv({}, async ({path, run, source}) => {
+        await run(`add`, `no-deps@npm:^1.0.0`);
+
+        await expect(xfs.readJsonPromise(ppath.join(path, Filename.manifest))).resolves.toMatchObject({
+          dependencies: {
+            // The default protocol may be omitted, but the range must be the requested one
+            [`no-deps`]: expect.stringMatching(/^(npm:)?\^1\.0\.0$/),
+          },
+        });
+      }),
+    );
+
+    test(
+      `it should keep explicit semver ranges as-is (alias)`,
+      makeTemporaryEnv({}, async ({path, run, source}) => {
+        await run(`add`, `foo@npm:no-deps@^1.0.0`);
+
+        await expect(xfs.readJsonPromise(ppath.join(path, Filename.manifest))).resolves.toMatchObject({
+          dependencies: {
+            [`foo`]: `npm:no-deps@^1.0.0`,
+          },
+        });
+
+        await expect(source(`require('foo')`)).resolves.toMatchObject({
+          name: `no-deps`,
+          version: `1.1.0`,
+        });
+      }),
+    );
+
+    test(
+      `it should keep the alias when resolving a tag (alias)`,
+      makeTemporaryEnv({}, async ({path, run, source}) => {
+        await run(`add`, `foo@npm:no-deps@latest`, `-T`);
+
+        await expect(xfs.readJsonPromise(ppath.join(path, Filename.manifest))).resolves.toMatchObject({
+          dependencies: {
+            [`foo`]: `npm:no-deps@~2.0.0`,
+          },
+        });
+
+        await expect(source(`require('foo')`)).resolves.toMatchObject({
+          name: `no-deps`,
+          version: `2.0.0`,
+        });
+      }),
+    );
+
+    test(
+      `it should apply the modifier flags to resolved tags`,
+      makeTemporaryEnv({}, async ({path, run, source}) => {
+        await run(`add`, `no-deps@latest`, `-T`);
+
+        await expect(xfs.readJsonPromise(ppath.join(path, Filename.manifest))).resolves.toMatchObject({
+          dependencies: {
+            [`no-deps`]: `~2.0.0`,
+          },
+        });
+      }),
+    );
+
+    test(
+      `it should keep catalog references as-is`,
+      makeTemporaryEnv({}, async ({path, run, source}) => {
+        await yarn.writeConfiguration(path, {
+          catalog: {
+            [`no-deps`]: `^1.0.0`,
+          },
+        });
+
+        await run(`add`, `no-deps@catalog:`, `-E`);
+
+        await expect(xfs.readJsonPromise(ppath.join(path, Filename.manifest))).resolves.toMatchObject({
+          dependencies: {
+            [`no-deps`]: `catalog:`,
+          },
+        });
+
+        await expect(source(`require('no-deps')`)).resolves.toMatchObject({
+          name: `no-deps`,
+          version: `1.1.0`,
         });
       }),
     );
@@ -370,6 +507,49 @@ describe(`Commands`, () => {
         };
 
         expect(lock).toMatchObject(expectedLockfile);
+      }),
+    );
+
+    test(
+      `it should add a node-gyp dependency to the lockfile if a development script uses it`,
+      makeTemporaryEnv({}, async ({path, run, source}) => {
+        await run(`add`, `node-gyp-dev-scripts`);
+
+        const lock = parseSyml(await xfs.readFilePromise(`${path}/yarn.lock` as PortablePath, `utf8`));
+        const entry = tests.FEATURE_CHECKS.jsonLockfile
+          ? lock.entries[`node-gyp-dev-scripts@npm:^1.0.0`].resolution
+          : lock[`node-gyp-dev-scripts@npm:^1.0.0`];
+
+        expect(Object.keys(entry.dependencies ?? {})).toEqual([`node-gyp`]);
+      }),
+    );
+
+    test(
+      `it shouldn't add a node-gyp dependency to the lockfile if only a development script uses it and gypfile is false`,
+      makeTemporaryEnv({}, async ({path, run, source}) => {
+        await run(`add`, `gypfile-false-dev-scripts`);
+
+        const lock = parseSyml(await xfs.readFilePromise(`${path}/yarn.lock` as PortablePath, `utf8`));
+        const entry = tests.FEATURE_CHECKS.jsonLockfile
+          ? lock.entries[`gypfile-false-dev-scripts@npm:^1.0.0`].resolution
+          : lock[`gypfile-false-dev-scripts@npm:^1.0.0`];
+
+        expect(Object.keys(entry.dependencies ?? {})).toEqual([]);
+        expect(Object.keys(tests.FEATURE_CHECKS.jsonLockfile ? lock.entries : lock).some(key => key.startsWith(`node-gyp@`))).toEqual(false);
+      }),
+    );
+
+    test(
+      `it should add a node-gyp dependency to the lockfile if an install script uses it, even if gypfile is false`,
+      makeTemporaryEnv({}, async ({path, run, source}) => {
+        await run(`add`, `gypfile-false-install-script`);
+
+        const lock = parseSyml(await xfs.readFilePromise(`${path}/yarn.lock` as PortablePath, `utf8`));
+        const entry = tests.FEATURE_CHECKS.jsonLockfile
+          ? lock.entries[`gypfile-false-install-script@npm:^1.0.0`].resolution
+          : lock[`gypfile-false-install-script@npm:^1.0.0`];
+
+        expect(Object.keys(entry.dependencies ?? {})).toEqual([`node-gyp`]);
       }),
     );
 

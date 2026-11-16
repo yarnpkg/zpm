@@ -124,7 +124,13 @@ pub async fn with_report<F, R>(report: StreamReport, f: F) -> R where F: Future<
     res
 }
 
-pub async fn with_report_result<F, R>(report: StreamReport, f: F) -> Result<R, Error> where F: Future<Output = Result<R, Error>> {
+pub fn with_report_result<F, R>(report: StreamReport, f: F) -> impl Future<Output = Result<R, Error>> where F: Future<Output = Result<R, Error>> {
+    // The futures we get here are typically whole commands; we move them to
+    // the heap so that their size isn't multiplied by the layers of futures
+    // wrapping them (each of which would otherwise keep its own copy inline).
+    let f
+        = Box::pin(f);
+
     with_report(report, async move {
         let res
             = f.await;
@@ -142,7 +148,7 @@ pub async fn with_report_result<F, R>(report: StreamReport, f: F) -> Result<R, E
         }
 
         res
-    }).await
+    })
 }
 
 pub async fn with_context<F>(context: ReportContext, f: F) -> () where F: Future {

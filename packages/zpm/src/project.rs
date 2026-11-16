@@ -483,9 +483,11 @@ impl Project {
         let lockfile_path
             = self.lockfile_path();
 
-        let current_content = lockfile_path
-            .fs_read()
-            .ok_missing()?;
+        // The lockfile is missing on first install; work on the io::Result
+        // so that this doesn't build an error
+        let current_content
+            = std::fs::read(lockfile_path.to_path_buf())
+                .ok_missing()?;
 
         let contents
             = format!("{}\n", JsonDocument::to_string_pretty(lockfile)?);
@@ -1451,6 +1453,17 @@ impl Project {
     }
 
     pub fn package_visible_binaries(&self, locator: &Locator) -> Result<BTreeMap<String, Binary>, Error> {
+        let binaries = self.package_visible_binaries_with_providers(locator)?
+            .into_iter()
+            .map(|(name, (_, binary))| (name, binary))
+            .collect();
+
+        Ok(binaries)
+    }
+
+    /// Same as `package_visible_binaries`, but also returns the locator of
+    /// the package that provides each binary.
+    pub fn package_visible_binaries_with_providers(&self, locator: &Locator) -> Result<BTreeMap<String, (Locator, Binary)>, Error> {
         let install_state = self.install_state.as_ref()
             .ok_or(Error::InstallStateNotFound)?;
 
@@ -1464,21 +1477,23 @@ impl Project {
             = BTreeMap::new();
 
         for (ident, descriptor) in &resolution.dependencies {
-            let locator = install_state.resolution_tree.descriptor_to_locator.get(descriptor)
+            let dependency_locator = install_state.resolution_tree.descriptor_to_locator.get(descriptor)
                 .expect("Expected resolution to be found in the resolution tree");
 
             // Packages may be missing from locations_by_package when they
             // haven't been installed due to being unsupported on the current
             // platform. In this case, we ignore its binaries.
             //
-            if let Some(dependency_location) = self.find_visible_dependency_location(package_location, ident, locator)? {
-                all_bins.extend(self.package_binaries_at(locator, &dependency_location)?);
+            if let Some(dependency_location) = self.find_visible_dependency_location(package_location, ident, dependency_locator)? {
+                all_bins.extend(self.package_binaries_at(dependency_locator, &dependency_location)?.into_iter()
+                    .map(|(name, binary)| (name, (dependency_locator.clone(), binary))));
             }
         }
 
-        all_bins.extend(self.package_binaries_at(locator, package_location)?);
+        all_bins.extend(self.package_binaries_at(locator, package_location)?.into_iter()
+            .map(|(name, binary)| (name, (locator.clone(), binary))));
 
-        Ok(BTreeMap::from_iter(all_bins.into_iter()))
+        Ok(all_bins)
     }
 
     pub fn find_binary(&self, name: &str) -> Result<Binary, Error> {

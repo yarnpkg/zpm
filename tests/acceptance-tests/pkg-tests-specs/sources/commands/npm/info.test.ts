@@ -41,5 +41,25 @@ describe(`Commands`, () => {
         }));
       }),
     );
+
+    test(
+      `it should ignore the invalid versions listed by the registry`,
+      makeTemporaryEnv({}, async ({run}) => {
+        expect((await run(`npm`, `info`, `invalid-versions`, `--json`)).stdout).toMatchJSON(expect.objectContaining({
+          version: `2.0.0`,
+        }));
+
+        expect((await run(`npm`, `info`, `invalid-versions@*`, `--json`)).stdout).toMatchJSON(expect.objectContaining({
+          version: `2.0.0`,
+        }));
+
+        expect((await run(`npm`, `info`, `invalid-versions@^1.0.0`, `--json`)).stdout).toMatchJSON(expect.objectContaining({
+          version: `1.0.0`,
+        }));
+
+        await expect(run(`npm`, `info`, `invalid-versions@legacy`, `--json`)).rejects.toThrow(/The `legacy` tag of invalid-versions points to an invalid semver version \(3\.0\)/);
+        await expect(run(`npm`, `info`, `invalid-versions@3.0`, `--json`)).rejects.toThrow(/The registry lists 3\.0 as a version of invalid-versions, but it isn't a valid semver version/);
+      }),
+    );
   });
 });

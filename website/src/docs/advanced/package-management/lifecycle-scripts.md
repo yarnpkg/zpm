@@ -33,6 +33,8 @@ It is guaranteed to be called in topological order (in other words, your depende
 
 For backwards compatibility, the `preinstall` and `install` scripts, if present, are called right before running the `postinstall` script from the same package. In general, prefer using `postinstall` over those two.
 
+Also for compatibility with npm, packages with a `binding.gyp` file at their root but none of those three scripts are built by running `node-gyp rebuild`. Packages that ship prebuilt binaries can opt out of this by setting `gypfile` to `false` in their manifest.
+
 :::caution
 Postinstall scripts should be avoided at all cost, as they make installs slower and riskier. Many users will refuse to install dependencies that have `postinstall` scripts. Additionally, since the output isn't shown out of the box, using them to print a message to the user will not work as you expect.
 :::

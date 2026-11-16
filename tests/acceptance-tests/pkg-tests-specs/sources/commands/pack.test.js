@@ -10,6 +10,56 @@ async function genPackList(run) {
   }).filter(location => !!location);
 }
 
+// Neither alphabetical nor reverse-alphabetical, at every depth
+// (condition order is semantic for `exports` and `imports`)
+const ORDERED_PUBLISH_CONFIG = {
+  exports: {
+    [`.`]: {
+      types: `./dist/index.d.ts`,
+      node: {
+        types: `./dist/node.d.ts`,
+        import: `./dist/node.mjs`,
+        require: `./dist/node.cjs`,
+        default: `./dist/node.js`,
+      },
+      browser: `./dist/browser.js`,
+      import: {types: `./dist/index.d.mts`, module: `./dist/index.module.mjs`, default: `./dist/index.mjs`},
+      require: {types: `./dist/index.d.cts`, module: `./dist/index.module.cjs`, default: `./dist/index.cjs`},
+      default: `./dist/index.js`,
+    },
+    [`./package.json`]: `./package.json`,
+    [`./zeta`]: {types: `./dist/zeta.d.ts`, default: `./dist/zeta.js`},
+    [`./alpha`]: {default: `./dist/alpha.js`, types: `./dist/alpha.d.ts`},
+    [`./mid`]: `./dist/mid.js`,
+    [`./core`]: `./dist/core.js`,
+    [`./utils/*`]: `./dist/utils/*.js`,
+    [`./beta`]: `./dist/beta.js`,
+    [`./internal/*`]: null,
+    [`./omega`]: `./dist/omega.js`,
+  },
+  imports: {
+    [`#zeta`]: {node: `./dist/zeta-node.js`, browser: `./dist/zeta-browser.js`, default: `./dist/zeta.js`},
+    [`#alpha`]: `./dist/alpha.js`,
+    [`#mid`]: `./dist/mid.js`,
+    [`#dep`]: `dep`,
+    [`#beta`]: `./dist/beta.js`,
+  },
+  browser: {
+    [`./dist/zeta.js`]: `./dist/zeta-browser.js`,
+    [`./dist/alpha.js`]: false,
+    [`./dist/mid.js`]: `./dist/mid-browser.js`,
+    [`fs`]: false,
+    [`./dist/beta.js`]: `./dist/beta-browser.js`,
+  },
+  bin: {
+    zeta: `./bin/zeta.js`,
+    alpha: `./bin/alpha.js`,
+    mid: `./bin/mid.js`,
+    omega: `./bin/omega.js`,
+    beta: `./bin/beta.js`,
+  },
+};
+
 describe(`Commands`, () => {
   describe(`pack`, () => {
     test(
@@ -526,6 +576,73 @@ describe(`Commands`, () => {
         expect(originalManifest.browser).toBe(`./index.umd.js`);
         expect(originalManifest.exports).toBe(`./index.modern.js`);
         expect(originalManifest.imports).toEqual({[`#dep`]: `local`});
+      }),
+    );
+
+    for (const [indentName, indent] of [[`2 spaces`, 2], [`4 spaces`, 4], [`tabs`, `\t`]]) {
+      test(
+        `it should indent the publishConfig overrides like the rest of the manifest (${indentName})`,
+        makeTemporaryEnv({}, async ({path, run, source}) => {
+          await xfs.writeFilePromise(`${path}/package.json`, `${JSON.stringify({
+            name: `pkg`,
+            version: `1.0.0`,
+            main: `./src/index.ts`,
+            exports: `./src/index.ts`,
+            bin: {pkg: `./src/cli.ts`},
+            publishConfig: {
+              main: `./lib/index.js`,
+              exports: {[`.`]: {import: {default: `./lib/index.mjs`}}},
+              bin: {pkg: `./lib/cli.js`},
+              browser: {[`./lib/node.js`]: `./lib/browser.js`},
+            },
+          }, null, indent)}\n`);
+
+          await run(`install`);
+          await run(`pack`);
+
+          await fsUtils.unpackToDirectory(path, `${path}/package.tgz`);
+
+          await expect(xfs.readFilePromise(`${path}/package/package.json`, `utf8`)).resolves.toEqual(`${JSON.stringify({
+            name: `pkg`,
+            version: `1.0.0`,
+            main: `./lib/index.js`,
+            browser: {[`./lib/node.js`]: `./lib/browser.js`},
+            exports: {[`.`]: {import: {default: `./lib/index.mjs`}}},
+            bin: {pkg: `./lib/cli.js`},
+            publishConfig: {
+              main: `./lib/index.js`,
+              exports: {[`.`]: {import: {default: `./lib/index.mjs`}}},
+              bin: {pkg: `./lib/cli.js`},
+              browser: {[`./lib/node.js`]: `./lib/browser.js`},
+            },
+          }, null, indent)}\n`);
+        }),
+      );
+    }
+
+    test(
+      `it should preserve the authored key order of the fields overridden from publishConfig`,
+      makeTemporaryEnv({
+        exports: `./index.js`,
+        publishConfig: ORDERED_PUBLISH_CONFIG,
+      }, async ({path, run, source}) => {
+        await run(`install`);
+
+        // The order used to depend on a per-process hash seed, so we pack
+        // several times to make sure the output is deterministic
+        for (let t = 0; t < 3; ++t) {
+          await run(`pack`);
+
+          await xfs.removePromise(`${path}/package`);
+          await fsUtils.unpackToDirectory(path, `${path}/package.tgz`);
+
+          const packedManifest = await xfs.readJsonPromise(`${path}/package/package.json`);
+
+          // JSON.stringify is sensitive to the key order, unlike toEqual
+          for (const field of [`exports`, `imports`, `browser`, `bin`]) {
+            expect({[field]: JSON.stringify(packedManifest[field], null, 2)}).toEqual({[field]: JSON.stringify(ORDERED_PUBLISH_CONFIG[field], null, 2)});
+          }
+        }
       }),
     );
 

@@ -23,66 +23,87 @@ pub fn scc_tarjan_pearce_core(adj: &[Vec<usize>]) -> Vec<Vec<usize>> {
     let mut comps
         = Vec::new();
 
-    fn visit(
+    struct Frame {
         v: usize,
-        adj: &[Vec<usize>],
-        rindex: &mut [usize],
-        stack: &mut Vec<usize>,
-        index: &mut usize,
-        c: &mut usize,
-        comps: &mut Vec<Vec<usize>>,
-    ) {
-        let mut is_root
-            = true;
-
-        rindex[v] = *index;
-        *index += 1;
-
-        for &w in &adj[v] {
-            if rindex[w] == 0 {
-                visit(w, adj, rindex, stack, index, c, comps);
-            }
-
-            if rindex[w] < rindex[v] {
-                rindex[v] = rindex[w];
-                is_root = false;
-            }
-        }
-
-        if is_root {
-            *index -= 1;
-
-            let mut comp
-                = Vec::new();
-
-            while let Some(&top) = stack.last() {
-                if rindex[v] <= rindex[top] {
-                    let w
-                        = stack.pop().unwrap();
-
-                    rindex[w] = *c;
-                    *index -= 1;
-
-                    comp.push(w);
-                } else {
-                    break;
-                }
-            }
-
-            rindex[v] = *c;
-            comp.push(v);
-
-            *c = c.saturating_sub(1);
-
-            comps.push(comp);
-        } else {
-            stack.push(v);
-        }
+        next_edge: usize,
+        is_root: bool,
     }
 
-    for v in 0..n {
-        if rindex[v] == 0 {
-            visit(v, adj, &mut rindex, &mut stack, &mut index, &mut c, &mut comps);
+    // The depth-first traversal uses an explicit stack rather than recursion,
+    // as its depth is bounded only by the length of the longest dependency
+    // chain in the graph.
+    let mut call_stack
+        = Vec::new();
+
+    for root in 0..n {
+        if rindex[root] != 0 {
+            continue;
+        }
+
+        rindex[root] = index;
+        index += 1;
+
+        call_stack.push(Frame {v: root, next_edge: 0, is_root: true});
+
+        while let Some(frame) = call_stack.last_mut() {
+            let v
+                = frame.v;
+
+            if let Some(&w) = adj[v].get(frame.next_edge) {
+                if rindex[w] == 0 {
+                    rindex[w] = index;
+                    index += 1;
+
+                    // We'll come back to this same edge once w has been
+                    // fully visited; its index will then be non-zero, so
+                    // the check below will run
+                    call_stack.push(Frame {v: w, next_edge: 0, is_root: true});
+                    continue;
+                }
+
+                if rindex[w] < rindex[v] {
+                    rindex[v] = rindex[w];
+                    frame.is_root = false;
+                }
+
+                frame.next_edge += 1;
+                continue;
+            }
+
+            let is_root
+                = frame.is_root;
+
+            call_stack.pop();
+
+            if is_root {
+                index -= 1;
+
+                let mut comp
+                    = Vec::new();
+
+                while let Some(&top) = stack.last() {
+                    if rindex[v] <= rindex[top] {
+                        let w
+                            = stack.pop().unwrap();
+
+                        rindex[w] = c;
+                        index -= 1;
+
+                        comp.push(w);
+                    } else {
+                        break;
+                    }
+                }
+
+                rindex[v] = c;
+                comp.push(v);
+
+                c = c.saturating_sub(1);
+
+                comps.push(comp);
+            } else {
+                stack.push(v);
+            }
         }
     }
 
@@ -181,6 +202,122 @@ mod tests {
         // Should have one SCC with all 3 nodes (the cycle)
         assert_eq!(sccs.len(), 1);
         assert_eq!(sccs[0].len(), 3);
+    }
+
+    /// The recursive formulation of the algorithm, as a reference.
+    fn scc_recursive(adj: &[Vec<usize>]) -> Vec<Vec<usize>> {
+        fn visit(v: usize, adj: &[Vec<usize>], rindex: &mut [usize], stack: &mut Vec<usize>, index: &mut usize, c: &mut usize, comps: &mut Vec<Vec<usize>>) {
+            let mut is_root = true;
+
+            rindex[v] = *index;
+            *index += 1;
+
+            for &w in &adj[v] {
+                if rindex[w] == 0 {
+                    visit(w, adj, rindex, stack, index, c, comps);
+                }
+
+                if rindex[w] < rindex[v] {
+                    rindex[v] = rindex[w];
+                    is_root = false;
+                }
+            }
+
+            if is_root {
+                *index -= 1;
+
+                let mut comp = Vec::new();
+
+                while let Some(&top) = stack.last() {
+                    if rindex[v] <= rindex[top] {
+                        let w = stack.pop().unwrap();
+                        rindex[w] = *c;
+                        *index -= 1;
+                        comp.push(w);
+                    } else {
+                        break;
+                    }
+                }
+
+                rindex[v] = *c;
+                comp.push(v);
+
+                *c = c.saturating_sub(1);
+
+                comps.push(comp);
+            } else {
+                stack.push(v);
+            }
+        }
+
+        let n = adj.len();
+        if n == 0 {
+            return Vec::new();
+        }
+
+        let mut rindex = vec![0usize; n];
+        let mut stack = Vec::new();
+        let mut index = 1usize;
+        let mut c = n - 1;
+        let mut comps = Vec::new();
+
+        for v in 0..n {
+            if rindex[v] == 0 {
+                visit(v, adj, &mut rindex, &mut stack, &mut index, &mut c, &mut comps);
+            }
+        }
+
+        comps
+    }
+
+    #[test]
+    fn test_matches_recursive_formulation() {
+        let mut seed = 0x2545f4914f6cdd1du64;
+        let mut next = move |max: usize| {
+            seed ^= seed << 13;
+            seed ^= seed >> 7;
+            seed ^= seed << 17;
+            (seed % max as u64) as usize
+        };
+
+        for _ in 0..500 {
+            let n = 1 + next(40);
+            let edges = next(n * 3);
+
+            let mut adj = vec![Vec::new(); n];
+            for _ in 0..edges {
+                let from = next(n);
+                let to = next(n);
+                adj[from].push(to);
+            }
+
+            assert_eq!(scc_tarjan_pearce_core(&adj), scc_recursive(&adj), "graph: {adj:?}");
+        }
+    }
+
+    #[test]
+    fn test_deep_chain_with_small_stack() {
+        // A dependency chain much longer than what a recursive traversal
+        // could handle on a 256 KiB stack
+        let n = 200_000;
+
+        let handle = std::thread::Builder::new()
+            .stack_size(256 * 1024)
+            .spawn(move || {
+                let mut adj: Vec<Vec<usize>> = (0..n).map(|i| if i + 1 < n {vec![i + 1]} else {vec![]}).collect();
+                let sccs = scc_tarjan_pearce_core(&adj);
+                assert_eq!(sccs.len(), n);
+                assert_eq!(sccs[0], vec![n - 1]);
+
+                // Same, with the chain closed into a single cycle
+                adj[n - 1].push(0);
+                let sccs = scc_tarjan_pearce_core(&adj);
+                assert_eq!(sccs.len(), 1);
+                assert_eq!(sccs[0].len(), n);
+            })
+            .unwrap();
+
+        handle.join().unwrap();
     }
 
     #[test]
