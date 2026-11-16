@@ -134,7 +134,7 @@
     },
     "enableLazyInstalls": {
       "type": "boolean",
-      "description": "Whether to automatically install dependencies before running commands. Set to false, or set YARN_ENABLE_LAZY_INSTALLS=0, to require explicit installs",
+      "description": "Whether to automatically install dependencies before running commands. Set to false to require explicit installs",
       "affectsInstall": false,
       "default": true
     },
