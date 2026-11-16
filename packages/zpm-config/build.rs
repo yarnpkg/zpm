@@ -5,6 +5,14 @@ use serde::Deserialize;
 use serde_with::{serde_as, OneOrMany};
 use zpm_parsers::JsonDocument;
 
+/// Types whose serde representation can't be written back into a
+/// configuration file (`std::time::Duration` serializes as a struct); the
+/// settings using them are serialized through their file string instead.
+/// Keep in sync with the `file_string` entries in `src/lib.rs`.
+const FILE_STRING_SERIALIZED_TYPES: &[&str] = &[
+    "std::time::Duration",
+];
+
 #[derive(Debug, Deserialize, Clone, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 enum Type {
@@ -409,6 +417,17 @@ impl Generator {
                     writeln!(writer, "    #[serde(default)]").unwrap();
                 }
 
+                if let InternalTypeKind::Native(name) = &field.type_.kind {
+                    if FILE_STRING_SERIALIZED_TYPES.contains(&name.as_str()) {
+                        let serializer = match field.type_.nullable {
+                            true => "crate::serialize_optional_setting_as_file_string",
+                            false => "crate::serialize_setting_as_file_string",
+                        };
+
+                        writeln!(writer, "    #[serde(serialize_with = \"{serializer}\")]").unwrap();
+                    }
+                }
+
                 writeln!(writer, "    pub {lc_snake_name}: {},", type_.to_type_string()).unwrap();
             }
 
@@ -421,9 +440,9 @@ impl Generator {
             writeln!(writer, "        unimplemented!(\"Configuration records cannot be returned directly just yet\");").unwrap();
             writeln!(writer, "    }}").unwrap();
             writeln!(writer).unwrap();
-            writeln!(writer, "    fn hydrate(&self, path: &[&str], value_str: &str) -> Result<AbstractValue<'_>, HydrateError> {{").unwrap();
+            writeln!(writer, "    fn hydrate(path: &[&str], value_str: &str) -> Result<AbstractValue<'static>, HydrateError> {{").unwrap();
             writeln!(writer, "        let Some(key_str) = path.first() else {{").unwrap();
-            writeln!(writer, "            unimplemented!(\"Configuration records cannot be returned directly just yet\");").unwrap();
+            writeln!(writer, "            return hydrate_container(value_str);").unwrap();
             writeln!(writer, "        }};").unwrap();
             writeln!(writer, "").unwrap();
             writeln!(writer, "        match *key_str {{").unwrap();
@@ -431,18 +450,18 @@ impl Generator {
             for field in fields {
                 let name = &field.name;
 
-                let lc_snake_name
-                    = name.to_case(Case::Snake);
-
                 let all_names
                     = field.aliases.iter()
                         .chain(std::iter::once(name));
 
+                let type_string
+                    = field.type_.to_type_string();
+
                 for name in all_names {
                     if let Some(duration_unit) = &field.duration_unit {
-                        writeln!(writer, "            \"{name}\" => crate::duration::DurationSetting::hydrate_with_unit(&self.{lc_snake_name}, &path[1..], value_str, zpm_utils::DurationUnit::{duration_unit}),").unwrap();
+                        writeln!(writer, "            \"{name}\" => <{type_string} as crate::duration::DurationSetting>::hydrate_with_unit(&path[1..], value_str, zpm_utils::DurationUnit::{duration_unit}),").unwrap();
                     } else {
-                        writeln!(writer, "            \"{name}\" => MergeSettings::hydrate(&self.{lc_snake_name}, &path[1..], value_str),").unwrap();
+                        writeln!(writer, "            \"{name}\" => <{type_string} as MergeSettings>::hydrate(&path[1..], value_str),").unwrap();
                     }
                 }
             }

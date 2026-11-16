@@ -658,7 +658,7 @@ describe(`Features`, () => {
           ].join(`\n`));
 
           await expect(run(`config`, `get`, `npmScopes.scoped.npmMinimalAgeGate`)).resolves.toMatchObject({
-            stdout: `604800s\n`,
+            stdout: `7d\n`,
           });
         }),
       );

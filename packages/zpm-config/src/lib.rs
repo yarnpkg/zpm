@@ -75,6 +75,36 @@ impl<T: Serialize> Serialize for Setting<T> {
     }
 }
 
+/// Serializes a value through its file string rather than its serde
+/// representation, so that `yarn config get --json` and `yarn config set`
+/// produce values that can be written back into a configuration file
+/// (`std::time::Duration` would otherwise serialize as `{secs, nanos}`).
+#[derive(Debug, Clone)]
+struct FileString<T>(T);
+
+impl<T: ToFileString> Serialize for FileString<T> {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error> where S: Serializer {
+        serializer.serialize_str(&self.0.to_file_string())
+    }
+}
+
+impl<T: ToHumanString> ToHumanString for FileString<T> {
+    fn to_print_string(&self) -> String {
+        self.0.to_print_string()
+    }
+}
+
+fn serialize_setting_as_file_string<T: ToFileString, S: Serializer>(setting: &Setting<T>, serializer: S) -> Result<S::Ok, S::Error> {
+    serializer.serialize_str(&setting.value.to_file_string())
+}
+
+fn serialize_optional_setting_as_file_string<T: ToFileString, S: Serializer>(setting: &Setting<Option<T>>, serializer: S) -> Result<S::Ok, S::Error> {
+    match &setting.value {
+        Some(value) => serializer.serialize_str(&value.to_file_string()),
+        None => serializer.serialize_none(),
+    }
+}
+
 /**
  * Serde will by default coalesce both a missing value and a null value to `None`. We
  * don't want that (`null` should be its own value), so we instead use the Partial<T>
@@ -310,6 +340,17 @@ impl<'de, T: FromFileString + Deserialize<'de>> Deserialize<'de> for Interpolate
     }
 }
 
+/// Container settings (lists, maps, records) can't be parsed from a plain
+/// string, so we read them as JSON documents, like with `--json`. Their
+/// content is validated when the configuration file gets loaded again.
+fn hydrate_container(value_str: &str) -> Result<AbstractValue<'static>, HydrateError> {
+    let value: serde_yaml::Value
+        = zpm_parsers::JsonDocument::hydrate_from_str(value_str)
+            .map_err(|e| HydrateError::InvalidValue(e.to_string()))?;
+
+    Ok(AbstractValue::new_container(Container::new(value)))
+}
+
 trait MergeSettings: Sized {
     type Intermediate;
 
@@ -318,11 +359,13 @@ trait MergeSettings: Sized {
         from_config: Option<Self>,
     ) -> Result<Self, HydrateError>;
 
+    /// Parses `value_str` as the value of the setting at `path`. This doesn't
+    /// look at the current configuration, so that `yarn config set` can create
+    /// entries in maps (`npmScopes.foo.npmAlwaysAuth`) that don't exist yet.
     fn hydrate(
-        &self,
         path: &[&str],
         value_str: &str,
-    ) -> Result<AbstractValue<'_>, HydrateError>;
+    ) -> Result<AbstractValue<'static>, HydrateError>;
 
     fn get(
         &self,
@@ -350,20 +393,17 @@ impl<K: Ord + ToFileString + ToHumanString + FromFileString + Serialize + std::f
         unimplemented!("Configuration maps cannot be returned directly just yet");
     }
 
-    fn hydrate(&self, path: &[&str], value_str: &str) -> Result<AbstractValue<'_>, HydrateError> {
+    fn hydrate(path: &[&str], value_str: &str) -> Result<AbstractValue<'static>, HydrateError> {
         let Some(key_str) = path.first() else {
-            unimplemented!("Configuration maps cannot be returned directly just yet");
+            return hydrate_container(value_str);
         };
 
-        let Ok(key) = K::from_file_string(key_str) else {
+        if K::from_file_string(key_str).is_err() {
             return Err(HydrateError::InvalidKey(key_str.to_string()));
-        };
+        }
 
-        let Some(entry) = self.get(&key) else {
-            return Err(HydrateError::KeyNotFound(key_str.to_string()));
-        };
-
-        entry.hydrate(&path[1..], value_str)
+        // Maps accept arbitrary keys, so the entry doesn't have to exist yet
+        T::hydrate(&path[1..], value_str)
     }
 
     fn get(&self, path: &[&str]) -> Result<ConfigurationEntry<'_>, GetError> {
@@ -488,20 +528,13 @@ impl<T: std::fmt::Debug + Serialize + MergeSettings> MergeSettings for Vec<T> {
         Ok(result)
     }
 
-    fn hydrate(&self, path: &[&str], value_str: &str) -> Result<AbstractValue<'_>, HydrateError> {
+    fn hydrate(path: &[&str], value_str: &str) -> Result<AbstractValue<'static>, HydrateError> {
         let Some(key_str) = path.first() else {
-            unimplemented!("Configuration lists cannot be returned directly just yet");
+            return hydrate_container(value_str);
         };
 
-        let Ok(key) = usize::from_file_string(key_str) else {
-            return Err(HydrateError::InvalidKey(key_str.to_string()));
-        };
-
-        if key >= self.len() {
-            return Err(HydrateError::KeyNotFound(key_str.to_string()));
-        };
-
-        self[key].hydrate(&path[1..], value_str)
+        // The rc file editor doesn't support editing list items in place
+        Err(HydrateError::ListItem(key_str.to_string()))
     }
 
     fn get(&self, path: &[&str]) -> Result<ConfigurationEntry<'_>, GetError> {
@@ -609,7 +642,7 @@ impl MergeSettings for Setting<Path> {
         })
     }
 
-    fn hydrate(&self, path: &[&str], value_str: &str) -> Result<AbstractValue<'_>, HydrateError> {
+    fn hydrate(path: &[&str], value_str: &str) -> Result<AbstractValue<'static>, HydrateError> {
         if let Some(key) = path.first() {
             return Err(HydrateError::KeyNotFound(key.to_string()));
         }
@@ -689,7 +722,7 @@ impl MergeSettings for Setting<Path> {
 }
 
 macro_rules! merge_settings_impl {
-    ($type:ty, $from_str:expr) => {
+    ($type:ty, $wrap:expr) => {
         impl MergeSettings for Setting<$type> {
             type Intermediate = Interpolated<$type>;
 
@@ -704,7 +737,7 @@ macro_rules! merge_settings_impl {
                 })
             }
 
-            fn hydrate(&self, path: &[&str], value_str: &str) -> Result<AbstractValue<'_>, HydrateError> {
+            fn hydrate(path: &[&str], value_str: &str) -> Result<AbstractValue<'static>, HydrateError> {
                 if let Some(key) = path.first() {
                     return Err(HydrateError::KeyNotFound(key.to_string()));
                 }
@@ -713,7 +746,7 @@ macro_rules! merge_settings_impl {
                     = <$type as FromFileString>::from_file_string(value_str)
                         .map_err(|e| HydrateError::InvalidValue(e.to_string()))?;
 
-                Ok(AbstractValue::new(value))
+                Ok(AbstractValue::new(($wrap)(value)))
             }
 
             fn get(&self, path: &[&str]) -> Result<ConfigurationEntry<'_>, GetError> {
@@ -722,7 +755,7 @@ macro_rules! merge_settings_impl {
                 }
 
                 Ok(ConfigurationEntry {
-                    value: AbstractValue::new(self.value.clone()),
+                    value: AbstractValue::new(($wrap)(self.value.clone())),
                     source: self.source,
                 })
             }
@@ -759,7 +792,7 @@ macro_rules! merge_settings_impl {
 
                 fields.insert("value".to_string(), tree::Node {
                     label: Some("Value".to_string()),
-                    value: Some(AbstractValue::new(self.value.clone())),
+                    value: Some(AbstractValue::new(($wrap)(self.value.clone()))),
                     children: None,
                 });
 
@@ -775,7 +808,7 @@ macro_rules! merge_settings_impl {
 }
 
 macro_rules! merge_optional_settings_impl {
-    ($type:ty) => {
+    ($type:ty, $wrap:expr) => {
         impl MergeSettings for Setting<Option<$type>> {
             type Intermediate = Option<Interpolated<$type>>;
 
@@ -790,7 +823,7 @@ macro_rules! merge_optional_settings_impl {
                 })
             }
 
-            fn hydrate(&self, path: &[&str], value_str: &str) -> Result<AbstractValue<'_>, HydrateError> {
+            fn hydrate(path: &[&str], value_str: &str) -> Result<AbstractValue<'static>, HydrateError> {
                 if let Some(key) = path.first() {
                     return Err(HydrateError::KeyNotFound(key.to_string()));
                 }
@@ -799,7 +832,7 @@ macro_rules! merge_optional_settings_impl {
                     = <Option<$type> as FromFileString>::from_file_string(value_str)
                         .map_err(|e| HydrateError::InvalidValue(e.to_string()))?;
 
-                Ok(AbstractValue::new(value))
+                Ok(AbstractValue::new(value.map($wrap)))
             }
 
             fn get(&self, path: &[&str]) -> Result<ConfigurationEntry<'_>, GetError> {
@@ -808,7 +841,7 @@ macro_rules! merge_optional_settings_impl {
                 }
 
                 Ok(ConfigurationEntry {
-                    value: AbstractValue::new(self.value.clone()),
+                    value: AbstractValue::new(self.value.clone().map($wrap)),
                     source: self.source,
                 })
             }
@@ -875,7 +908,7 @@ macro_rules! merge_optional_settings_impl {
 
                 fields.insert("value".to_string(), tree::Node {
                     label: Some("Value".to_string()),
-                    value: Some(AbstractValue::new(self.value.clone())),
+                    value: Some(AbstractValue::new(self.value.clone().map($wrap))),
                     children: None,
                 });
 
@@ -889,15 +922,26 @@ macro_rules! merge_optional_settings_impl {
     };
 }
 
+// The `file_string` variants are for types whose serde representation can't
+// be written back into a configuration file (they must also be listed in
+// `FILE_STRING_SERIALIZED_TYPES` in `build.rs`).
 macro_rules! merge_settings {
     ($type:ty, $from_str:expr) => {
-        merge_settings_impl!($type, $from_str);
+        merge_settings_impl!($type, std::convert::identity);
+    };
+
+    ($type:ty, $from_str:expr, file_string) => {
+        merge_settings_impl!($type, FileString);
     };
 }
 
 macro_rules! merge_optional_settings {
     ($type:ty) => {
-        merge_optional_settings_impl!($type);
+        merge_optional_settings_impl!($type, std::convert::identity);
+    };
+
+    ($type:ty, file_string) => {
+        merge_optional_settings_impl!($type, FileString);
     };
 }
 
@@ -1178,6 +1222,9 @@ pub enum HydrateError {
 
     #[error("Invalid configuration value ({0})")]
     InvalidValue(String),
+
+    #[error("List items can't be set individually ({0}); set the whole list with --json instead")]
+    ListItem(String),
 }
 
 impl HydrateError {
@@ -1494,8 +1541,8 @@ impl Configuration {
         Ok(())
     }
 
-    pub fn hydrate(&self, path: &[&str], value_str: &str) -> Result<AbstractValue<'_>, HydrateError> {
-        self.settings.hydrate(path, value_str)
+    pub fn hydrate(&self, path: &[&str], value_str: &str) -> Result<AbstractValue<'static>, HydrateError> {
+        Settings::hydrate(path, value_str)
     }
 
     pub fn get(&self, path: &[&str]) -> Result<ConfigurationEntry<'_>, GetError> {
@@ -1662,6 +1709,10 @@ pub use fns::*;
 
 mod types;
 pub use types::*;
+
+#[cfg(test)]
+#[path = "./roundtrip.test.rs"]
+mod roundtrip_tests;
 
 #[cfg(test)]
 mod tests {
@@ -2009,8 +2060,8 @@ mod tests {
 
 // Rust doesn't support specialization, so we can't have a blanket implementation for FromStr
 // and a different one for Option<T: FromStr>; instead we manually generate whatever we need.
-merge_settings!(std::time::Duration, |s: &str| FromFileString::from_file_string(s).unwrap());
-merge_optional_settings!(std::time::Duration);
+merge_settings!(std::time::Duration, |s: &str| FromFileString::from_file_string(s).unwrap(), file_string);
+merge_optional_settings!(std::time::Duration, file_string);
 
 merge_settings!(String, |s: &str| FromFileString::from_file_string(s).unwrap());
 merge_settings!(bool, |s: &str| FromFileString::from_file_string(s).unwrap());
