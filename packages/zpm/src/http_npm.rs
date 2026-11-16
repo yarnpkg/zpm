@@ -365,7 +365,7 @@ pub async fn get_id_token(options: &GetIdTokenOptions<'_>) -> Result<Option<Stri
     Ok(Some(data.value))
 }
 
-fn get_ident_url(ident: &Ident) -> String {
+pub fn get_ident_url(ident: &Ident) -> String {
     let (scope, name)
         = ident.split();
 
