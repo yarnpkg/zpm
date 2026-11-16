@@ -1564,16 +1564,43 @@ impl<'a> InstallManager<'a> {
                 // --check-cache forces a fresh hash even when the
                 // lockfile already had one, so on-disk tampering shows.
                 if check_checksums {
+        // Conditional locators (os/cpu/libc-specific packages) keep their
+        // checksum out of the lockfile so it stays the same on every
+        // architecture; the previous install shadowed it in its state
+        // instead. Cache archives are deterministic for a given install
+        // configuration, so when it didn't change we can trust that shadow
+        // like we trust the lockfile checksums, rather than re-hashing
+        // archives that often weigh 100MB+ on every install.
+        let current_install_config_hash = self.context.project
+            .map(|project| project.install_config_hash());
+
+        let reusable_cache_checksums = self.previous_state
+            .filter(|_| !check_checksums)
+            .filter(|state| state.install_config_hash.is_some() && state.install_config_hash == current_install_config_hash)
+            .map(|state| &state.cache_checksums);
+
                     return true;
                 }
 
-                let previous_entry
-                    = self.initial_lockfile.entries.get(&entry.resolution.locator);
+                let locator
+                    = &entry.resolution.locator;
 
-                let has_checksum
-                    = previous_entry.map_or(false, |s| s.checksum.is_some());
+                // Freshly fetched archives were hashed as they were written
+                // to the cache; that checksum takes precedence below anyway.
+                let has_fresh_checksum = self.result.package_data.get(locator)
+                    .is_some_and(|package_data| package_data.checksum().is_some());
 
-                !has_checksum
+                if has_fresh_checksum {
+                    return false;
+                }
+
+                let has_lockfile_checksum = self.initial_lockfile.entries.get(locator)
+                    .is_some_and(|previous_entry| previous_entry.checksum.is_some());
+
+                let has_cache_checksum = reusable_cache_checksums
+                    .is_some_and(|cache_checksums| cache_checksums.contains_key(locator));
+
+                !has_lockfile_checksum && !has_cache_checksum
             })
             .flat_map(|entry| {
                 let package_data = self.result.package_data.get(&entry.resolution.locator)
@@ -1626,7 +1653,8 @@ impl<'a> InstallManager<'a> {
                     None
                 })
                 .or_else(|| previous_checksum.cloned())
-                .or_else(|| late_checksums.get(&entry.resolution.locator).cloned());
+                .or_else(|| late_checksums.get(&entry.resolution.locator).cloned())
+                .or_else(|| reusable_cache_checksums.and_then(|cache_checksums| cache_checksums.get(&entry.resolution.locator)).cloned());
 
             let is_conditional_locator
                 = self.result.install_state.conditional_locators
