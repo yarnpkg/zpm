@@ -374,6 +374,49 @@ describe(`Commands`, () => {
     );
 
     test(
+      `it should add a node-gyp dependency to the lockfile if a development script uses it`,
+      makeTemporaryEnv({}, async ({path, run, source}) => {
+        await run(`add`, `node-gyp-dev-scripts`);
+
+        const lock = parseSyml(await xfs.readFilePromise(`${path}/yarn.lock` as PortablePath, `utf8`));
+        const entry = tests.FEATURE_CHECKS.jsonLockfile
+          ? lock.entries[`node-gyp-dev-scripts@npm:^1.0.0`].resolution
+          : lock[`node-gyp-dev-scripts@npm:^1.0.0`];
+
+        expect(Object.keys(entry.dependencies ?? {})).toEqual([`node-gyp`]);
+      }),
+    );
+
+    test(
+      `it shouldn't add a node-gyp dependency to the lockfile if only a development script uses it and gypfile is false`,
+      makeTemporaryEnv({}, async ({path, run, source}) => {
+        await run(`add`, `gypfile-false-dev-scripts`);
+
+        const lock = parseSyml(await xfs.readFilePromise(`${path}/yarn.lock` as PortablePath, `utf8`));
+        const entry = tests.FEATURE_CHECKS.jsonLockfile
+          ? lock.entries[`gypfile-false-dev-scripts@npm:^1.0.0`].resolution
+          : lock[`gypfile-false-dev-scripts@npm:^1.0.0`];
+
+        expect(Object.keys(entry.dependencies ?? {})).toEqual([]);
+        expect(Object.keys(tests.FEATURE_CHECKS.jsonLockfile ? lock.entries : lock).some(key => key.startsWith(`node-gyp@`))).toEqual(false);
+      }),
+    );
+
+    test(
+      `it should add a node-gyp dependency to the lockfile if an install script uses it, even if gypfile is false`,
+      makeTemporaryEnv({}, async ({path, run, source}) => {
+        await run(`add`, `gypfile-false-install-script`);
+
+        const lock = parseSyml(await xfs.readFilePromise(`${path}/yarn.lock` as PortablePath, `utf8`));
+        const entry = tests.FEATURE_CHECKS.jsonLockfile
+          ? lock.entries[`gypfile-false-install-script@npm:^1.0.0`].resolution
+          : lock[`gypfile-false-install-script@npm:^1.0.0`];
+
+        expect(Object.keys(entry.dependencies ?? {})).toEqual([`node-gyp`]);
+      }),
+    );
+
+    test(
       `it should suggest a workspace if it would match the request (explicit path)`,
       makeTemporaryEnv({
         private: true,

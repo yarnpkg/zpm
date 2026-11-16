@@ -1,0 +1,8 @@
+{
+    "name": "gypfile-false-install-script",
+    "version": "1.0.0",
+    "gypfile": false,
+    "scripts": {
+        "install": "node-gyp help"
+    }
+}

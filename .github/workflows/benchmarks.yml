@@ -45,15 +45,26 @@ jobs:
       fail-fast: false
       matrix:
         packageManager: ${{ fromJSON(github.event_name == 'schedule' && '[["Yarn 6.x","zpm"],["Yarn 4.x","yarn"],["npm","npm"],["pnpm","pnpm"],["Yarn Classic","classic"]]' || '[["Yarn 6.x","zpm"]]') }}
+
         benchmark:
           - [Next.js, next]
           - [Gatsby, gatsby]
           - [Monorepo, monorepo]
+
         scenario:
           - [Full cold install, install-full-cold]
           - [Cache only, install-cache-only]
           - [Cache + lockfile, install-cache-and-lock]
           - [Recurrent call, install-ready]
+
+        # The monorepo fixture relies on the workspace: protocol and on Yarn-style
+        # resolutions, which neither npm nor Yarn Classic support (bench-run.sh
+        # skips these combinations with a warning when run directly)
+        exclude:
+          - packageManager: ["npm","npm"]
+            benchmark: [Monorepo, monorepo]
+          - packageManager: ["Yarn Classic","classic"]
+            benchmark: [Monorepo, monorepo]
 
     needs: [build]
 
@@ -78,8 +89,8 @@ jobs:
 
     - name: Install Hyperfine
       run: |
-        wget https://github.com/sharkdp/hyperfine/releases/download/v1.10.0/hyperfine_1.10.0_amd64.deb
-        sudo dpkg -i hyperfine_1.10.0_amd64.deb
+        wget https://github.com/sharkdp/hyperfine/releases/download/v1.18.0/hyperfine_1.18.0_amd64.deb
+        sudo dpkg -i hyperfine_1.18.0_amd64.deb
 
     - name: 'Creates a temporary directory'
       run: |
@@ -89,14 +100,28 @@ jobs:
     - name: Prepare Node
       uses: ./.github/actions/prepare-node
 
+    # prepare-node installs the pnpm version the test suite expects; the
+    # benchmarks compare against the current pnpm release instead
+    - name: Install the latest pnpm
+      if: matrix.packageManager[1] == 'pnpm'
+      run: |
+        npm install --global pnpm@latest
+        pnpm --version
+
     - name: 'Run the performance test'
       run: |
-        bash scripts/bench-run.sh ${{matrix.packageManager[1]}} ${{matrix.benchmark[1]}} hyperfine "$BENCH_DIR" ${{matrix.scenario[1]}} || true
+        bash scripts/bench-run.sh ${{matrix.packageManager[1]}} ${{matrix.benchmark[1]}} hyperfine "$BENCH_DIR" ${{matrix.scenario[1]}}
 
-        if [[ '${{github.event.inputs.sendReport}}' != 'false' ]]; then
-          yarn node scripts/submit-bench-data.js ${{matrix.packageManager[1]}} ${{matrix.benchmark[1]}} "$BENCH_DIR"
+        if [[ -f "$BENCH_DIR/bench-version.txt" ]]; then
+          echo "Measured ${{matrix.packageManager[0]}} $(cat "$BENCH_DIR/bench-version.txt") on ${{matrix.benchmark[0]}} (${{matrix.scenario[0]}})" >> "$GITHUB_STEP_SUMMARY"
         fi
       env:
-        DD_API_KEY: ${{secrets.DD_API_KEY}}
         HYPERFINE_OPTIONS: ${{github.event.inputs.hyperfineOptions}}
         YARN_ENABLE_HARDENED_MODE: '0'
+
+    - name: 'Submit the results'
+      if: github.event.inputs.sendReport != 'false'
+      run: |
+        yarn node scripts/submit-bench-data.js ${{matrix.packageManager[1]}} ${{matrix.benchmark[1]}} "$BENCH_DIR"
+      env:
+        DD_API_KEY: ${{secrets.DD_API_KEY}}
