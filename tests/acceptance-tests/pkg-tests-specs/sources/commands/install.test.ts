@@ -1355,5 +1355,63 @@ describe(`Commands`, () => {
         }),
       );
     });
+
+    for (const nodeLinker of [`pnp`, `node-modules`, `pnpm`]) {
+      tests.testIf(
+        () => process.platform !== `win32`,
+        `it should install deep dependency chains regardless of the main thread stack size (${nodeLinker})`,
+        makeTemporaryEnv({
+          private: true,
+          workspaces: [`packages/*`],
+          dependencies: {
+            [`pkg-0`]: `workspace:*`,
+          },
+        }, {
+          nodeLinker,
+        }, async ({path, run, source}) => {
+          // Peer dependency resolution walks the dependency tree recursively
+          // (up to 1000 levels deep, like Berry)
+          const depth = 900;
+
+          for (let t = 0; t < depth; ++t) {
+            await xfs.mkdirPromise(ppath.join(path, `packages/pkg-${t}` as PortablePath), {recursive: true});
+            await xfs.writeJsonPromise(ppath.join(path, `packages/pkg-${t}/package.json` as PortablePath), {
+              name: `pkg-${t}`,
+              version: `1.0.0`,
+              dependencies: t + 1 < depth ? {
+                [`pkg-${t + 1}`]: `workspace:*`,
+              } : {},
+            });
+          }
+
+          // Run Yarn with a main thread stack smaller than the 1 MiB Windows
+          // gives it; the install shouldn't depend on it
+          const originalTestBinary = process.env.TEST_BINARY;
+          const yarnBinary = originalTestBinary
+            ?? require.resolve(`${__dirname}/../../../../../target/release/yarn-bin`);
+
+          const wrapperPath = ppath.join(await xfs.mktempPromise(), `yarn-small-stack` as Filename);
+          await xfs.writeFilePromise(wrapperPath, `#!/bin/sh\nulimit -s 512 || exit 1\nexec ${JSON.stringify(yarnBinary)} "$@"\n`, {mode: 0o755});
+
+          process.env.TEST_BINARY = npath.fromPortablePath(wrapperPath);
+          try {
+            await run(`install`);
+          } finally {
+            if (typeof originalTestBinary === `undefined`) {
+              delete process.env.TEST_BINARY;
+            } else {
+              process.env.TEST_BINARY = originalTestBinary;
+            }
+          }
+
+          // The bottom of the chain must have been linked too
+          await expect(run(`node`, `-p`, `require.resolve('pkg-${depth - 1}/package.json')`, {
+            cwd: ppath.join(path, `packages/pkg-${depth - 2}` as PortablePath),
+          })).resolves.toMatchObject({
+            stdout: expect.stringContaining(`pkg-${depth - 1}`),
+          });
+        }),
+      );
+    }
   });
 });
