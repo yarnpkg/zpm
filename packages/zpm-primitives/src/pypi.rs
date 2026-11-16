@@ -54,19 +54,25 @@ impl PypiVersion {
         let release
             = parsed.release();
 
-        let to_u32
-            = |n: Option<u64>| -> Result<u32, PypiError> {
+        // Same limit as the semver parser, so that the projected version
+        // can be printed and parsed back
+        let to_component
+            = |n: Option<u64>| -> Result<u64, PypiError> {
                 let n
                     = n.unwrap_or(0);
-            n.try_into().map_err(|_| PypiError::InvalidSemverProjection(self.raw.clone()))
+
+                match n <= zpm_semver::MAX_SAFE_INTEGER {
+                    true => Ok(n),
+                    false => Err(PypiError::InvalidSemverProjection(self.raw.clone())),
+                }
             };
 
         let major
-            = to_u32(release.first().copied())?;
+            = to_component(release.first().copied())?;
         let minor
-            = to_u32(release.get(1).copied())?;
+            = to_component(release.get(1).copied())?;
         let patch
-            = to_u32(release.get(2).copied())?;
+            = to_component(release.get(2).copied())?;
 
         let mut prerelease_segments
             = Vec::new();
@@ -100,9 +106,9 @@ impl PypiVersion {
             } else {
                 let rc_segments
                     = prerelease_segments.into_iter().map(|segment| {
-                        match segment.parse::<u32>() {
-                            Ok(number) => VersionRc::Number(number),
-                            Err(_) => VersionRc::String(segment.into()),
+                        match segment.parse::<u64>() {
+                            Ok(number) if number <= zpm_semver::MAX_SAFE_INTEGER => VersionRc::Number(number),
+                            _ => VersionRc::String(segment.into()),
                         }
                     }).collect::<Vec<_>>();
 

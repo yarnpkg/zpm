@@ -1,0 +1,5 @@
+{
+  "name": "native-string-libc-musl",
+  "version": "1.0.0",
+  "libc": "musl"
+}

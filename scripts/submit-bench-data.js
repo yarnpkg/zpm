@@ -37,6 +37,13 @@ for (const entry of benchmarkEntries) {
   });
 }
 
+// bench-run.sh exits successfully without results for the combinations
+// it skips (it prints the reason as a warning)
+if (series.length === 0) {
+  console.log(`No benchmark results found in ${benchDir}; nothing to submit`);
+  process.exit(0);
+}
+
 if (process.env.DD_API_KEY) {
   const data = JSON.stringify({series}, null, 2);
 
@@ -47,11 +54,15 @@ if (process.env.DD_API_KEY) {
     },
   }, res => {
     console.log(`Data submitted; received status ${res.statusCode}`);
+    if (res.statusCode < 200 || res.statusCode >= 300)
+      process.exitCode = 1;
+
     res.resume();
   });
 
   req.on(`error`, e => {
     console.error(`problem with request: ${e.message}`);
+    process.exitCode = 1;
   });
 
   req.write(data);

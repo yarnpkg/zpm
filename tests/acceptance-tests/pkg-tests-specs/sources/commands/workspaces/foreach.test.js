@@ -276,6 +276,149 @@ describe(`Commands`, () => {
 
 
     test(
+      `should support combined short flags (-Apt)`,
+      makeTemporaryEnv(
+        {
+          private: true,
+          workspaces: [`packages/*`],
+        },
+        async ({path, run}) => {
+          await setupWorkspaces(path);
+          await run(`install`);
+
+          const {code, stdout, stderr} = await run(`workspaces`, `foreach`, `-Apt`, `run`, `print`);
+
+          const order = stdout.split(`\n`).filter(line => line.includes(`Test Workspace`)).map(line => line.match(/Workspace (?<name>\w+)/).groups.name);
+
+          expect([...order].sort()).toEqual([`A`, `B`, `C`, `D`, `E`, `F`, `G`]);
+
+          // Each workspace runs after its dependencies (B depends on A and C, C on A, D on B, E on D, F on E)
+          for (const [dependency, dependent] of [[`A`, `C`], [`C`, `B`], [`B`, `D`], [`D`, `E`], [`E`, `F`]])
+            expect(order.indexOf(dependency)).toBeLessThan(order.indexOf(dependent));
+
+          expect({code, stderr}).toEqual({code: 0, stderr: ``});
+        },
+      ),
+    );
+
+    test(
+      `should support the short flags of the selection options (-R, -W)`,
+      makeTemporaryEnv(
+        {
+          private: true,
+          workspaces: [`packages/*`],
+        },
+        async ({path, run}) => {
+          await setupWorkspaces(path);
+          await run(`install`);
+
+          await expect(run(`workspaces`, `foreach`, `-Rt`, `run`, `print`, {cwd: `${path}/packages/workspace-b`})).resolves.toEqual({
+            code: 0,
+            stderr: ``,
+            stdout: [
+              `Test Workspace A\n`,
+              `Test Workspace C\n`,
+              `Test Workspace B\n`,
+              ...forEachVerboseDone,
+            ].join(``),
+          });
+
+          await expect(run(`workspaces`, `foreach`, `-Wv`, `run`, `print`, {cwd: `${path}/packages/workspace-c/packages/workspace-d`})).resolves.toEqual({
+            code: 0,
+            stderr: ``,
+            stdout: [
+              `[workspace-d]: Test Workspace D\n`,
+              `[workspace-e]: Test Workspace E\n`,
+              ...forEachVerboseDone,
+            ].join(``),
+          });
+        },
+      ),
+    );
+
+    test(
+      `should order workspaces by dev dependencies too when run with --topological-dev`,
+      makeTemporaryEnv(
+        {
+          private: true,
+          workspaces: [`packages/*`],
+        },
+        async ({path, run}) => {
+          await writeJson(`${path}/packages/workspace-a/package.json`, {
+            name: `workspace-a`,
+            version: `1.0.0`,
+            scripts: {
+              print: `echo Test Workspace A`,
+            },
+            devDependencies: {
+              [`workspace-b`]: `workspace:*`,
+            },
+          });
+
+          await writeJson(`${path}/packages/workspace-b/package.json`, {
+            name: `workspace-b`,
+            version: `1.0.0`,
+            scripts: {
+              print: `echo Test Workspace B`,
+            },
+          });
+
+          await run(`install`);
+
+          const expected = {
+            code: 0,
+            stderr: ``,
+            stdout: [
+              `Test Workspace B\n`,
+              `Test Workspace A\n`,
+              ...forEachVerboseDone,
+            ].join(``),
+          };
+
+          await expect(run(`workspaces`, `foreach`, `--all`, `--topological-dev`, `run`, `print`)).resolves.toEqual(expected);
+
+          // Unlike --topological, --topological-dev always follows dev dependencies
+          await expect(run(`workspaces`, `foreach`, `--all`, `--topological-dev`, `--followed-dependencies`, `prod`, `run`, `print`)).resolves.toEqual(expected);
+        },
+      ),
+    );
+
+    test(
+      `should list the selected workspaces without running the command when run with --dry-run`,
+      makeTemporaryEnv(
+        {
+          private: true,
+          workspaces: [`packages/*`],
+        },
+        async ({path, run}) => {
+          await setupWorkspaces(path);
+          await run(`install`);
+
+          await expect(run(`workspaces`, `foreach`, `--recursive`, `--topological`, `--dry-run`, `run`, `print`, {cwd: `${path}/packages/workspace-b`})).resolves.toEqual({
+            code: 0,
+            stderr: ``,
+            stdout: [
+              `- packages/workspace-a\n`,
+              `  workspace-a@workspace:packages/workspace-a\n`,
+              `- packages/workspace-c\n`,
+              `  workspace-c@workspace:packages/workspace-c\n`,
+              `- packages/workspace-b\n`,
+              `  workspace-b@workspace:packages/workspace-b\n`,
+            ].join(``),
+          });
+
+          await expect(run(`workspaces`, `foreach`, `-An`, `exec`, `touch`, `marker`)).resolves.toMatchObject({
+            code: 0,
+            stderr: ``,
+          });
+
+          await expect(xfs.existsPromise(ppath.join(path, `marker`))).resolves.toEqual(false);
+          await expect(xfs.existsPromise(ppath.join(path, `packages/workspace-a/marker`))).resolves.toEqual(false);
+        },
+      ),
+    );
+
+    test(
       `should prefix the output when run with one --verbose`,
       makeTemporaryEnv(
         {

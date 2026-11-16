@@ -208,6 +208,82 @@ describe(`Protocols`, () => {
     );
 
     test(
+      `it should block git dependencies from repositories that aren't approved`,
+      makeTemporaryEnv(
+        {
+          dependencies: {
+            [`has-prepack`]: tests.startPackageServer().then(url => `${url}/repositories/has-prepack.git`),
+          },
+        },
+        {
+          approvedGitRepositories: [`https://github.com/yarnpkg/*`],
+        },
+        async ({run}) => {
+          await expect(run(`install`)).rejects.toThrow(
+            /doesn't match any of the patterns in 'approvedGitRepositories'/,
+          );
+        },
+      ),
+    );
+
+    test(
+      `it should report unapproved repositories rather than an invalid specifier (GitHub shorthand)`,
+      makeTemporaryEnv(
+        {
+          dependencies: {
+            [`util-deprecate`]: `yarnpkg/util-deprecate#v1.0.1`,
+          },
+        },
+        {
+          approvedGitRepositories: [],
+        },
+        async ({run}) => {
+          const error = await run(`install`).then(() => null, error => error);
+
+          expect(error).not.toBeNull();
+          expect(error.stdout).toContain(`util-deprecate@github:yarnpkg/util-deprecate#v1.0.1: Request to 'https://github.com/yarnpkg/util-deprecate.git' has been blocked because it doesn't match any of the patterns in 'approvedGitRepositories'. To approve it, add a matching pattern (for example 'https://github.com/yarnpkg/util-deprecate.git') to 'approvedGitRepositories' in your .yarnrc.yml, or use '**' to approve all git repositories.`);
+          expect(error.stdout).not.toContain(`Invalid Git specifier`);
+        },
+      ),
+    );
+
+    test(
+      `it should report unapproved repositories rather than an invalid specifier (url with a bare treeish)`,
+      makeTemporaryEnv(
+        {
+          dependencies: {
+            [`has-prepack`]: tests.startPackageServer().then(url => `${url}/repositories/has-prepack.git#master`),
+          },
+        },
+        {
+          approvedGitRepositories: [`https://github.com/other/*`],
+        },
+        async ({run}) => {
+          const error = await run(`install`).then(() => null, error => error);
+
+          expect(error).not.toBeNull();
+          expect(error.stdout).toMatch(/has-prepack@http:\/\/localhost:\d+\/repositories\/has-prepack\.git#master: Request to 'http:\/\/localhost:\d+\/repositories\/has-prepack\.git' has been blocked because it doesn't match any of the patterns in 'approvedGitRepositories'/);
+          expect(error.stdout).toContain(`or use '**' to approve all git repositories.`);
+          expect(error.stdout).not.toContain(`Invalid Git specifier`);
+        },
+      ),
+    );
+
+    test(
+      `it should still report treeishes that don't exist as invalid specifiers`,
+      makeTemporaryEnv(
+        {
+          dependencies: {
+            [`has-prepack`]: tests.startPackageServer().then(url => `${url}/repositories/has-prepack.git#does-not-exist`),
+          },
+        },
+        async ({run}) => {
+          await expect(run(`install`)).rejects.toThrow(/has-prepack@.*#does-not-exist: Invalid Git specifier/);
+        },
+      ),
+    );
+
+    test(
       `it should support installing workspace packages from projects in subfolders`,
       makeTemporaryEnv(
         {

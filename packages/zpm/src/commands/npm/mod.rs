@@ -5,6 +5,7 @@ pub mod logout_all;
 pub mod logout;
 pub mod publish;
 pub mod stage;
+pub mod tag;
 pub mod whoami;
 
 use zpm_parsers::DataDocument;

@@ -22,9 +22,15 @@
     "cacheFolder": {
       "_package": "@yarnpkg/core",
       "title": "Path where the downloaded packages are stored on your system.",
-      "description": "They'll be normalized, compressed, and saved under the form of zip archives with standardized names. The cache is deemed to be relatively safe to be shared by multiple projects, even when multiple Yarn instances run at the same time on different projects. For setting a global cache folder, you should use `enableGlobalCache` instead. Defaults to `.yarn/cache` in the project when the global cache is disabled.",
+      "description": "Packages are normalized and saved as zip archives with standardized names (compressed according to `compressionLevel`). This folder is only used when `enableGlobalCache` is `false`; otherwise the archives are stored in the global cache inside `globalFolder`. Defaults to `.yarn/cache` in the project.\n\nWhen this setting is left to its default, archives the project no longer references are removed from the folder at the end of each install; they're kept when `cacheFolder` is set explicitly.",
       "type": "string",
-      "format": "uri-reference"
+      "format": "uri-reference",
+      "_examples": [
+        {
+          "description": "Store the project cache in a custom folder (requires `enableGlobalCache: false`).",
+          "value": ".cache/yarn"
+        }
+      ]
     },
     "changesetBaseRefs": {
       "_package": "@yarnpkg/plugin-git",
@@ -64,17 +70,28 @@
     "cloneConcurrency": {
       "_package": "@yarnpkg/plugin-git",
       "title": "Amount of `git clone` operations that Yarn will run at the same time.",
-      "description": "We by default limit it to 2 concurrent clone operations.",
+      "description": "We by default limit it to 2 concurrent clone operations. The value must be at least 1.",
       "type": "integer",
       "default": 2,
-      "minimum": 0
+      "minimum": 1,
+      "examples": [4]
     },
     "compressionLevel": {
       "_package": "@yarnpkg/core",
       "type": ["integer", "string", "null"],
       "title": "Compression level employed for zip archives",
-      "description": "Values from `0` (no compression) to `9` (heavy compression) are accepted as integers or strings. Set to `null` to let Yarn choose the compression algorithm.",
-      "enum": [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, "0", "1", "2", "3", "4", "5", "6", "7", "8", "9", null]
+      "description": "Values from `0` (no compression) to `9` (heavy compression) select the Deflate level used for the archives stored in the cache, and are accepted as integers or strings. When the setting is omitted or `null` (the default), archives are stored without compression. The `mixed` value from earlier Yarn versions is rejected.",
+      "enum": [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, "0", "1", "2", "3", "4", "5", "6", "7", "8", "9", null],
+      "_examples": [
+        {
+          "description": "Compress cache archives as much as possible.",
+          "value": 9
+        },
+        {
+          "description": "Store cache archives without compression (the default).",
+          "value": null
+        }
+      ]
     },
     "defaultSemverRangePrefix": {
       "_package": "@yarnpkg/plugin-essentials",
@@ -82,14 +99,26 @@
       "title": "Default prefix used in semver ranges created by `yarn add` and similar commands.",
       "description": "Possible values are `caret` (the default), `tilde`, and `exact`; the symbolic aliases `^`, `~`, `=`, `*`, and the empty string are also accepted.",
       "enum": ["caret", "^", "tilde", "~", "exact", "=", "*", ""],
-      "default": "caret"
+      "default": "caret",
+      "_examples": [
+        {
+          "description": "Pin the exact version when adding dependencies.",
+          "value": "exact"
+        },
+        {
+          "description": "Only accept patch updates of new dependencies.",
+          "value": "tilde"
+        }
+      ]
     },
     "deferredVersionFolder": {
       "_package": "@yarnpkg/plugin-version",
       "title": "Folder where the versioning files are stored.",
+      "description": "Deferred version decisions (recorded by `yarn version` when `preferDeferredVersions` is enabled, and applied by `yarn version apply`) are written to this folder. Relative paths are resolved from the project root.",
       "type": "string",
       "format": "uri-reference",
-      "default": ".yarn/versions"
+      "default": ".yarn/versions",
+      "examples": [".changes"]
     },
     "enableAutoDedupe": {
       "_package": "@yarnpkg/core",
@@ -117,7 +146,7 @@
     "enableHardenedMode": {
       "_package": "@yarnpkg/core",
       "title": "Define whether Yarn should attempt to check for malicious changes.",
-      "description": "If true, Yarn will query the remote registries to validate that the lockfile content matches the remote information. These checks make installs slower, so you should only run them on branches managed by users outside your circle of trust.\n\nYarn will automatically enable the hardened mode on GitHub pull requests from public repository. Should you want to disable it, explicitly set it to `false` in your yarnrc file.",
+      "description": "If true, `yarn install` refreshes the package metadata stored in the lockfile from the remote registries (as with `--refresh-lockfile`) and never takes the \"already up-to-date\" shortcut. Immutable installs are also enabled, unless `enableImmutableInstalls` is set explicitly. These checks make installs slower, so you should only run them on branches managed by users outside your circle of trust.\n\nYarn will automatically enable the hardened mode on GitHub pull requests from public repository. Should you want to disable it, explicitly set it to `false` in your yarnrc file (or set `YARN_ENABLE_HARDENED_MODE=0`).",
       "type": "boolean"
     },
     "enableImmutableCache": {
@@ -158,7 +187,7 @@
     "enableScripts": {
       "_package": "@yarnpkg/core",
       "title": "Define whether to run postinstall scripts or not.",
-      "description": "If false, Yarn will not execute the `postinstall` scripts from third-party packages when installing the project (workspaces will still see their postinstall scripts evaluated, as they're assumed to be safe if you're running an install within them).\n\nNote that you also have the ability to disable scripts on a per-package basis using `dependenciesMeta`, or to re-enable a specific script by combining `enableScripts` and `dependenciesMeta`.",
+      "description": "If false (the default), Yarn will not execute the build scripts (such as `postinstall`) of third-party packages when installing the project (workspaces will still see their postinstall scripts evaluated, as they're assumed to be safe if you're running an install within them).\n\nThe `dependenciesMeta[].built` field of the root manifest overrides this setting on a per-package basis, so you can allow the scripts of specific packages while keeping `enableScripts` disabled, or disable specific packages when it's enabled.",
       "type": "boolean",
       "default": false
     },
@@ -194,6 +223,7 @@
     "httpProxy": {
       "_package": "@yarnpkg/core",
       "title": "Proxy to use when making an HTTP request.",
+      "description": "Applies to requests whose URL uses the `http:` protocol; see `httpsProxy` for `https:` URLs.",
       "type": ["string", "null"],
       "format": "uri",
       "examples": ["http://proxy:4040"]
@@ -201,20 +231,25 @@
     "httpRetry": {
       "_package": "@yarnpkg/core",
       "title": "Number of times to retry a failed HTTP request.",
+      "description": "Requests are retried when they fail with a network error or a `408`, `413`, `429`, or `5xx` status code. Yarn waits between attempts with an exponential backoff capped at 10 seconds. Set it to `0` to disable retries.",
       "type": "integer",
       "default": 3,
-      "minimum": 0
+      "minimum": 0,
+      "examples": [5]
     },
     "httpTimeout": {
       "_package": "@yarnpkg/core",
       "title": "Amount of time to wait in milliseconds before cancelling pending HTTP requests.",
+      "description": "The timeout covers the whole request, from the connection to the end of the response body.",
       "type": "integer",
       "default": 60000,
-      "minimum": 0
+      "minimum": 0,
+      "examples": [120000]
     },
     "httpsCaFilePath": {
       "_package": "@yarnpkg/core",
       "title": "Path to a file containing one or multiple Certificate Authority signing certificates.",
+      "description": "The certificates are trusted in addition to the system ones. Can be set for specific hosts through `networkSettings`.",
       "type": ["string", "null"],
       "format": "uri-reference",
       "examples": ["./exampleCA.pem"]
@@ -222,6 +257,7 @@
     "httpsCertFilePath": {
       "_package": "@yarnpkg/core",
       "title": "Path to a file containing a certificate chain in PEM format.",
+      "description": "Client certificate presented to the servers that request one; it must be combined with `httpsKeyFilePath`. Can be set for specific hosts through `networkSettings`.",
       "type": ["string", "null"],
       "format": "uri-reference",
       "examples": ["./exampleCert.pem"]
@@ -229,6 +265,7 @@
     "httpsKeyFilePath": {
       "_package": "@yarnpkg/core",
       "title": "Path to a file containing a private key in PEM format.",
+      "description": "Private key matching the client certificate set in `httpsCertFilePath`. Can be set for specific hosts through `networkSettings`.",
       "type": ["string", "null"],
       "format": "uri-reference",
       "examples": ["./exampleKey.pem"]
@@ -236,6 +273,7 @@
     "httpsProxy": {
       "_package": "@yarnpkg/core",
       "title": "Define a proxy to use when making an HTTPS request.",
+      "description": "Applies to requests whose URL uses the `https:` protocol; see `httpProxy` for `http:` URLs.",
       "type": ["string", "null"],
       "format": "uri",
       "examples": ["http://proxy:4040"]
@@ -243,6 +281,7 @@
     "immutablePatterns": {
       "_package": "@yarnpkg/core",
       "title": "Array of file patterns whose content won't be allowed to change if `enableImmutableInstalls` is set.",
+      "description": "Patterns are relative to the project root. When immutable installs are enabled, `yarn install` hashes the matching files before and after the install, and fails if they changed.",
       "type": "array",
       "items": {
         "type": "string"
@@ -262,6 +301,7 @@
     "initScope": {
       "_package": "@yarnpkg/plugin-init",
       "title": "Scope used when creating packages via the `init` command.",
+      "description": "Accepted for compatibility with earlier Yarn versions, but not currently used: `yarn init` doesn't read this setting.",
       "type": "string",
       "pattern": "^([^/]+?)$",
       "default": "yarnpkg"
@@ -294,11 +334,17 @@
       "description": "Use `focused` to install only the active workspace and its dependencies, or `all` to install the entire project.",
       "type": "string",
       "enum": ["focused", "all"],
-      "default": "all"
+      "default": "all",
+      "_examples": [
+        {
+          "description": "Only install the workspaces needed by the command being run.",
+          "value": "focused"
+        }
+      ]
     },
     "logFilters": {
       "title": "Alter the log levels for emitted messages.",
-      "description": "This can be used to hide specific messages, or instead make them more prominent. Rules defined there accept filtering messages by exact text or glob pattern.",
+      "description": "This can be used to hide specific messages, or instead make them more prominent. Each filter matches messages by exact `text` or by glob `pattern` (a pattern doesn't need to cover the whole message), and assigns them a new `level` (`info`, `warning`, `error`, or `discard` to hide them). Filters are evaluated in order, and the first one matching a message decides its level. Colors are stripped from messages before matching.",
       "type": "array",
       "items": {
         "type": "object",
@@ -306,17 +352,19 @@
           "text": {
             "type": ["string", "null"],
             "title": "Match messages whose content is strictly equal to the given text.",
+            "description": "Match messages whose content is strictly equal to the given text.",
             "examples": ["lorem-ipsum@npm:1.2.3 lists build scripts, but its build has been explicitly disabled through configuration"]
           },
           "pattern": {
             "type": ["string", "null"],
             "title": "Match messages whose content match the given glob pattern.",
-            "description": "Patterns can be overridden on a case-by-case basis by using the `text` filter, which has precedence over `pattern`.",
+            "description": "Match messages containing a section that matches the given glob pattern.",
             "examples": ["lorem-ipsum@* lists build scripts, but its build has been explicitly disabled through configuration"]
           },
           "level": {
             "type": "string",
             "title": "New log level to apply to the matching messages. Use `discard` if you wish to hide those messages altogether.",
+            "description": "New log level to apply to the matching messages. Use `discard` if you wish to hide those messages altogether.",
             "enum": ["info", "warning", "error", "discard"]
           }
         }
@@ -358,11 +406,13 @@
       "description": "We default to 100 concurrent requests, but it may be required to limit it even more when working behind proxies that can't handle large amounts of traffic.",
       "type": "integer",
       "default": 100,
-      "minimum": 0
+      "minimum": 0,
+      "examples": [16]
     },
     "networkSettings": {
       "_package": "@yarnpkg/core",
       "title": "Additional network settings, per hostname",
+      "description": "Keys are glob patterns matched against the hostname of each request; when several patterns match, the longest one takes precedence. Each entry can override `enableNetwork`, `httpsCaFilePath`, `httpsCertFilePath`, and `httpsKeyFilePath` for the matching hosts. A CA file set here is trusted in addition to the global `httpsCaFilePath`, while setting `httpsCertFilePath` or `httpsKeyFilePath` here replaces both global client certificate settings for the matching hosts.",
       "type": "object",
       "patternProperties": {
         "^(.+)$": {
@@ -370,6 +420,7 @@
           "properties": {
             "enableNetwork": {
               "_hidden": true,
+              "description": "Whether to allow network access to the matching hosts.",
               "anyOf": [{"$ref": "#/properties/enableNetwork"}, {"type": "null"}]
             },
             "httpsCaFilePath": {
@@ -413,7 +464,13 @@
       "description": "Replacement of the former `nohoist` setting. Possible values are:\n\n- If `none` (the default), packages are hoisted as per the usual rules.\n- If `workspaces`, packages won't be hoisted past the workspace that depends on them.\n- If `dependencies`, transitive dependencies also won't be hoisted past your direct dependencies.\n\nThis setting can be overridden on a per-workspace basis using the `installConfig.hoistingLimits` field.",
       "type": "string",
       "enum": ["workspaces", "dependencies", "none"],
-      "default": "none"
+      "default": "none",
+      "_examples": [
+        {
+          "description": "Keep each workspace's dependencies inside its own node_modules folder.",
+          "value": "workspaces"
+        }
+      ]
     },
     "nmSelfReferences": {
       "_package": "@yarnpkg/plugin-nm",
@@ -428,7 +485,13 @@
       "description": "Possible values are:\n\n- If `classic`, regular copy or clone operations are performed.\n- If `hardlinks-global`, hardlinks to a global content-addressable store will be used.\n- If `hardlinks-local`, hardlinks will only be created between similar packages from the same project.\n\nFor compatibility with the ecosystem, the default is `classic`.",
       "type": "string",
       "enum": ["classic", "hardlinks-local", "hardlinks-global"],
-      "default": "classic"
+      "default": "classic",
+      "_examples": [
+        {
+          "description": "Save disk space by hardlinking files from a store shared between projects.",
+          "value": "hardlinks-global"
+        }
+      ]
     },
     "nodeLinker": {
       "_package": "@yarnpkg/plugin-pnp",
@@ -461,7 +524,13 @@
       "description": "Possible values are:\n\n- If `standard` (the default), package maps will reflect the dependency graph and reject undeclared dependencies.\n- If `loose`, package maps will reflect the hoisted node_modules layout and mimic Node.js resolution more closely.\n\nThis setting applies to both `nodeLinker: node-modules` and `nodeLinker: pnpm`.",
       "type": "string",
       "enum": ["standard", "loose"],
-      "default": "standard"
+      "default": "standard",
+      "_examples": [
+        {
+          "description": "Mimic the Node.js resolution of the hoisted node_modules layout.",
+          "value": "loose"
+        }
+      ]
     },
     "pnpmStoreFolder": {
       "_package": "@yarnpkg/plugin-pnpm",
@@ -488,12 +557,18 @@
       "description": "Possible values are:\n\n- If `junctions`, Yarn will use Windows junctions when linking workspaces into `node_modules` directories, which are always absolute paths.\n- If `symlinks`, Yarn will use symlinks, which will use relative paths, and is consistent with Yarn's behavior on non-Windows platforms.",
       "type": "string",
       "enum": ["junctions", "symlinks"],
-      "default": "symlinks"
+      "default": "symlinks",
+      "_examples": [
+        {
+          "description": "Use junctions on Windows machines where symlinks can't be created.",
+          "value": "junctions"
+        }
+      ]
     },
     "npmAlwaysAuth": {
       "_package": "@yarnpkg/plugin-npm",
       "title": "Define whether to always send authentication credentials when querying the npm registry.",
-      "description": "If true, authentication credentials will always be sent when sending requests to the registries. This shouldn't be needed unless you configured the registry to reference a private npm mirror.",
+      "description": "If true, authentication credentials will always be sent when sending requests to the registries. Requests for scoped packages already include the configured credentials, so this is only needed for unscoped packages, for example when you configured the registry to reference a private npm mirror.",
       "type": "boolean",
       "default": false
     },
@@ -524,18 +599,20 @@
       "type": ["string", "null"],
       "title": "Define the default access to use when publishing packages to the npm registry.",
       "description": "Valid values are `public` and `restricted`, but `restricted` usually requires to register for a paid plan (this is up to the registry you use). Can be overridden on a per-package basis using the [`publishConfig.access`](manifest#publishConfig.access) field.",
-      "enum": ["public", "restricted", null]
+      "enum": ["public", "restricted", null],
+      "examples": ["public"]
     },
     "npmPublishProvenance": {
       "_package": "@yarnpkg/plugin-npm-cli",
       "title": "Define whether to attach a provenance statement when publishing packages to the npm registry.",
-      "description": "If true, Yarn will generate and publish the provenance information when publishing packages. Can be overridden on a per-package basis using the [`publishConfig.provenance`](manifest#publishConfig.provenance) field.",
+      "description": "Accepted for compatibility with earlier Yarn versions, but not currently used: `yarn npm publish` only generates a provenance statement when called with `--provenance`, or when the [`publishConfig.provenance`](manifest#publishConfig.provenance) field of the package is set.",
       "type": "boolean",
       "default": false
     },
     "npmAuditExcludePackages": {
       "_package": "@yarnpkg/plugin-npm-cli",
       "title": "Array of package name glob patterns to exclude from `yarn npm audit`.",
+      "description": "Matching packages aren't sent to the audit endpoint. Patterns passed through `yarn npm audit --exclude` are added to this list.",
       "type": "array",
       "items": {
         "type": "string"
@@ -555,6 +632,7 @@
     "npmAuditIgnoreAdvisories": {
       "_package": "@yarnpkg/plugin-npm-cli",
       "title": "Array of advisory ID glob patterns to ignore from `yarn npm audit` results.",
+      "description": "Matching advisories are removed from the report. Patterns passed through `yarn npm audit --ignore` are added to this list.",
       "type": "array",
       "items": {
         "type": "string"
@@ -582,7 +660,7 @@
     "npmRegistries": {
       "_package": "@yarnpkg/plugin-npm",
       "title": "Per-registry configurations.",
-      "description": "Legacy-compatible per-registry npm authentication settings. New configurations may prefer `sourceRules` for registry and ecosystem policy.\n\nEach key is either the registry URL (`https://npm.pkg.github.com`) or the same URL without its protocol (`//npm.pkg.github.com`), which then applies whatever the protocol; trailing slashes are ignored. When both forms are set for a registry, only the entry with the protocol is used.",
+      "description": "Legacy-compatible per-registry npm authentication settings. New configurations may prefer `sourceRules` for registry and ecosystem policy.\n\nEach key is either the registry URL (`https://npm.pkg.github.com`) or the same URL without its protocol (`//npm.pkg.github.com`), which then applies whatever the protocol; trailing slashes are ignored. When both forms are set for a registry, only the entry with the protocol is used. Each entry accepts `npmAlwaysAuth`, `npmAuthIdent`, and `npmAuthToken`, which override the global settings for requests to that registry. `yarn npm login` stores the tokens it obtains here.",
       "type": "object",
       "patternProperties": {
         "^(?:^[a-zA-Z][a-zA-Z0-9+-.]*:)?[^\\s]*$": {
@@ -604,12 +682,12 @@
         }
       },
       "additionalProperties": false,
-      "_exampleKeys": ["//npm.pkg.github.com"],
+      "_exampleKeys": ["https://npm.pkg.github.com"],
       "_examples": [
         {
           "description": "Configure authentication for the public npm registry.",
           "value": {
-            "//registry.npmjs.org": {
+            "https://registry.npmjs.org": {
               "npmAuthToken": "${NPM_TOKEN}"
             }
           }
@@ -617,7 +695,7 @@
         {
           "description": "Always send auth for a private registry.",
           "value": {
-            "//npm.pkg.github.com": {
+            "https://npm.pkg.github.com": {
               "npmAlwaysAuth": true,
               "npmAuthToken": "${GITHUB_TOKEN}"
             }
@@ -631,26 +709,108 @@
       "description": "Should you want to define different registries for different packages, see `packageRules`. To define the authentication scheme for your servers, see `npmAuthToken`. The url must use HTTPS by default, but this can be changed by adding it to the `unsafeHttpWhitelist`.",
       "type": "string",
       "format": "uri",
-      "default": "https://registry.npmjs.org"
+      "default": "https://registry.npmjs.org",
+      "examples": ["https://registry.example.org"]
     },
     "pypiRegistryServer": {
       "_package": "@yarnpkg/core",
       "title": "Define the PyPI registry to use when fetching Python packages.",
-      "description": "Used by the `pypi:` protocol. Can be overridden for specific packages using `packageRules`.",
+      "description": "Used by the `pypi:` protocol. Must point to the root of a [Simple Repository API](https://packaging.python.org/en/latest/specifications/simple-repository-api/) (PEP 503 / PEP 691), which is the URL you'd give to `pip --index-url`; `https://pypi.org` is accepted as an alias for `https://pypi.org/simple/`. Can be overridden for specific packages using `packageRules`.",
       "type": "string",
       "format": "uri",
-      "default": "https://pypi.org",
+      "default": "https://pypi.org/simple/",
       "_examples": [
         {
           "description": "Use an internal PyPI-compatible registry.",
-          "value": "https://pypi.example.org"
+          "value": "https://pypi.example.org/simple/"
         }
       ]
+    },
+    "pypiAuthIdent": {
+      "_package": "@yarnpkg/core",
+      "title": "Username and password (`username:password`) to use for PyPI authentication.",
+      "description": "Sent as `Authorization: Basic` credentials when querying PyPI indexes. Takes precedence over `pypiAuthToken` when both are set. Credentials are only sent to the host serving the index; artifacts hosted elsewhere are downloaded without them. Can be set per package through `packageRules`, or per index through `sourceRules`.",
+      "type": ["string", "null"],
+      "examples": ["${PYPI_USERNAME}:${PYPI_PASSWORD}"]
+    },
+    "pypiAuthToken": {
+      "_package": "@yarnpkg/core",
+      "title": "Token to use for PyPI authentication.",
+      "description": "Sent as an `Authorization: Bearer` token when querying PyPI indexes. Credentials are only sent to the host serving the index; artifacts hosted elsewhere are downloaded without them. Can be set per package through `packageRules`, or per index through `sourceRules`.",
+      "type": ["string", "null"],
+      "examples": ["${PYPI_TOKEN}"]
+    },
+    "pypiMacosTarget": {
+      "_package": "@yarnpkg/core",
+      "title": "Newest macOS version that macOS wheels may require.",
+      "description": "Wheels whose `macosx_X_Y` platform tag requires a newer macOS version are ignored when selecting the wheels to lock for macOS. The value is a `major.minor` version.",
+      "type": "string",
+      "default": "14.0",
+      "examples": ["15.0"]
+    },
+    "pypiManylinuxTarget": {
+      "_package": "@yarnpkg/core",
+      "title": "Newest glibc version that manylinux wheels may require.",
+      "description": "Wheels whose `manylinux_X_Y` platform tag requires a newer glibc are ignored when selecting the wheels to lock for Linux. The value is a `major.minor` version.",
+      "type": "string",
+      "default": "2.34",
+      "examples": ["2.28"]
+    },
+    "pypiMinimalAgeGate": {
+      "_package": "@yarnpkg/core",
+      "title": "Minimum age of a PyPI release file required before installation.",
+      "description": "Files uploaded more recently than this duration are ignored (the equivalent of uv's `exclude-newer`). It relies on the upload times reported by PEP 691 indexes; files whose index doesn't report an upload time are never filtered. Can be overridden per package through `packageRules`, or per index through `sourceRules`.",
+      "type": "string",
+      "default": "0s",
+      "_examples": [
+        {
+          "description": "Ignore files published less than two days ago.",
+          "value": "2d"
+        }
+      ]
+    },
+    "pythonDownloadMirror": {
+      "_package": "@yarnpkg/core",
+      "title": "Base URL of the python-build-standalone releases.",
+      "description": "Managed CPython builds are downloaded from `<mirror>/<release>/`, along with the `SHA256SUMS` file used to verify them. The name of the latest release is still read from the python-build-standalone repository on GitHub.",
+      "type": "string",
+      "format": "uri",
+      "default": "https://github.com/astral-sh/python-build-standalone/releases/download",
+      "examples": ["https://artifacts.example.com/python-build-standalone/releases/download"]
+    },
+    "pythonDownloads": {
+      "_package": "@yarnpkg/core",
+      "title": "Define whether Yarn may download managed Python interpreters.",
+      "description": "If true (the default), Yarn downloads a [python-build-standalone](https://github.com/astral-sh/python-build-standalone) CPython build when no interpreter matching the requested `pythonVersion` is found, either in the global folder or on the `PATH`. If false, the install fails instead.",
+      "type": "boolean",
+      "default": true
+    },
+    "pythonPreference": {
+      "_package": "@yarnpkg/core",
+      "title": "Define which Python interpreters Yarn should prefer.",
+      "description": "Possible values are:\n\n- If `managed` (the default), Yarn uses a python-build-standalone build already downloaded in the global folder, then an interpreter found on the `PATH`, and finally downloads a build (unless `pythonDownloads` is `false`).\n- If `system`, interpreters found on the `PATH` are preferred over the managed builds.\n\nThe `YARN_PYTHON_EXECUTABLE` environment variable can be used to force a specific interpreter.",
+      "type": "string",
+      "enum": ["managed", "system"],
+      "default": "managed",
+      "_examples": [
+        {
+          "description": "Prefer the interpreters installed on the system.",
+          "value": "system"
+        }
+      ]
+    },
+    "pythonVersion": {
+      "_package": "@yarnpkg/core",
+      "title": "Python version used for PyPI packages and venv islands.",
+      "description": "Accepts a `major.minor` (`3.12`) or `major.minor.patch` (`3.12.11`) version. It's used to evaluate environment markers and `requires-python` when resolving `pypi:` dependencies, and to pick the interpreter of the `venv` islands. Each island can override it through its own `pythonVersion` field (see `unstableIslands`).",
+      "type": "string",
+      "default": "3.12",
+      "examples": ["3.13"]
     },
     "npmScopes": {
       "_package": "@yarnpkg/plugin-npm",
       "title": "Per-scope registry configurations.",
-      "description": "Legacy-compatible per-scope npm registry and authentication settings. New configurations may prefer `packageRules`.",
+      "description": "Legacy-compatible per-scope npm registry and authentication settings. New configurations may prefer `packageRules`.\n\nEach key is a scope name, without the leading `@`. Each entry accepts `npmRegistryServer`, `npmPublishRegistry`, `npmAlwaysAuth`, `npmAuthIdent`, and `npmAuthToken`, which apply to the packages of that scope.",
       "type": "object",
       "patternProperties": {
         "^\\S+$": {
@@ -706,18 +866,20 @@
     "packageRules": {
       "_package": "@yarnpkg/core",
       "title": "Package-specific configuration rules.",
-      "description": "Rules are applied in order, and later matching rules override earlier ones. Each rule must define at least one of `ecosystemFilter` or `packageFilter`.",
+      "description": "Rules are applied in order, and later matching rules override earlier ones. Each rule must define at least one of `ecosystemFilter` (`npm` or `pypi`) or `packageFilter` (a package name glob pattern). Besides the filters, a rule accepts `npmRegistryServer`, `npmPublishRegistry`, `npmMinimalAgeGate`, `npmAlwaysAuth`, `npmAuthIdent`, `npmAuthToken`, `pypiRegistryServer`, `pypiMinimalAgeGate`, `pypiAuthIdent`, and `pypiAuthToken`, which override the matching global settings for the packages it matches. Package rules take precedence over `npmScopes`, `npmRegistries`, and `sourceRules`.",
       "type": "array",
       "items": {
         "type": "object",
         "properties": {
           "ecosystemFilter": {
             "type": ["string", "null"],
+            "description": "The package ecosystem this rule applies to.",
             "enum": ["npm", "pypi", null],
             "_hidden": true
           },
           "packageFilter": {
             "type": ["string", "null"],
+            "description": "The package name glob pattern this rule applies to.",
             "_hidden": true
           },
           "npmRegistryServer": {
@@ -731,6 +893,18 @@
           "pypiRegistryServer": {
             "_hidden": true,
             "anyOf": [{"$ref": "#/properties/pypiRegistryServer"}, {"type": "null"}]
+          },
+          "pypiMinimalAgeGate": {
+            "_hidden": true,
+            "anyOf": [{"$ref": "#/properties/pypiMinimalAgeGate"}, {"type": "null"}]
+          },
+          "pypiAuthIdent": {
+            "_hidden": true,
+            "$ref": "#/properties/pypiAuthIdent"
+          },
+          "pypiAuthToken": {
+            "_hidden": true,
+            "$ref": "#/properties/pypiAuthToken"
           },
           "npmMinimalAgeGate": {
             "_hidden": true,
@@ -789,10 +963,13 @@
           }]
         },
         {
-          "description": "Use a private PyPI-compatible registry.",
+          "description": "Route internal Python packages to a private index.",
           "value": [{
             "ecosystemFilter": "pypi",
-            "pypiRegistryServer": "https://pypi.example.org"
+            "packageFilter": "mycompany-*",
+            "pypiRegistryServer": "https://pypi.example.org/simple/",
+            "pypiAuthToken": "${PYPI_TOKEN}",
+            "pypiMinimalAgeGate": "0s"
           }]
         }
       ]
@@ -800,13 +977,14 @@
     "sourceRules": {
       "_package": "@yarnpkg/core",
       "title": "Source-specific configuration rules.",
-      "description": "Rules are applied in order, and later matching rules override earlier ones. Each rule must define at least one of `ecosystemFilter` or `registryFilter`.",
+      "description": "Rules are applied in order, and later matching rules override earlier ones. Each rule must define at least one of `ecosystemFilter` (`npm` or `pypi`) or `registryFilter` (a registry or index URL, compared after normalizing trailing slashes). Besides the filters, a rule accepts `npmMinimalAgeGate`, `npmAlwaysAuth`, `npmAuthIdent`, `npmAuthToken`, `pypiMinimalAgeGate`, `pypiAuthIdent`, and `pypiAuthToken`, which override the matching global settings for the requests sent to the sources it matches. Source rules take precedence over `npmScopes` and `npmRegistries`, and are themselves overridden by `packageRules`.",
       "type": "array",
       "items": {
         "type": "object",
         "properties": {
           "ecosystemFilter": {
             "type": ["string", "null"],
+            "description": "The source ecosystem this rule applies to.",
             "enum": ["npm", "pypi", null],
             "_hidden": true
           },
@@ -819,6 +997,18 @@
           "npmMinimalAgeGate": {
             "_hidden": true,
             "anyOf": [{"$ref": "#/properties/npmMinimalAgeGate"}, {"type": "null"}]
+          },
+          "pypiMinimalAgeGate": {
+            "_hidden": true,
+            "anyOf": [{"$ref": "#/properties/pypiMinimalAgeGate"}, {"type": "null"}]
+          },
+          "pypiAuthIdent": {
+            "_hidden": true,
+            "$ref": "#/properties/pypiAuthIdent"
+          },
+          "pypiAuthToken": {
+            "_hidden": true,
+            "$ref": "#/properties/pypiAuthToken"
           },
           "npmAlwaysAuth": {
             "_hidden": true,
@@ -871,6 +1061,14 @@
             "ecosystemFilter": "npm",
             "npmMinimalAgeGate": "6h"
           }]
+        },
+        {
+          "description": "Authenticate the requests sent to a private PyPI index.",
+          "value": [{
+            "ecosystemFilter": "pypi",
+            "registryFilter": "https://pypi.example.org/simple/",
+            "pypiAuthIdent": "${PYPI_USERNAME}:${PYPI_PASSWORD}"
+          }]
         }
       ]
     },
@@ -886,6 +1084,7 @@
           "properties": {
             "dependencies": {
               "_hidden": true,
+              "description": "Dependencies to add to the matching packages.",
               "type": "object",
               "patternProperties": {
                 "^(?:@([^/]+?)/)?([^/]+?)$": {
@@ -899,6 +1098,7 @@
             },
             "peerDependencies": {
               "_hidden": true,
+              "description": "Peer dependencies to add to the matching packages.",
               "type": "object",
               "patternProperties": {
                 "^(?:@([^/]+?)/)?([^/]+?)$": {
@@ -912,6 +1112,7 @@
             },
             "peerDependenciesMeta": {
               "_hidden": true,
+              "description": "Peer dependency metadata to add to the matching packages.",
               "type": "object",
               "patternProperties": {
                 "^(?:@([^/]+?)/)?([^/]+?)$": {
@@ -919,6 +1120,7 @@
                   "properties": {
                     "optional": {
                       "_hidden": true,
+                      "description": "Whether the peer dependency is optional.",
                       "type": ["boolean", "null"],
                       "examples": [true]
                     }
@@ -965,9 +1167,11 @@
     "patchFolder": {
       "_package": "@yarnpkg/plugin-patch",
       "title": "Folder where patch files will be written to.",
+      "description": "Used by `yarn patch-commit --save`, which writes the patch file there and updates the manifests to reference it through the `patch:` protocol. Relative paths are resolved from the project root.",
       "type": "string",
       "format": "uri-reference",
-      "default": ".yarn/patches"
+      "default": ".yarn/patches",
+      "examples": ["patches"]
     },
     "pnpEnableInlining": {
       "_package": "@yarnpkg/plugin-pnp",
@@ -982,7 +1186,13 @@
       "title": "Define whether to allow packages to rely on the builtin PnP fallback mechanism.",
       "description": "Possible values are:\n\n- If `all`, all packages can access dependencies made available in the fallback.\n- If `dependencies-only` (the default), dependencies will have access to them but not your workspaces.\n- If `none`, no packages will have access to them.",
       "enum": ["none", "dependencies-only", "all"],
-      "default": "dependencies-only"
+      "default": "dependencies-only",
+      "_examples": [
+        {
+          "description": "Disable the fallback to catch every undeclared dependency.",
+          "value": "none"
+        }
+      ]
     },
     "pnpIgnorePatterns": {
       "_package": "@yarnpkg/plugin-pnp",
@@ -1007,17 +1217,20 @@
     "pnpShebang": {
       "_package": "@yarnpkg/plugin-pnp",
       "title": "String prepended to the generated PnP loader.",
+      "description": "Written as the first line of the generated `.pnp.cjs` file.",
       "type": "string",
       "pattern": "^(#!.*\n?)+",
-      "default": "#!/usr/bin/env node"
+      "default": "#!/usr/bin/env node",
+      "examples": ["#!/usr/bin/env -S node --no-warnings"]
     },
     "pnpUnpluggedFolder": {
       "_package": "@yarnpkg/plugin-pnp",
       "title": "Path where unplugged packages are stored.",
-      "description": "While Yarn attempts to reference and load packages directly from their zip archives, it may not always be possible. In those cases, Yarn will extract the files to the unplugged folder.",
+      "description": "While Yarn attempts to reference and load packages directly from their zip archives, it may not always be possible. In those cases, Yarn will extract the files to the unplugged folder. Relative paths are resolved from the project root.",
       "type": "string",
       "format": "uri-reference",
-      "default": ".yarn/unplugged"
+      "default": ".yarn/unplugged",
+      "examples": [".yarn/unplugged-packages"]
     },
     "preferDeferredVersions": {
       "_package": "@yarnpkg/plugin-version",
@@ -1029,7 +1242,7 @@
     "preferInteractive": {
       "_package": "@yarnpkg/core",
       "title": "Define whether to use interactive prompts by default or not.",
-      "description": "If true, Yarn will ask for your guidance when some actions would be improved by being disambiguated. Enabling this setting also unlocks some features (for example the `yarn add` command will suggest to reuse the same dependencies as other workspaces if pertinent).",
+      "description": "Accepted for compatibility with earlier Yarn versions, but not currently used: no command reads this setting.",
       "type": "boolean",
       "default": false
     },
@@ -1043,7 +1256,7 @@
     "preferTruncatedLines": {
       "_package": "@yarnpkg/core",
       "title": "Define whether to truncate lines that would go beyond the size of the terminal or not.",
-      "description": "If true, Yarn will truncate lines that would go beyond the size of the terminal. If progress bars are disabled, lines will never be truncated.",
+      "description": "Accepted for compatibility with earlier Yarn versions, but not currently used: Yarn doesn't read this setting.",
       "type": "boolean",
       "default": false
     },
@@ -1054,6 +1267,7 @@
       "properties": {
         "os": {
           "title": "List of operating systems to cover.",
+          "description": "Accepts `current` and the values of Node.js' `process.platform` (for example `darwin`, `linux`, or `win32`).",
           "type": ["string", "array", "null"],
           "items": {
             "type": "string"
@@ -1073,6 +1287,7 @@
         },
         "libc": {
           "title": "The list of standard C libraries to cover.",
+          "description": "Accepts `current`, `glibc`, and `musl`.",
           "type": ["string", "array", "null"],
           "items": {
             "type": "string"
@@ -1204,7 +1419,7 @@
       "_package": "@yarnpkg/core",
       "title": "Maximum number of task processes running at the same time.",
       "description": "The daemon shares this limit between all the `yarn tasks run` invocations it serves. Long-lived tasks and tasks without a script don't count toward it, nor do tasks waiting on a nested `yarn tasks run`. The background daemon reads it when it starts, so it must be restarted for changes to apply. Defaults to the number of CPUs.",
-      "type": "number",
+      "type": "integer",
       "_examples": [
         {
           "description": "Run tasks one at a time.",
@@ -1219,7 +1434,7 @@
     "enableAutoTypes": {
       "_package": "@yarnpkg/plugin-typescript",
       "title": "Define whether Yarn should automatically add @types packages.",
-      "description": "When enabled, Yarn may add matching `@types/*` packages when adding dependencies that don't ship their own TypeScript declarations. Enabled by default when a `tsconfig.json` exists at the project root or in the active workspace. This setting is also available through the `tsEnableAutoTypes` alias.",
+      "description": "When enabled, Yarn may add matching `@types/*` packages when adding dependencies that don't ship their own TypeScript declarations, and `yarn remove` also removes the `@types/*` package matching each removed dependency. Enabled by default when a `tsconfig.json` exists at the project root or in the active workspace. This setting is also available through the `tsEnableAutoTypes` alias.",
       "type": "boolean",
       "_examples": [
         {
@@ -1235,7 +1450,7 @@
     "enableCacheClean": {
       "_package": "@yarnpkg/core",
       "title": "Define whether the cache clean command is allowed to remove cache entries.",
-      "description": "If false, cache clean operations won't remove entries from the cache.",
+      "description": "If false, `yarn cache clean` refuses to run and reports an error instead of removing entries from the cache.",
       "type": "boolean",
       "default": true,
       "_examples": [
@@ -1251,18 +1466,14 @@
     },
     "enableLocalCacheCleanup": {
       "_package": "@yarnpkg/core",
-      "title": "Define whether unused packages should be removed from the local cache after installs.",
-      "description": "When enabled, Yarn can remove unused entries from the project-local cache after each install.",
+      "title": "Define whether the `pnp` linker should remove the project's root `node_modules` folder.",
+      "description": "Despite its name, this setting doesn't control the local cache: unused entries are removed from the local cache after each install whenever `cacheFolder` is left to its default. Its only effect is on the `pnp` linker, which removes the project's root `node_modules` folder (preserving hidden folders other than `.bin`) when this setting is enabled.",
       "type": "boolean",
       "default": true,
       "_examples": [
         {
-          "description": "Keep stale local cache entries around for manual inspection.",
+          "description": "Keep the root node_modules folder when installing with the pnp linker.",
           "value": false
-        },
-        {
-          "description": "Clean unused local cache entries after installs.",
-          "value": true
         }
       ]
     },
@@ -1286,7 +1497,7 @@
     "enforceUnsafeHttp": {
       "_package": "@yarnpkg/core",
       "title": "Define whether Yarn should enforce unsafe HTTP requests over HTTPS.",
-      "description": "This setting is intended for controlled environments that deliberately need to force unsafe HTTP behavior.",
+      "description": "If true, Yarn rewrites the URL of every request to use plain `http:` instead of `https:`, and `unsafeHttpWhitelist` isn't checked anymore. This setting is intended for controlled environments (such as tests against a local registry) that deliberately need to force unsafe HTTP behavior.",
       "type": "boolean",
       "default": false,
       "_examples": [
@@ -1303,7 +1514,7 @@
     "nodeDistUrl": {
       "_package": "@yarnpkg/core",
       "title": "URL used to download Node.js distributions.",
-      "description": "Yarn uses this endpoint when resolving managed Node.js binaries.",
+      "description": "Yarn reads the list of releases (`index.json`) and downloads the Node.js binaries from this endpoint when resolving `builtin:` Node.js dependencies (for example `@yarnpkg/node: builtin:^22.0.0`).",
       "type": "string",
       "format": "uri",
       "default": "https://nodejs.org/dist",
@@ -1414,7 +1625,7 @@
     "unstableIslands": {
       "_package": "@yarnpkg/core",
       "title": "Configuration of resolution islands.",
-      "description": "Each island resolves its transitive dependencies in isolation using a constraint solver, producing at most one version of each package per island.",
+      "description": "Each island resolves its transitive dependencies in isolation using a constraint solver, producing at most one version of each package per island. Each entry accepts:\n\n- `workspaces`: the workspace name glob patterns belonging to the island.\n- `linker`: `node-modules`, or `venv` for Python workspaces using the [`pypi:` protocol](/protocol/pypi).\n- `pythonVersion`: the Python version of the island, overriding the global `pythonVersion` setting.\n- `pypiConstraints`: PEP 508 requirements restricting the versions the island may select, without adding the packages to the island (like uv's `constraint-dependencies`).\n- `pypiSeedLockfile`: the path (relative to the project root) of a `uv.lock` file whose versions are preferred while the island has no entry in the lockfile yet; `yarn import uv` sets it so that migrating doesn't upgrade anything.",
       "type": "object",
       "patternProperties": {
         "^(.+)$": {
@@ -1422,6 +1633,7 @@
           "properties": {
             "workspaces": {
               "_hidden": true,
+              "description": "List of workspace name glob patterns that belong to this island.",
               "type": "array",
               "items": {
                 "type": "string"
@@ -1429,8 +1641,27 @@
             },
             "linker": {
               "_hidden": true,
+              "description": "The linker to use for the workspaces of this island.",
               "type": "string",
               "enum": ["node-modules", "venv"]
+            },
+            "pythonVersion": {
+              "_hidden": true,
+              "description": "The Python version used by this island, overriding the global `pythonVersion` setting.",
+              "type": ["string", "null"]
+            },
+            "pypiSeedLockfile": {
+              "_hidden": true,
+              "description": "Path (relative to the project root) of a `uv.lock` file whose versions are preferred while the island has no entry in the lockfile yet.",
+              "type": ["string", "null"]
+            },
+            "pypiConstraints": {
+              "_hidden": true,
+              "description": "PEP 508 requirements restricting the versions the island may select for a package, without adding the package to the island.",
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
             }
           }
         }
@@ -1450,7 +1681,9 @@
           "value": {
             "python": {
               "workspaces": ["@acme/py-*"],
-              "linker": "venv"
+              "linker": "venv",
+              "pythonVersion": "3.13",
+              "pypiConstraints": ["protobuf<6"]
             }
           }
         }
@@ -1459,7 +1692,7 @@
     "workspaceProfiles": {
       "_package": "@yarnpkg/core",
       "title": "Per-profile dependencies that can be applied to workspaces.",
-      "description": "Workspace profiles let you define reusable dev dependency sets. Workspaces can inherit them through their manifest `extends` field, and the `default` profile is applied automatically.",
+      "description": "Workspace profiles let you define reusable dev dependency sets. Workspaces can inherit them through their manifest `extends` field, and the `default` profile is applied automatically. Each profile accepts `devDependencies`, which are added to the workspace unless it already declares them, and `extends`, a list of other profiles to apply as well.",
       "type": "object",
       "patternProperties": {
         "^(.+)$": {
@@ -1467,6 +1700,7 @@
           "properties": {
             "extends": {
               "_hidden": true,
+              "description": "Other profiles whose dev dependencies are also applied.",
               "type": "array",
               "items": {
                 "type": "string"
@@ -1474,6 +1708,7 @@
             },
             "devDependencies": {
               "_hidden": true,
+              "description": "Dev dependencies added to the workspaces using this profile, unless they already declare them.",
               "type": "object",
               "patternProperties": {
                 "^(?:@([^/]+?)/)?([^/]+?)$": {
@@ -1594,6 +1829,7 @@
     "unsafeHttpWhitelist": {
       "_package": "@yarnpkg/core",
       "title": "Array of hostname glob patterns for which using the HTTP protocol is allowed.",
+      "description": "Requests to `http:` URLs are rejected unless their hostname matches one of these patterns (or `enforceUnsafeHttp` is enabled).",
       "type": "array",
       "items": {
         "type": "string"
@@ -1617,7 +1853,8 @@
       "type": "string",
       "format": "uri-reference",
       "pattern": "^.*__virtual__$",
-      "default": ".yarn/__virtual__"
+      "default": ".yarn/__virtual__",
+      "examples": [".cache/__virtual__"]
     }
   }
 }
