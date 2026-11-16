@@ -19,7 +19,7 @@ The first line of the doc comment is the command description, and the following 
 
 ## Command examples
 
-clipanion-rs doesn't read examples from the command definitions yet (the `examples` field of the command specs is always empty), so examples are written as the last section of the details: a `## Examples` paragraph followed by pairs of paragraphs, a short description and then the command wrapped in single backticks. The website extracts this section and renders it as the "Examples" section of the command page (see [website/src/utils/cli.ts](../../website/src/utils/cli.ts)); the build fails if a description has no command or the other way around. Note that `yarn <command> --help` only prints the usage line and the description, not the details. Only document commands and flags you ran against your build.
+Examples are written as the last section of the doc comment: a `## Examples` paragraph followed by pairs of paragraphs, a short description and then the command wrapped in single backticks. clipanion-rs takes this section out of the details when the command is compiled (the build fails if a description has no command, or if a command isn't a single code span) and exposes it as the `examples` field of the command spec. `yarn <command> --help` prints them in its "Examples" section, and the website renders them on the command page (see [website/src/utils/cli.ts](../../website/src/utils/cli.ts)). Only document commands and flags you ran against your build.
 
 ```rust
 /// Add new dependencies to the project
