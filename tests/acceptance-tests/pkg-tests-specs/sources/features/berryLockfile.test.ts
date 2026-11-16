@@ -249,9 +249,6 @@ describe(`Features`, () => {
           const lockfile = makeBerryLockfile(8);
           await xfs.writeFilePromise(ppath.join(path, Filename.lockfile), lockfile);
 
-          // TODO: the migration mode doesn't create the folder of its lockfile yet
-          await xfs.mkdirPromise(ppath.join(path, `.yarn/ignore/migration`), {recursive: true});
-
           const migrationEnv = {
             env: {
               ...WITH_YARN6_DEFAULTS.env,
