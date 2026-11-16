@@ -5,4 +5,7 @@ pub enum Error {
 
     #[error("Invalid semver version: {0}")]
     InvalidVersion(String),
+
+    #[error("Invalid prerelease pattern: {0}")]
+    InvalidPrereleasePattern(String),
 }

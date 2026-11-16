@@ -1,8 +1,32 @@
-use std::sync::Arc;
+use std::sync::{atomic::{AtomicUsize, Ordering}, Arc};
 
 use thiserror::Error;
 
 use crate::{Path, ToHumanString};
+
+static CAPTURED_BACKTRACES: AtomicUsize
+    = AtomicUsize::new(0);
+
+/// Captures the backtrace attached to I/O errors. When `RUST_BACKTRACE` is
+/// set, each capture walks the whole stack, which is expensive (very much so
+/// in static musl builds), so code probing the filesystem in loops should
+/// work on `std::io::Result` and only convert the errors it reports.
+pub fn capture_backtrace() -> std::backtrace::Backtrace {
+    let backtrace
+        = std::backtrace::Backtrace::capture();
+
+    if backtrace.status() == std::backtrace::BacktraceStatus::Captured {
+        CAPTURED_BACKTRACES.fetch_add(1, Ordering::Relaxed);
+    }
+
+    backtrace
+}
+
+/// How many backtraces `capture_backtrace` collected since the process
+/// started; used by the tests to detect expected errors on hot paths.
+pub fn captured_backtrace_count() -> usize {
+    CAPTURED_BACKTRACES.load(Ordering::Relaxed)
+}
 
 pub fn render_backtrace(backtrace: &std::backtrace::Backtrace) -> String {
     if backtrace.status() == std::backtrace::BacktraceStatus::Captured {
@@ -75,7 +99,7 @@ impl From<std::io::Error> for PathError {
     fn from(error: std::io::Error) -> Self {
         Self::IoError {
             inner: Arc::new(error),
-            backtrace: Arc::new(std::backtrace::Backtrace::capture()),
+            backtrace: Arc::new(capture_backtrace()),
         }
     }
 }

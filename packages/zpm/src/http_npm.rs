@@ -55,7 +55,7 @@ fn package_rule_matches(rule: &PackageRule, ecosystem: EcosystemFilter, ident: O
 fn source_rule_matches(rule: &SourceRule, ecosystem: EcosystemFilter, registry: &str) -> bool {
     ecosystem_matches(rule.ecosystem_filter.value, ecosystem)
         && rule.registry_filter.value.as_ref().map_or(true, |filter| {
-            normalize_registry_url(filter) == normalize_registry_url(registry)
+            registry_key_matches(filter, registry)
         })
 }
 
@@ -64,23 +64,69 @@ fn legacy_scope_settings<'a>(config: &'a Configuration, ident: Option<&Ident>) -
     config.settings.npm_scopes.get(scope.strip_prefix('@').unwrap_or(scope))
 }
 
-fn legacy_registry_settings<'a>(config: &'a Configuration, registry: &str) -> Option<&'a NpmRegistry> {
-    if let Some(registry_settings) = config.settings.npm_registries.get(registry) {
-        return Some(registry_settings);
-    }
+/// Returns the registry URL without its protocol (`https://host/path` becomes
+/// `//host/path`), or `None` if it doesn't start with one. Mirrors the
+/// `/^[a-z]+:/` substitution Berry applies in `getRegistryConfiguration`.
+fn strip_registry_protocol(registry: &str) -> Option<&str> {
+    let (protocol, rest)
+        = registry.split_once(':')?;
 
-    let registry_with_slash = format!("{}/", registry);
-    if let Some(registry_settings) = config.settings.npm_registries.get(&registry_with_slash) {
-        return Some(registry_settings);
-    }
+    let is_protocol
+        = !protocol.is_empty() && protocol.bytes().all(|byte| byte.is_ascii_lowercase());
+
+    is_protocol.then_some(rest)
+}
+
+/// Returns, in their original order, the `npmRegistries` keys that apply to
+/// the given registry, best match first. Trailing slashes are ignored on both
+/// sides. Like in Berry, keys spelled as the registry URL come first; the
+/// protocol-less `//host/path` keys (npm's own `.npmrc` style) come after
+/// them and apply whatever the protocol of the registry.
+pub fn matching_registry_keys<'a, I: IntoIterator<Item = &'a str>>(keys: I, registry: &str) -> Vec<&'a str> {
+    let keys
+        = keys.into_iter().collect::<Vec<_>>();
 
     let normalized_registry
         = normalize_registry_url(registry);
 
-    config.settings.npm_registries.iter()
-        .find_map(|(candidate, settings)| {
-            (normalize_registry_url(candidate) == normalized_registry).then_some(settings)
-        })
+    let protocol_less_registry
+        = strip_registry_protocol(normalized_registry);
+
+    let exact_keys = keys.iter()
+        .filter(|key| normalize_registry_url(key) == normalized_registry);
+
+    let protocol_less_keys = keys.iter()
+        .filter(|key| Some(normalize_registry_url(key)) == protocol_less_registry);
+
+    let mut result
+        = Vec::new();
+
+    // Prefer the key spelled exactly like the registry, so that duplicated
+    // spellings of the same URL keep resolving as they always did.
+    result.extend(keys.iter().filter(|key| **key == registry));
+    result.extend(exact_keys.chain(protocol_less_keys).filter(|key| **key != registry));
+
+    result
+}
+
+/// Returns whether a registry key (an `npmRegistries` key or a
+/// `sourceRules[].registryFilter`) designates the given registry; see
+/// `matching_registry_keys` for the accepted forms.
+pub fn registry_key_matches(key: &str, registry: &str) -> bool {
+    !matching_registry_keys([key], registry).is_empty()
+}
+
+/// Returns the `npmRegistries` key whose settings apply to the given registry;
+/// see `matching_registry_keys` for the precedence rules.
+pub fn find_registry_key<'a, I: IntoIterator<Item = &'a str>>(keys: I, registry: &str) -> Option<&'a str> {
+    matching_registry_keys(keys, registry).into_iter().next()
+}
+
+fn legacy_registry_settings<'a>(config: &'a Configuration, registry: &str) -> Option<&'a NpmRegistry> {
+    let key
+        = find_registry_key(config.settings.npm_registries.keys().map(|key| key.as_str()), registry)?;
+
+    config.settings.npm_registries.get(key)
 }
 
 fn get_registry_raw<'a>(config: &'a Configuration, ident: Option<&Ident>, publish: bool) -> Result<&'a str, Error> {
@@ -258,6 +304,12 @@ pub fn get_minimal_age_gate(config: &Configuration, registry: &str, ident: &Iden
     let mut value
         = config.settings.npm_minimal_age_gate.value;
 
+    if let Some(scope_settings) = legacy_scope_settings(config, Some(ident)) {
+        if let Some(next) = scope_settings.npm_minimal_age_gate.value {
+            value = next;
+        }
+    }
+
     for rule in &config.settings.source_rules {
         if source_rule_matches(rule, EcosystemFilter::Npm, registry) {
             if let Some(next) = rule.npm_minimal_age_gate.value {
@@ -365,7 +417,7 @@ pub async fn get_id_token(options: &GetIdTokenOptions<'_>) -> Result<Option<Stri
     Ok(Some(data.value))
 }
 
-fn get_ident_url(ident: &Ident) -> String {
+pub fn get_ident_url(ident: &Ident) -> String {
     let (scope, name)
         = ident.split();
 
@@ -717,8 +769,10 @@ async fn fetch_metadata_with_disk_cache(params: &GetPackageMetadataParams<'_>) -
     let cache_file
         = get_cache_file_path(params.global_folder, &url);
 
+    // Not going through `fs_read_prealloc`: the errors are discarded, and
+    // the file is missing for every package of a cold install
     let cached = if !params.refresh_lockfile {
-        cache_file.fs_read_prealloc().ok()
+        std::fs::read(cache_file.to_path_buf()).ok()
             .and_then(|data| rkyv::from_bytes::<CachedMetadataDisk, rkyv::rancor::BoxedError>(&data).ok())
     } else {
         None
@@ -1123,5 +1177,73 @@ mod tests {
         // entries; 2.0.0 from fresh must still be there.
         assert!(versions.contains_key("0.9.0"));
         assert!(versions.contains_key("2.0.0"));
+    }
+
+    #[test]
+    fn registry_keys_match_with_or_without_protocol_and_trailing_slash() {
+        let cases = [
+            ("https://npm.pkg.github.com", "https://npm.pkg.github.com"),
+            ("https://npm.pkg.github.com/", "https://npm.pkg.github.com"),
+            ("//npm.pkg.github.com", "https://npm.pkg.github.com"),
+            ("//npm.pkg.github.com/", "https://npm.pkg.github.com"),
+            ("//npm.pkg.github.com", "https://npm.pkg.github.com/"),
+            ("//localhost:4873", "http://localhost:4873"),
+            ("//host/artifactory/api/npm/repo/", "https://host/artifactory/api/npm/repo"),
+            ("https://host/artifactory/api/npm/repo/", "https://host/artifactory/api/npm/repo/"),
+        ];
+
+        for (key, registry) in cases {
+            assert_eq!(find_registry_key([key], registry), Some(key), "{key} should match {registry}");
+        }
+    }
+
+    #[test]
+    fn registry_keys_dont_match_other_registries() {
+        let cases = [
+            // The protocol is only ignored when the key doesn't have one
+            ("http://npm.pkg.github.com", "https://npm.pkg.github.com"),
+            ("https://npm.pkg.github.com", "http://npm.pkg.github.com"),
+            // Paths must match exactly; keys aren't prefixes
+            ("//host", "https://host/artifactory/api/npm/repo"),
+            ("//host/artifactory/api/npm/repo", "https://host"),
+            ("https://host", "https://host/artifactory/api/npm/repo"),
+            ("//host:8080", "https://host"),
+            ("host", "https://host"),
+            ("///host", "https://host"),
+        ];
+
+        for (key, registry) in cases {
+            assert_eq!(find_registry_key([key], registry), None, "{key} shouldn't match {registry}");
+        }
+    }
+
+    #[test]
+    fn registry_keys_spelled_with_the_protocol_win() {
+        // Same rule as Berry: the full URL entry wins over the protocol-less
+        // one regardless of their order, and the entries aren't merged.
+        assert_eq!(find_registry_key(["//host", "https://host/"], "https://host"), Some("https://host/"));
+        assert_eq!(find_registry_key(["https://host/", "//host"], "https://host"), Some("https://host/"));
+
+        // A key spelled exactly like the registry beats its trailing-slash
+        // variants; other variants of the same form keep their order
+        assert_eq!(find_registry_key(["https://host/", "https://host"], "https://host"), Some("https://host"));
+        assert_eq!(find_registry_key(["//host/", "//host"], "https://host"), Some("//host/"));
+
+        assert_eq!(
+            matching_registry_keys(["//host", "//other", "https://host", "https://host/", "http://host"], "https://host"),
+            vec!["https://host", "https://host/", "//host"],
+        );
+    }
+
+    #[test]
+    fn single_registry_keys_match_like_npm_registries_keys() {
+        // Used for `sourceRules[].registryFilter`
+        assert!(registry_key_matches("https://host/repo/", "https://host/repo"));
+        assert!(registry_key_matches("//host/repo", "https://host/repo"));
+        assert!(registry_key_matches("//host/repo/", "http://host/repo"));
+
+        assert!(!registry_key_matches("//host", "https://host/repo"));
+        assert!(!registry_key_matches("//other/repo", "https://host/repo"));
+        assert!(!registry_key_matches("http://host/repo", "https://host/repo"));
     }
 }

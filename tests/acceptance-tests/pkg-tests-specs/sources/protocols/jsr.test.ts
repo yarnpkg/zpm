@@ -5,6 +5,30 @@ import {tests}         from 'pkg-tests-core';
 describe(`Protocols`, () => {
   describe(`jsr:`, () => {
     test(
+      `it should keep explicit ranges as-is when adding a package with "yarn add"`,
+      makeTemporaryEnv(
+        {},
+        async ({path, run, source}) => {
+          await xfs.writeFilePromise(ppath.join(path, `.yarnrc.yml`), JSON.stringify({
+            [`npmScopes`]: {
+              [`jsr`]: {
+                [`npmRegistryServer`]: `${await tests.startPackageServer()}/registry/jsr`,
+              },
+            },
+          }));
+
+          await run(`add`, `jsr:no-deps-jsr@^1`);
+
+          await expect(xfs.readJsonPromise(ppath.join(path, `package.json`))).resolves.toMatchObject({
+            dependencies: {
+              [`no-deps-jsr`]: `jsr:^1`,
+            },
+          });
+        },
+      ),
+    );
+
+    test(
       `is should allow adding a package with "yarn add"`,
       makeTemporaryEnv(
         {},

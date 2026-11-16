@@ -86,6 +86,46 @@ describe(`Commands`, () => {
       }),
     );
 
+    test(
+      `it should print durations in a form that config set accepts`,
+      makeTemporaryEnv({}, async ({path, run, source}) => {
+        const env = {env: {YARN_NPM_MINIMAL_AGE_GATE: undefined}};
+
+        await xfs.writeFilePromise(`${path}/.yarnrc.yml`, [
+          `npmMinimalAgeGate: 72h\n`,
+          `pypiMinimalAgeGate: 0\n`,
+          `packageRules:\n`,
+          `  - packageFilter: lodash\n`,
+          `    npmMinimalAgeGate: 90s\n`,
+        ].join(``));
+
+        await expect(run(`config`, `get`, `npmMinimalAgeGate`, env)).resolves.toMatchObject({
+          stdout: `3d\n`,
+        });
+
+        await expect(run(`config`, `get`, `--json`, `npmMinimalAgeGate`, env)).resolves.toMatchObject({
+          stdout: `"3d"\n`,
+        });
+
+        await expect(run(`config`, `get`, `pypiMinimalAgeGate`, env)).resolves.toMatchObject({
+          stdout: `0s\n`,
+        });
+
+        const {stdout: rules} = await run(`config`, `get`, `--json`, `packageRules`, env);
+        expect(JSON.parse(rules)).toMatchObject([{packageFilter: `lodash`, npmMinimalAgeGate: `90s`}]);
+
+        const {stdout: listing} = await run(`config`, `--json`, env);
+        expect(listing.split(`\n`).filter(line => line).map(line => JSON.parse(line))).toEqual(expect.arrayContaining([
+          {key: `npmMinimalAgeGate`, effective: `3d`, source: `<project>`},
+          {key: `pypiMinimalAgeGate`, effective: `0s`, source: `<project>`},
+        ]));
+
+        await expect(run(`config`, env)).resolves.toMatchObject({
+          stdout: expect.stringMatching(/npmMinimalAgeGate\n.*\n.*Value: 3d\n/),
+        });
+      }),
+    );
+
     const folderSettings = [
       `cacheFolder`,
       `deferredVersionFolder`,

@@ -451,6 +451,7 @@ pub struct ScriptEnvironment {
     trust_check_enabled: bool,
     trust_check_project_cwd: Option<Path>,
     venv_bin: Option<Path>,
+    global_folder: Option<Path>,
 }
 
 impl ScriptEnvironment {
@@ -466,6 +467,7 @@ impl ScriptEnvironment {
             trust_check_enabled: false,
             trust_check_project_cwd: None,
             venv_bin: None,
+            global_folder: None,
         };
 
         if let Ok(val) = std::env::var("YARNSW_DETECTED_ROOT") {
@@ -580,6 +582,7 @@ impl ScriptEnvironment {
         self.env.insert("INIT_CWD".to_string(), Some(project.project_cwd.with_join(&project.shell_cwd).to_native_string()));
         self.env.insert("CACHE_CWD".to_string(), Some(project.preferred_cache_path().to_native_string()));
         self.trust_check_project_cwd = Some(project.project_cwd.clone());
+        self.global_folder = Some(project.config.settings.global_folder.value.clone());
 
         self
     }
@@ -752,14 +755,39 @@ impl ScriptEnvironment {
         self
     }
 
+    /// Where the binary wrappers are stored: the project's global folder when
+    /// we have one, the default global folder otherwise. The wrappers are
+    /// cheap to recreate, so we fallback to the temporary folder when there's
+    /// no home directory to compute the default from.
+    fn binaries_root(&self) -> Result<Path, Error> {
+        if let Some(global_folder) = &self.global_folder {
+            return Ok(global_folder.clone());
+        }
+
+        let context = zpm_config::ConfigurationContext {
+            env: std::env::vars().collect(),
+            user_cwd: None,
+            project_cwd: None,
+            package_cwd: None,
+        };
+
+        let global_folder
+            = zpm_config::compute_global_folder(&context);
+
+        if global_folder.is_empty() {
+            return Ok(Path::temp_root_dir()?.with_join_str("zpm"));
+        }
+
+        Ok(global_folder)
+    }
+
     fn install_binaries(&mut self) -> Result<Path, Error> {
         let hash
             = Hash64::from_string(&JsonDocument::to_string(&self.binaries)?);
         let dir_name
-            = format!(".yarn/zpm/binaries/zpm-{}", hash.to_file_string());
+            = format!("binaries/zpm-{}", hash.to_file_string());
 
-        let dir = Path::home_dir()?
-            .expect("Expected home directory")
+        let dir = self.binaries_root()?
             .with_join_str(&dir_name);
 
         if !dir.fs_exists() {

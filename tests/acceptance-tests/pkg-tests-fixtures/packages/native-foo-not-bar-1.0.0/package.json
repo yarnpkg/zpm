@@ -1,0 +1,5 @@
+{
+  "name": "native-foo-not-bar",
+  "version": "1.0.0",
+  "os": ["foo", "!bar"]
+}

@@ -287,26 +287,20 @@ impl LooseDescriptor {
             panic!("Invalid range");
         };
 
-        // We use as-is ranges declared using a prefix (ie `^x.y.w`, `~x.y.z`, etc)
-        let Some(range_kind) = range_params.range.kind() else {
-            let descriptor
-                = Descriptor::new(ident.clone(), RegistrySemverRange {ident: range_ident.cloned(), range: range.clone()}.into());
-
+        // Explicit semver ranges are kept exactly as the user wrote them; the
+        // range modifier flags only apply to the ranges we generate when
+        // resolving tags. Ranges starting with a version (`1.2.3`, `^1.2.3`,
+        // `~1.2`, ...) are still resolved upfront to pin the version the
+        // install will use; the others are left to the install.
+        if range_params.range.kind().is_none() {
             return Ok(LooseResolution {
                 descriptor,
                 locator: None,
             });
-        };
+        }
 
-        // Otherwise we resolve them
         let resolution_result
             = resolvers::npm::resolve_semver_descriptor(context, &descriptor, &range_params).await?;
-
-        let range = resolution_result.resolution.version
-            .to_range(range_kind);
-
-        let descriptor
-            = Descriptor::new(ident.clone(), RegistrySemverRange {ident: range_ident.cloned(), range: range.clone()}.into());
 
         Ok(LooseResolution {
             descriptor,
@@ -386,21 +380,16 @@ impl LooseDescriptor {
             panic!("Invalid range");
         };
 
-        let Some(range_kind) = range_params.range.kind() else {
+        // Same as for the npm registry: explicit ranges are kept as-is
+        if range_params.range.kind().is_none() {
             return Ok(LooseResolution {
                 descriptor,
                 locator: None,
             });
-        };
+        }
 
         let resolution_result
             = resolvers::jsr::resolve_semver_descriptor(context, &descriptor, &range_params).await?;
-
-        let range = resolution_result.resolution.version
-            .to_range(range_kind);
-
-        let descriptor
-            = Descriptor::new(ident.clone(), JsrSemverRange {ident: range_ident.cloned(), range: range.clone()}.into());
 
         Ok(LooseResolution {
             descriptor,

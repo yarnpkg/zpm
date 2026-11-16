@@ -1,0 +1,10 @@
+{
+  "name": "optional-native-negated",
+  "version": "1.0.0",
+  "optionalDependencies": {
+    "native-foo-not-bar": "1.0.0",
+    "native-not-foo": "1.0.0",
+    "native-not-musl": "1.0.0",
+    "native-not-x64-x86": "1.0.0"
+  }
+}

@@ -124,7 +124,18 @@ impl Login {
                 .ok_missing()?
                 .unwrap_or_default();
 
-            let auth_token_path = npm_credential_path(self.scope.as_deref(), &registry, "npmAuthToken");
+            // Reuse the entry already configured for this registry, if any
+            // (for example a protocol-less `//host` key migrated from Yarn 4),
+            // so that we don't end up with two entries for the same registry.
+            let registry_key = match self.scope {
+                Some(_) => registry.clone(),
+                None => super::matching_rc_registry_keys(&config_content, &registry)?
+                    .into_iter()
+                    .next()
+                    .unwrap_or_else(|| registry.clone()),
+            };
+
+            let auth_token_path = npm_credential_path(self.scope.as_deref(), &registry_key, "npmAuthToken");
 
             let mut updated_content = DataDocument::update_document_field(
                 &config_content,
@@ -133,7 +144,7 @@ impl Login {
             )?;
 
             if self.always_auth {
-                let always_auth_path = npm_credential_path(self.scope.as_deref(), &registry, "npmAlwaysAuth");
+                let always_auth_path = npm_credential_path(self.scope.as_deref(), &registry_key, "npmAlwaysAuth");
 
                 updated_content = DataDocument::update_document_field(
                     &updated_content,

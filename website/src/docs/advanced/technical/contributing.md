@@ -55,7 +55,7 @@ yarn test:integration -t 'it should correctly install a single dependency that c
 The ecosystem e2e tests are shell scenarios:
 
 ```bash
-yarn test:e2e <e2e test name, minus the .sh>
+yarn e2e <e2e test name, minus the .sh>
 ```
 
 Should you need to write a test, the integration specs are located in `tests/acceptance-tests/pkg-tests-specs/sources`. The `makeTemporaryEnv` utility generates a temporary project; the first parameter becomes `package.json`, the second becomes `.yarnrc.yml`, and the callback runs inside that project.
@@ -95,7 +95,7 @@ If it fails and you have no idea why, feel free to ping a maintainer and we'll d
 ## Reviewing other PRs
 
 You're welcome to leave comments if you spot glaring bugs, but do not approve PRs if you're not a member.
-It's generally seen as [bad form](https://twitter.com/brian_d_vaughn/status/1224051534536667137) in the open source community.
+It's generally seen as bad form in the open source community.
 
 ## Writing documentation
 

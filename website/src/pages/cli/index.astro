@@ -1,0 +1,16 @@
+---
+import {getCollection} from 'astro:content';
+import DocsLayout from '../../layouts/DocsLayout.astro';
+import ReferenceSidebar from '../../components/ReferenceSidebar.astro';
+import CliIndex from '../../components/CliIndex.astro';
+
+const cliEntries = await getCollection(`cli`);
+---
+
+<DocsLayout title="Yarn CLI reference" activePage="reference" mainMaxWidth="820px" breadcrumb={["Docs", "Reference", "CLI"]} description="List of all the commands available in the Yarn CLI.">
+  <Fragment slot="sidebar">
+    <ReferenceSidebar activePage="cli/" cliEntries={cliEntries} />
+  </Fragment>
+
+  <CliIndex cliEntries={cliEntries} cliPrefix="cli" />
+</DocsLayout>

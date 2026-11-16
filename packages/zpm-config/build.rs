@@ -5,6 +5,14 @@ use serde::Deserialize;
 use serde_with::{serde_as, OneOrMany};
 use zpm_parsers::JsonDocument;
 
+/// Types whose serde representation can't be written back into a
+/// configuration file (`std::time::Duration` serializes as a struct); the
+/// settings using them are serialized through their file string instead.
+/// Keep in sync with the `file_string` entries in `src/lib.rs`.
+const FILE_STRING_SERIALIZED_TYPES: &[&str] = &[
+    "std::time::Duration",
+];
+
 #[derive(Debug, Deserialize, Clone, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 enum Type {
@@ -105,6 +113,9 @@ struct Field {
     title: Option<String>,
     description: Option<String>,
     default: Option<Expression>,
+    /// Required on duration fields: the unit in which a value without unit
+    /// (`1440` rather than `1440m`) is read; same values as Berry's `unit`.
+    unit: Option<String>,
     /// Set on array fields that also accept a single item, which then gets
     /// treated as a list of one (`supportedArchitectures`, for instance).
     one_or_many: Option<bool>,
@@ -123,12 +134,11 @@ impl Field {
         let type_
             = self.get_type();
 
-        if let InternalTypeKind::Struct(name) = &type_.kind {
+        if let InternalTypeKind::Struct(struct_name) = &type_.kind {
             let is_root
-                = name == &generator.root_name;
+                = struct_name == &generator.root_name;
 
-            let fields
-                = generator.ensure_struct(name);
+            generator.ensure_struct(struct_name);
 
             if let Some(properties) = &self.properties {
                 for (name, field) in properties.iter() {
@@ -136,7 +146,25 @@ impl Field {
                         .and_then(|aliases| aliases.get(name).cloned())
                         .unwrap_or_default();
 
+                    let duration_unit
+                        = field.get_duration_unit(name);
+
+                    if let Some(duration_unit) = &duration_unit {
+                        let previous_unit
+                            = generator.duration_units.insert(name.to_string(), duration_unit.clone());
+
+                        if previous_unit.as_ref().is_some_and(|previous_unit| previous_unit != duration_unit) {
+                            panic!("Field {} must use the same unit everywhere it's declared", name);
+                        }
+                    }
+
+                    let fields
+                        = generator.ensure_struct(struct_name);
+
                     let field_default = match field.default.as_ref() {
+                        Some(Expression::String(default)) if duration_unit.is_some()
+                            => format!("|| Setting::new(zpm_utils::parse_duration_with_unit({}, zpm_utils::DurationUnit::{}).unwrap(), Source::Default)", JsonDocument::to_string(default).unwrap(), duration_unit.as_ref().unwrap()),
+
                         Some(Expression::String(default)) if default.contains("::")
                             => format!("|| Setting::new({}, Source::Default)", default),
 
@@ -188,6 +216,7 @@ impl Field {
                         default: field_default,
                         one_or_many: field.one_or_many.unwrap_or(false),
                         affects_install: field.affects_install.unwrap_or(true),
+                        duration_unit,
                         required,
                     });
                 }
@@ -212,6 +241,34 @@ impl Field {
             if let Some(items) = &self.items {
                 items.send_to(generator);
             }
+        }
+    }
+
+    /// The `DurationUnit` variant to use for a field's values without unit,
+    /// for duration fields only.
+    fn get_duration_unit(&self, name: &str) -> Option<String> {
+        let is_duration
+            = matches!(self.get_type().kind, InternalTypeKind::Native(type_name) if type_name == "std::time::Duration");
+
+        match (is_duration, self.unit.as_deref()) {
+            (false, None)
+                => None,
+
+            (false, Some(_))
+                => panic!("Field {} can't set a unit; only duration fields can", name),
+
+            (true, None)
+                => panic!("Duration field {} must declare the unit of values without unit", name),
+
+            (true, Some(unit)) => Some(match unit {
+                "ms" => "Milliseconds",
+                "s" => "Seconds",
+                "m" => "Minutes",
+                "h" => "Hours",
+                "d" => "Days",
+                "w" => "Weeks",
+                _ => panic!("Field {} has an invalid unit ({})", name, unit),
+            }.to_string()),
         }
     }
 
@@ -287,11 +344,13 @@ struct GeneratorField {
     default: String,
     one_or_many: bool,
     affects_install: bool,
+    duration_unit: Option<String>,
     required: bool,
 }
 
 struct Generator {
     structs: BTreeMap<String, Vec<GeneratorField>>,
+    duration_units: BTreeMap<String, String>,
     root_name: String,
 }
 
@@ -299,6 +358,7 @@ impl Generator {
     pub fn new(root_name: &str) -> Self {
         Self {
             structs: BTreeMap::new(),
+            duration_units: BTreeMap::new(),
             root_name: root_name.to_string(),
         }
     }
@@ -331,9 +391,11 @@ impl Generator {
                 }
 
                 let deserialize_with = if field.one_or_many {
-                    ", deserialize_with = \"crate::deserialize_one_or_many\""
+                    ", deserialize_with = \"crate::deserialize_one_or_many\"".to_string()
+                } else if let Some(duration_unit) = &field.duration_unit {
+                    format!(", deserialize_with = \"crate::duration::deserialize_in_{}\"", duration_unit.to_lowercase())
                 } else {
-                    ""
+                    "".to_string()
                 };
 
                 writeln!(writer, "        #[serde(default{deserialize_with})] pub {lc_snake_name}: Partial<{}>,", type_.to_intermediate_type_string()).unwrap();
@@ -394,6 +456,17 @@ impl Generator {
                     writeln!(writer, "    #[serde(default)]").unwrap();
                 }
 
+                if let InternalTypeKind::Native(name) = &field.type_.kind {
+                    if FILE_STRING_SERIALIZED_TYPES.contains(&name.as_str()) {
+                        let serializer = match field.type_.nullable {
+                            true => "crate::serialize_optional_setting_as_file_string",
+                            false => "crate::serialize_setting_as_file_string",
+                        };
+
+                        writeln!(writer, "    #[serde(serialize_with = \"{serializer}\")]").unwrap();
+                    }
+                }
+
                 writeln!(writer, "    pub {lc_snake_name}: {},", type_.to_type_string()).unwrap();
             }
 
@@ -406,9 +479,9 @@ impl Generator {
             writeln!(writer, "        unimplemented!(\"Configuration records cannot be returned directly just yet\");").unwrap();
             writeln!(writer, "    }}").unwrap();
             writeln!(writer).unwrap();
-            writeln!(writer, "    fn hydrate(&self, path: &[&str], value_str: &str) -> Result<AbstractValue<'_>, HydrateError> {{").unwrap();
+            writeln!(writer, "    fn hydrate(path: &[&str], value_str: &str) -> Result<AbstractValue<'static>, HydrateError> {{").unwrap();
             writeln!(writer, "        let Some(key_str) = path.first() else {{").unwrap();
-            writeln!(writer, "            unimplemented!(\"Configuration records cannot be returned directly just yet\");").unwrap();
+            writeln!(writer, "            return hydrate_container(value_str);").unwrap();
             writeln!(writer, "        }};").unwrap();
             writeln!(writer, "").unwrap();
             writeln!(writer, "        match *key_str {{").unwrap();
@@ -416,15 +489,19 @@ impl Generator {
             for field in fields {
                 let name = &field.name;
 
-                let lc_snake_name
-                    = name.to_case(Case::Snake);
-
                 let all_names
                     = field.aliases.iter()
                         .chain(std::iter::once(name));
 
+                let type_string
+                    = field.type_.to_type_string();
+
                 for name in all_names {
-                    writeln!(writer, "            \"{name}\" => MergeSettings::hydrate(&self.{lc_snake_name}, &path[1..], value_str),").unwrap();
+                    if let Some(duration_unit) = &field.duration_unit {
+                        writeln!(writer, "            \"{name}\" => <{type_string} as crate::duration::DurationSetting>::hydrate_with_unit(&path[1..], value_str, zpm_utils::DurationUnit::{duration_unit}),").unwrap();
+                    } else {
+                        writeln!(writer, "            \"{name}\" => <{type_string} as MergeSettings>::hydrate(&path[1..], value_str),").unwrap();
+                    }
                 }
             }
 
@@ -486,29 +563,7 @@ impl Generator {
                 let merge_expr
                     = format!("MergeSettings::merge(context, {user_expr}, project.{lc_snake_name}, {default})");
 
-                if struct_name == &self.root_name {
-                    writeln!(writer, "            {lc_snake_name}: {{").unwrap();
-                    writeln!(writer, "                let merged_value").unwrap();
-                    writeln!(writer, "                    = {merge_expr};").unwrap();
-                    writeln!(writer).unwrap();
-                    writeln!(writer, "                let env_value").unwrap();
-                    writeln!(writer, "                    = context.env.get(\"YARN_{}\");", name.to_case(Case::UpperSnake)).unwrap();
-
-                    for alias in &field.aliases {
-                        writeln!(writer, "                let env_value = env_value").unwrap();
-                        writeln!(writer, "                    .or_else(|| context.env.get(\"YARN_{}\"));", alias.to_case(Case::UpperSnake)).unwrap();
-                    }
-
-                    writeln!(writer).unwrap();
-                    writeln!(writer, "                if let Some(env_value) = env_value {{").unwrap();
-                    writeln!(writer, "                    MergeSettings::from_env_string(context, env_value, Some(merged_value)).unwrap()").unwrap();
-                    writeln!(writer, "                }} else {{").unwrap();
-                    writeln!(writer, "                    merged_value").unwrap();
-                    writeln!(writer, "                }}").unwrap();
-                    writeln!(writer, "            }},").unwrap();
-                } else {
-                    writeln!(writer, "            {lc_snake_name}: {merge_expr},").unwrap();
-                }
+                writeln!(writer, "            {lc_snake_name}: {merge_expr},").unwrap();
             }
 
             writeln!(writer, "        }}").unwrap();
@@ -588,6 +643,55 @@ impl Generator {
             }
 
             writeln!(writer, "        ]").unwrap();
+            writeln!(writer, "    }}").unwrap();
+            writeln!(writer).unwrap();
+            writeln!(writer, "    /// Overrides the merged settings with the values from the `YARN_*` environment variables").unwrap();
+            writeln!(writer, "    fn apply_env_overrides(self, context: &ConfigurationContext) -> Result<Self, ConfigurationError> {{").unwrap();
+            writeln!(writer, "        let Self {{").unwrap();
+
+            for field in fields {
+                writeln!(writer, "            {},", field.name.to_case(Case::Snake)).unwrap();
+            }
+
+            writeln!(writer, "        }} = self;").unwrap();
+
+            for field in fields {
+                let name = &field.name;
+
+                let lc_snake_name
+                    = name.to_case(Case::Snake);
+
+                writeln!(writer).unwrap();
+                writeln!(writer, "        let env_value").unwrap();
+                writeln!(writer, "            = context.env.get_key_value(\"YARN_{}\");", name.to_case(Case::UpperSnake)).unwrap();
+
+                for alias in &field.aliases {
+                    writeln!(writer, "        let env_value = env_value").unwrap();
+                    writeln!(writer, "            .or_else(|| context.env.get_key_value(\"YARN_{}\"));", alias.to_case(Case::UpperSnake)).unwrap();
+                }
+
+                writeln!(writer).unwrap();
+                writeln!(writer, "        let {lc_snake_name} = match env_value {{").unwrap();
+
+                if let Some(duration_unit) = &field.duration_unit {
+                    writeln!(writer, "            Some((env_name, env_value)) => crate::duration::DurationSetting::from_env_string_with_unit(env_value, zpm_utils::DurationUnit::{duration_unit})").unwrap();
+                } else {
+                    writeln!(writer, "            Some((env_name, env_value)) => MergeSettings::from_env_string(context, env_value, Some({lc_snake_name}))").unwrap();
+                }
+
+                writeln!(writer, "                .map_err(|error| env_override_error(env_name, \"{name}\", error))?,").unwrap();
+                writeln!(writer, "            None => {lc_snake_name},").unwrap();
+                writeln!(writer, "        }};").unwrap();
+            }
+
+            writeln!(writer).unwrap();
+            writeln!(writer, "        Ok(Self {{").unwrap();
+
+            for field in fields {
+                writeln!(writer, "            {},", field.name.to_case(Case::Snake)).unwrap();
+            }
+
+            writeln!(writer, "        }})").unwrap();
             writeln!(writer, "    }}").unwrap();
             writeln!(writer, "}}").unwrap();
         }

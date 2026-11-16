@@ -4,7 +4,7 @@ use rkyv::Archive;
 use zpm_macro_enum::zpm_enum;
 use zpm_utils::{DataType, Path, ToFileString};
 
-use crate::{AnonymousSemverRange, Range, WorkspaceMagicRange, WorkspacePathRange, WorkspaceSemverRange};
+use crate::{AnonymousSemverRange, CatalogRange, Range, WorkspaceMagicRange, WorkspacePathRange, WorkspaceSemverRange};
 
 type Error = Infallible;
 
@@ -39,7 +39,14 @@ pub enum PeerRange {
     #[to_print_string(|params| DataType::Range.colorize(&format!("workspace:{}", params.path.to_file_string())))]
     WorkspacePath {
         path: Path,
-    }
+    },
+
+    #[pattern(r"catalog:(?<catalog>.+)?")]
+    #[to_file_string(|params| format!("catalog:{}", params.catalog.as_deref().unwrap_or("")))]
+    #[to_print_string(|params| DataType::Range.colorize(&format!("catalog:{}", params.catalog.as_deref().unwrap_or(""))))]
+    Catalog {
+        catalog: Option<String>,
+    },
 }
 
 impl PeerRange {
@@ -60,6 +67,42 @@ impl PeerRange {
             PeerRange::WorkspacePath(params) => {
                 Range::WorkspacePath(WorkspacePathRange {path: params.path.clone()})
             },
+
+            PeerRange::Catalog(params) => {
+                Range::Catalog(CatalogRange {catalog: params.catalog.clone()})
+            },
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use rstest::rstest;
+    use zpm_utils::FromFileString;
+
+    use super::*;
+
+    #[rstest]
+    #[case("catalog:", None)]
+    #[case("catalog:react18", Some("react18"))]
+    fn test_catalog_peer_range(#[case] str: &str, #[case] catalog: Option<&str>) {
+        let range
+            = PeerRange::from_file_string(str).unwrap();
+
+        assert_eq!(range, PeerRange::Catalog(CatalogPeerRange {catalog: catalog.map(str::to_string)}));
+        assert_eq!(range.to_file_string(), str);
+        assert_eq!(range.to_range(), Range::from_file_string(str).unwrap());
+    }
+
+    #[rstest]
+    #[case("^1.0.0")]
+    #[case("workspace:^")]
+    #[case("workspace:^1.0.0")]
+    fn test_other_peer_ranges_arent_catalogs(#[case] str: &str) {
+        let range
+            = PeerRange::from_file_string(str).unwrap();
+
+        assert!(!matches!(range, PeerRange::Catalog(_)), "{str} parsed as {range:?}");
+        assert_eq!(range.to_file_string(), str);
     }
 }

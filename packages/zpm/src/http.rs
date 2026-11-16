@@ -21,9 +21,9 @@ static WARNED_HOSTNAMES: LazyLock<tokio::sync::Mutex<HashSet<String>>> = LazyLoc
 pub struct HttpConfig {
     pub enforce_unsafe_http: bool,
     pub http_retry: usize,
-    pub http_timeout: u64,
+    pub http_timeout: Duration,
     pub unsafe_http_whitelist: Vec<Setting<Glob>>,
-    pub slow_network_timeout: u64,
+    pub slow_network_timeout: Duration,
 
     enable_network: bool,
 
@@ -229,7 +229,7 @@ impl<'a> HttpRequest<'a> {
     /// `httpTimeout` setting.
     pub fn timeout(mut self, timeout: Duration) -> Self {
         let bounded_timeout
-            = std::cmp::min(timeout, Duration::from_millis(self.client.config.http_timeout));
+            = std::cmp::min(timeout, self.client.config.http_timeout);
 
         self.builder = self.builder.timeout(bounded_timeout);
         self
@@ -262,7 +262,7 @@ impl<'a> HttpRequest<'a> {
             });
 
             let warning_future = async {
-                tokio::time::sleep(Duration::from_millis(self.client.config.slow_network_timeout)).await;
+                tokio::time::sleep(self.client.config.slow_network_timeout).await;
 
                 // Check if we should warn about this hostname
                 if let Some(hostname) = &hostname {
@@ -433,7 +433,7 @@ impl HttpClient {
             // Timeout settings
             .connect_timeout(Duration::from_secs(30))
             .read_timeout(Duration::from_secs(30))
-            .timeout(Duration::from_millis(config.settings.http_timeout.value))
+            .timeout(config.settings.http_timeout.value)
 
             // HTTP/2 settings (helps with connection reuse)
             .http2_keep_alive_interval(Duration::from_secs(30))
@@ -679,7 +679,7 @@ mod tests {
     use hyper_util::rt::TokioIo;
     use tokio::{net::TcpListener, task::JoinHandle};
     use zpm_config::ConfigurationContext;
-    use zpm_utils::LastModifiedAt;
+    use zpm_utils::{LastModifiedAt, Path, ToFileString};
 
     use super::*;
 
@@ -710,7 +710,7 @@ mod tests {
 
     fn test_client(network_concurrency: usize) -> Arc<HttpClient> {
         let context = ConfigurationContext {
-            env: BTreeMap::new(),
+            env: BTreeMap::from([("YARN_GLOBAL_FOLDER".to_string(), Path::temp_root_dir().unwrap().with_join_str("zpm-test").to_file_string())]),
             user_cwd: None,
             project_cwd: None,
             package_cwd: None,

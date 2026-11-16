@@ -107,6 +107,50 @@ use crate::{range::{OperatorType, Token, TokenType}, Range, Version};
 #[case(">=1.0.0-beta.41 <1.0.0-c || ^1.0.0", "1.0.0-beta.45", true)]
 #[case(">=1.0.0-beta.41 <1.0.0-c || ^1.0.0", "1.0.0", true)]
 #[case(">=1.0.0-rc.2 <1.0.0", "1.0.0-rc.10", true)]
+
+// Components above u32::MAX (https://github.com/yarnpkg/zpm/issues/319)
+#[case("^0.99999999150214.0", "0.99999999150214.5", true)]
+#[case("^0.99999999150214.0", "0.99999999150215.0", false)]
+#[case("^1.99999999150214.0", "1.99999999204721.0", true)]
+#[case("^1.99999999150214.0", "1.99999999150213.0", false)]
+#[case("^12.99999999204721.0", "12.99999999204721.0", true)]
+#[case("~1.0.20240101123456", "1.0.20240101123457", true)]
+#[case("~1.0.20240101123456", "1.0.20240101123455", false)]
+#[case("~1.0.20240101123456", "1.1.0", false)]
+#[case("1.0.20240101123456", "1.0.20240101123456", true)]
+#[case(">=4294967295.0.0", "4294967296.0.0", true)]
+#[case("<4294967296.0.0", "4294967295.0.0", true)]
+#[case("<4294967296.0.0", "4294967296.0.0", false)]
+#[case("4294967296.x", "4294967296.5.0", true)]
+#[case("4294967296.x", "4294967297.0.0", false)]
+#[case(">=1.0.0-rc.4294967296 <1.0.0", "1.0.0-rc.10000000000", true)]
+
+// Ranges whose upper bound is computed from MAX_SAFE_INTEGER components
+#[case("^9007199254740991.0.0", "9007199254740991.9007199254740991.9007199254740991", true)]
+#[case("^0.9007199254740991.0", "0.9007199254740991.9007199254740991", true)]
+#[case("^0.0.9007199254740991", "0.0.9007199254740991", true)]
+#[case("~9007199254740991.9007199254740991.0", "9007199254740991.9007199254740991.9007199254740991", true)]
+#[case("9007199254740991", "9007199254740991.1.0", true)]
+#[case("9007199254740991.x", "9007199254740991.1.0", true)]
+#[case("9007199254740991.9007199254740991.x", "9007199254740991.9007199254740991.1", true)]
+#[case("1 - 9007199254740991", "9007199254740991.1.0", true)]
+#[case("1 - 9007199254740991.9007199254740991", "9007199254740991.9007199254740991.1", true)]
+#[case(">9007199254740991.9007199254740991.9007199254740991-9007199254740991", "9007199254740991.9007199254740991.9007199254740991", true)]
+
+// Empty comparator sets match any version, like `*` (checked against node-semver 7.8.5)
+#[case("", "0.0.0", true)]
+#[case("", "1.2.3", true)]
+#[case("", "1.0.0-rc.1", false)]
+#[case(" ", "1.2.3", true)]
+#[case("  ", "1.2.3", true)]
+#[case("||", "1.2.3", true)]
+#[case(" || ", "1.2.3", true)]
+#[case("1.2.3 ||", "2.5.0", true)]
+#[case("1.2.3 ||", "1.0.0-rc.1", false)]
+#[case("1.2.3 || ", "2.5.0", true)]
+#[case("|| 1.2.3", "2.5.0", true)]
+#[case("1.2.3 || || 2.0.0", "2.5.0", true)]
+#[case(">1.2.3 ||", "1.0.0", true)]
 fn test_range_check(#[case] range: Range, #[case] version: Version, #[case] expected: bool) {
     assert_eq!(range.check(&version), expected);
 }
@@ -137,8 +181,36 @@ fn test_range_check_ignore_rc(#[case] range: Range, #[case] version: Version, #[
 #[case("1", Some(Version { major: 1, minor: 0, patch: 0, rc: None }))]
 #[case("1.2", Some(Version { major: 1, minor: 2, patch: 0, rc: None }))]
 #[case("(^1.5 || ^1.2 || ^1.3) && <1.4", Some(Version { major: 1, minor: 2, patch: 0, rc: None }))]
+#[case("", Some(Version { major: 0, minor: 0, patch: 0, rc: None }))]
+#[case("1.2.3 ||", Some(Version { major: 0, minor: 0, patch: 0, rc: None }))]
 fn test_range_min(#[case] range: Range, #[case] expected: Option<Version>) {
     assert_eq!(range.range_min(), expected);
+}
+
+// node-semver 7.8.5 rejects all of these, except `&&` and parentheses which
+// are zpm extensions; they must be parse errors rather than panics later on
+#[rstest]
+#[case(">")]
+#[case("<")]
+#[case(">=")]
+#[case("<=")]
+#[case("=")]
+#[case("^")]
+#[case("~")]
+#[case("&&")]
+#[case("1.2.3 &&")]
+#[case("&& 1.2.3")]
+#[case("1.2.3 && || 2.0.0")]
+#[case("()")]
+#[case("( )")]
+#[case("(")]
+#[case(")")]
+#[case("1.2.3)")]
+#[case("(1.2.3")]
+#[case("1.2.3 - ")]
+#[case("- 1.2.3")]
+fn test_range_invalid(#[case] range: &str) {
+    assert!(Range::from_file_string(range).is_err());
 }
 
 #[rstest]
@@ -276,4 +348,12 @@ fn test_range_tokenize() {
         ),
         Token::Syntax(TokenType::RParen),
     ].into()));
+}
+
+#[test]
+fn test_range_max_safe_integer() {
+    assert!(Range::from_file_string("^1.2.9007199254740991").is_ok());
+    assert!(Range::from_file_string("^1.2.9007199254740992").is_err());
+    assert!(Range::from_file_string(">=9007199254740992.0.0").is_err());
+    assert!(Range::from_file_string("1 - 9007199254740992").is_err());
 }

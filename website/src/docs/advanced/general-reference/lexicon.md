@@ -11,7 +11,7 @@ sidebar:
 
 Refers to tasks executed right after the packages got installed; typically the `postinstall` scripts configured in the `scripts` field from the manifest.
 
-Build scripts should be left to native dependencies, there is virtually no reason for pure JavaScript packages to use them. They have [significant side effects](/advanced/lifecycle-scripts#a-note-about-postinstall) on your user's projects, so weight carefully whether you really need them.
+Build scripts should be left to native dependencies, there is virtually no reason for pure JavaScript packages to use them. They have [significant side effects](/advanced/lifecycle-scripts#field-postinstall) on your user's projects, so weight carefully whether you really need them.
 
 See also: [Lifecycle Scripts](/advanced/lifecycle-scripts)
 
@@ -43,7 +43,7 @@ See also: [Architecture](/advanced/architecture), [Fetcher interface](https://gi
 
 ### Hoisting
 
-Hoisting is the act of transforming the dependency tree to optimize it by removing as many nodes as possible. There isn't a single way to decide how to transform the tree, and different package managers make different tradeoffs (some optimize for package popularity, package size, highest versions, ...). For this reason, no guarantee can be made regarding the final hoisting layout - except that packages will always be able to access the dependencies they listed in their [manifests](#Manifest).
+Hoisting is the act of transforming the dependency tree to optimize it by removing as many nodes as possible. There isn't a single way to decide how to transform the tree, and different package managers make different tradeoffs (some optimize for package popularity, package size, highest versions, ...). For this reason, no guarantee can be made regarding the final hoisting layout - except that packages will always be able to access the dependencies they listed in their [manifests](#manifest).
 
 Because the hoisting is heavily connected to the filesystem and the Node resolution, its very design makes it easy to make an error and accidentally access packages without them being properly defined as dependencies - and thus without being accounted for during the hoisting process, making their very existence unpredictable. For this reason and others, hoisting got sidelined starting from Yarn 2 in favour of the [Plug'n'Play resolution](#plugnplay).
 
@@ -64,7 +64,7 @@ While not always practical (it causes the repository size to grow, although we h
 - It doesn't require additional infrastructure, such as a [Verdaccio proxy](https://verdaccio.org/)
 - It doesn't require additional configuration, such as registry authentication
 - The install fetch step is as fast as it can be, with no data transfer at all
-- It lets you reach [zero-installs](/features/caching#zero-installs) if you also use the PnP linker
+- It lets you reach [zero-installs](/concepts/zero-installs) if you also use the PnP linker
 
 To enable the local cache, set `enableGlobalCache` to `false`, run an install, and add the new artifacts to your repository (you might want to [update your gitignore](/getting-started/qa#which-files-should-be-gitignored) accordingly).
 
@@ -82,7 +82,7 @@ A monorepo is a repository that contains multiple packages. [Babel](https://gith
 
 Yarn provides native support for monorepos via "workspaces". It makes it easy to install the dependencies of multiple local packages by running a single install, and to connect them all together so that they don't have to be published before their changes can be reused by other parts of your project.
 
-See also: [Workspaces (feature)](/features/workspaces), [Workspace (lexicon)](#workspace).
+See also: [Workspaces (feature)](/concepts/workspaces), [Workspace (lexicon)](#workspace).
 
 ### Package
 
@@ -106,13 +106,13 @@ See also: [Virtual Packages](#virtual-package)
 
 Plugins are a new concept introduced in Yarn 2+. Through the use of plugins, Yarn can be extended and made even more powerful - whether it's through the addition of new <abbr>resolvers</abbr>, <abbr>fetchers</abbr>, or <abbr>linkers</abbr>.
 
-See also: [Plugins](/features/extensibility), [Plugin interface](https://github.com/yarnpkg/berry/blob/master/packages/yarnpkg-core/sources/Plugin.ts#L67)
+See also: [Plugin interface](https://github.com/yarnpkg/berry/blob/master/packages/yarnpkg-core/sources/Plugin.ts#L67)
 
 ### Plug'n'Play
 
 Plug'n'Play is an alternative installation strategy that, instead of generating the typical `node_modules` directories, generate one single file that is then injected into Node to let it know where to find the installed packages. Starting from the v2, Plug'n'Play becomes the default installation strategy for Javascript projects.
 
-See also: [Plug'n'Play](/features/pnp)
+See also: [Plug'n'Play](/concepts/pnp)
 
 ### PnP
 
@@ -128,7 +128,7 @@ Contrary to the `link:` protocol (which can point to any location but cannot hav
 
 The term project is used to encompass all the <abbr>worktrees</abbr> that belong to the same dependency tree.
 
-See also: [Workspaces](/features/workspaces)
+See also: [Workspaces](/concepts/workspaces)
 
 ### Range
 
@@ -195,13 +195,13 @@ Generally speaking workspaces are a Yarn features used to work on multiple proje
 
 In the context of Yarn's vocabulary, workspaces are local <abbr>packages</abbr> that directly belong to a <abbr>project</abbr>.
 
-See also: [Workspaces](/features/workspaces)
+See also: [Workspaces](/concepts/workspaces)
 
 ### Worktree
 
 A worktree is a private workspace that adds new child workspaces to the current <abbr>project</abbr>.
 
-See also: [Workspaces](/features/workspaces)
+See also: [Workspaces](/concepts/workspaces)
 
 ### Yarn
 
@@ -209,4 +209,4 @@ Yarn is a command line tool used to manage programming environments. This codeba
 
 ### Zero-Install
 
-See also: [Zero-Install](/features/caching#zero-installs)
+See also: [Zero-Install](/concepts/zero-installs)
