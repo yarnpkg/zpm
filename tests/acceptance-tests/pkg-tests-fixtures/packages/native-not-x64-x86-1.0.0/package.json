@@ -1,0 +1,5 @@
+{
+  "name": "native-not-x64-x86",
+  "version": "1.0.0",
+  "cpu": ["!x64", "!x86"]
+}
