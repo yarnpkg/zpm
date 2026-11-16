@@ -660,7 +660,7 @@
     "npmRegistries": {
       "_package": "@yarnpkg/plugin-npm",
       "title": "Per-registry configurations.",
-      "description": "Legacy-compatible per-registry npm authentication settings. New configurations may prefer `sourceRules` for registry and ecosystem policy.\n\nEach key is a registry URL, protocol included, as written in `npmRegistryServer` (trailing slashes are ignored); the protocol-less `//registry.example.org` keys from npm's configuration aren't matched. Each entry accepts `npmAlwaysAuth`, `npmAuthIdent`, and `npmAuthToken`, which override the global settings for requests to that registry. `yarn npm login` stores the tokens it obtains here.",
+      "description": "Legacy-compatible per-registry npm authentication settings. New configurations may prefer `sourceRules` for registry and ecosystem policy.\n\nEach key is either the registry URL (`https://npm.pkg.github.com`) or the same URL without its protocol (`//npm.pkg.github.com`), which then applies whatever the protocol; trailing slashes are ignored. When both forms are set for a registry, only the entry with the protocol is used. Each entry accepts `npmAlwaysAuth`, `npmAuthIdent`, and `npmAuthToken`, which override the global settings for requests to that registry. `yarn npm login` stores the tokens it obtains here.",
       "type": "object",
       "patternProperties": {
         "^(?:^[a-zA-Z][a-zA-Z0-9+-.]*:)?[^\\s]*$": {
@@ -990,8 +990,8 @@
           },
           "registryFilter": {
             "type": ["string", "null"],
-            "description": "The registry or index URL this rule applies to.",
-            "format": "uri",
+            "description": "The registry or index URL this rule applies to, or the same URL without its protocol (`//registry.example.org`) to match it whatever its protocol; trailing slashes are ignored.",
+            "format": "uri-reference",
             "_hidden": true
           },
           "npmMinimalAgeGate": {

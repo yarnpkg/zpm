@@ -20,6 +20,7 @@ use zpm_utils::{FromFileString, Hash64, Path, ToFileString};
 use crate::{
     error::Error,
     http::HttpClient,
+    http_npm,
     python_env::{PythonEnv, PythonTargets, supported_tags, wheel_priority},
 };
 
@@ -92,7 +93,29 @@ fn package_rule_matches(rule: &PackageRule, ident: &Ident) -> bool {
 
 fn source_rule_matches(rule: &SourceRule, registry: &str) -> bool {
     rule.ecosystem_filter.value.map_or(true, |filter| filter == EcosystemFilter::Pypi)
-        && rule.registry_filter.value.as_ref().map_or(true, |filter| normalize_index_url(filter) == normalize_index_url(registry))
+        && rule.registry_filter.value.as_ref().map_or(true, |filter| registry_filter_matches(filter, registry))
+}
+
+/// Whether a `registryFilter` designates the given index. Like for npm, the
+/// filter is either the index URL or the same URL without its protocol
+/// (`//pypi.example.com/simple`, which matches it whatever its protocol);
+/// both sides go through `normalize_index_url` first.
+fn registry_filter_matches(filter: &str, registry: &str) -> bool {
+    let filter
+        = filter.trim();
+
+    let normalized_filter = match filter.strip_prefix("//") {
+        // Normalized with a placeholder protocol so that the `pypi.org`
+        // alias also applies to protocol-less filters
+        Some(_) => normalize_index_url(&format!("https:{}", filter))
+            .strip_prefix("https:")
+            .expect("The normalized URL should keep its protocol")
+            .to_string(),
+
+        None => normalize_index_url(filter),
+    };
+
+    http_npm::registry_key_matches(&normalized_filter, &normalize_index_url(registry))
 }
 
 /// Normalizes an index URL so it ends with a slash; `https://pypi.org` is
@@ -852,6 +875,19 @@ mod tests {
 
         assert_eq!(metadata.name.as_deref(), Some("foo"));
         assert_eq!(metadata.requires_dist, vec!["bar>=1; extra == 'x'", "baz"]);
+    }
+
+    #[test]
+    fn registry_filters_match_with_or_without_protocol() {
+        assert!(registry_filter_matches("https://pypi.example.com/simple", "https://pypi.example.com/simple/"));
+        assert!(registry_filter_matches("//pypi.example.com/simple", "https://pypi.example.com/simple/"));
+        assert!(registry_filter_matches("//pypi.example.com/simple/", "http://pypi.example.com/simple"));
+        assert!(registry_filter_matches("//pypi.org", "https://pypi.org/simple/"));
+        assert!(registry_filter_matches("https://pypi.org", "https://pypi.org/simple/"));
+
+        assert!(!registry_filter_matches("//pypi.example.com", "https://pypi.example.com/simple/"));
+        assert!(!registry_filter_matches("//other.example.com/simple", "https://pypi.example.com/simple/"));
+        assert!(!registry_filter_matches("http://pypi.example.com/simple", "https://pypi.example.com/simple/"));
     }
 
     #[test]

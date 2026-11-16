@@ -79,25 +79,29 @@ impl Logout {
                     = get_registry(&project.config, None, self.publish)?
                         .to_string();
 
-                let updated = DataDocument::update_document_field(
-                    &config_content,
-                    zpm_parsers::Path::from_segments(vec![
-                        "npmRegistries".to_string(),
-                        registry.to_string(),
-                        "npmAuthToken".to_string(),
-                    ]),
-                    zpm_parsers::Value::Undefined,
-                )?;
+                // Remove the credentials from every entry applying to this
+                // registry, whatever their spelling (`https://host`,
+                // `https://host/`, `//host`, ...), so that none of them keeps
+                // being used once logged out.
+                let registry_keys
+                    = super::matching_rc_registry_keys(&config_content, &registry)?;
 
-                let updated = DataDocument::update_document_field(
-                    &updated,
-                    zpm_parsers::Path::from_segments(vec![
-                        "npmRegistries".to_string(),
-                        registry.to_string(),
-                        "npmAuthIdent".to_string(),
-                    ]),
-                    zpm_parsers::Value::Undefined,
-                )?;
+                let mut updated
+                    = config_content.clone();
+
+                for registry_key in registry_keys {
+                    for field in ["npmAuthToken", "npmAuthIdent"] {
+                        updated = DataDocument::update_document_field(
+                            &updated,
+                            zpm_parsers::Path::from_segments(vec![
+                                "npmRegistries".to_string(),
+                                registry_key.clone(),
+                                field.to_string(),
+                            ]),
+                            zpm_parsers::Value::Undefined,
+                        )?;
+                    }
+                }
 
                 crate::report::if_active_async(|report| {
                     report.info(format!("Successfully logged out from {}", DataType::Url.colorize(&registry)));
