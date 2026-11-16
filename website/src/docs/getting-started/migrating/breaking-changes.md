@@ -37,6 +37,8 @@ Some new features have been implemented. They are not "breaking changes" per se,
 
 - Workspaces aren't stored in the lockfile anymore as they would waste gigabytes of storage on very large monorepos despite Yarn never using those entries.
 
+- Yarn Classic (1.x) lockfiles can be migrated directly, without going through Yarn 4 first; see [Migrating from Yarn Classic](/getting-started/migrating-from-yarn-classic).
+
 ### Configuration defaults
 
 Some settings now default to stricter values:

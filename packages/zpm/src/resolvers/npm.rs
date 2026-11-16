@@ -445,8 +445,23 @@ pub async fn resolve_locator(context: &InstallContext<'_>, locator: &Locator, pa
 
     fix_manifest(&mut manifest);
 
+    // Locators imported from other lockfiles don't say whether the package
+    // is stored at a non-conventional url; we use the one from the registry,
+    // as a regular resolution would.
+    let locator = match (&params.url, &manifest.remote.dist) {
+        (None, Some(dist)) if !npm::is_conventional_tarball_url(&registry_base, &params.ident, &params.version, dist.tarball.clone()) => {
+            Locator::new(locator.ident.clone(), RegistryReference {
+                ident: params.ident.clone(),
+                version: params.version.clone(),
+                url: Some(UrlEncoded::new(dist.tarball.clone())),
+            }.into())
+        },
+
+        _ => locator.clone(),
+    };
+
     let resolution
-        = Resolution::from_remote_manifest(locator.clone(), manifest.remote.clone());
+        = Resolution::from_remote_manifest(locator, manifest.remote.clone());
 
     resolution.into_resolution_result(context)
 }
