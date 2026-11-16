@@ -215,9 +215,19 @@ impl Path {
 
     pub fn home_dir() -> Result<Option<Path>, PathError> {
         // Same lookup order as Node's os.homedir(): Windows shells such as
-        // Git Bash set HOME, but native ones only set USERPROFILE.
-        let home = std::env::var("HOME").ok()
-            .or_else(|| cfg!(windows).then(|| std::env::var("USERPROFILE").ok()).flatten());
+        // Git Bash set HOME, but native ones only set USERPROFILE. Empty
+        // values don't name a folder, so we ignore them.
+        Path::home_dir_from(
+            std::env::var("HOME").ok(),
+            std::env::var("USERPROFILE").ok(),
+            cfg!(windows),
+        )
+    }
+
+    fn home_dir_from(home: Option<String>, user_profile: Option<String>, is_windows: bool) -> Result<Option<Path>, PathError> {
+        let home = home
+            .filter(|home| !home.is_empty())
+            .or_else(|| user_profile.filter(|home| is_windows && !home.is_empty()));
 
         Ok(home
             .map(|s| Path::try_from(s))
@@ -1471,6 +1481,25 @@ mod tests {
         assert_eq!(Path::from_str("/foo/").unwrap().without_trailing_separators().as_str(), "/foo");
         assert_eq!(Path::from_str("/").unwrap().without_trailing_separators().as_str(), "/");
         assert_eq!(Path::new().without_trailing_separators().as_str(), "");
+    }
+
+    #[test]
+    fn home_dir_ignores_empty_values() {
+        let home_dir = |home: Option<&str>, user_profile: Option<&str>, is_windows: bool| {
+            Path::home_dir_from(home.map(str::to_string), user_profile.map(str::to_string), is_windows)
+                .unwrap()
+                .map(|path| path.as_str().to_string())
+        };
+
+        assert_eq!(home_dir(Some("/home/user"), Some("/profile"), true), Some("/home/user".to_string()));
+        assert_eq!(home_dir(None, Some("/profile"), true), Some("/profile".to_string()));
+        assert_eq!(home_dir(Some(""), Some("/profile"), true), Some("/profile".to_string()));
+        assert_eq!(home_dir(Some(""), Some(""), true), None);
+        assert_eq!(home_dir(None, None, true), None);
+
+        assert_eq!(home_dir(Some("/home/user"), None, false), Some("/home/user".to_string()));
+        assert_eq!(home_dir(Some(""), Some("/profile"), false), None);
+        assert_eq!(home_dir(None, Some("/profile"), false), None);
     }
 }
 

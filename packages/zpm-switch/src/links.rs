@@ -105,6 +105,12 @@ fn save_config(config: &FolderConfig) -> Result<(), Error> {
 }
 
 pub fn get_config(project_cwd: &Path) -> Result<Option<FolderConfig>, Error> {
+    // Without a home directory there's nowhere a configuration could have
+    // been stored; writing one will still report the missing home folder.
+    if Path::home_dir()?.is_none() {
+        return Ok(None);
+    }
+
     let config_path
         = config_path(project_cwd)?;
 

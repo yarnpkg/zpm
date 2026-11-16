@@ -1029,6 +1029,9 @@ pub enum ConfigurationError {
 
     #[error("Invalid configuration: {0}")]
     ValidationError(String),
+
+    #[error("Couldn't find a home directory to compute the default global folder; set the globalFolder setting (or the YARN_GLOBAL_FOLDER environment variable)")]
+    MissingGlobalFolder,
 }
 
 impl From<std::io::Error> for ConfigurationError {
@@ -1417,6 +1420,12 @@ impl Configuration {
             .extend(std::mem::take(&mut settings.catalog));
 
         settings.validate()?;
+
+        // The default is empty when we couldn't find a home directory to
+        // compute it from; it's only an error if nothing overrode it.
+        if settings.global_folder.value.is_empty() {
+            return Err(ConfigurationError::MissingGlobalFolder);
+        }
 
         apply_hardened_mode(&mut settings);
 
