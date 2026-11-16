@@ -858,7 +858,7 @@ pub fn get_package_internal_info(project: &Project, install: &Install, dependenc
     // incompatible with the current system (even if the package isn't
     // marked as optional).
     let is_compatible = resolution.requirements
-        .validate_system(&System::from_current());
+        .validate_system(System::current());
 
     let build_step = if !has_build_commands {
         build::BuildStep::Commands(Vec::new())

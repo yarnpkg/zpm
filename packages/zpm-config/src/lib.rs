@@ -1155,7 +1155,7 @@ impl SupportedArchitectures {
     /// independently, so the entry covers the cross product of its fields.
     pub fn to_system_set(&self) -> SystemSet {
         let current
-            = System::from_current();
+            = System::current();
 
         SystemSet {
             arch: resolve_current(&self.cpu.value, current.arch.as_ref(), &Cpu::Current),
