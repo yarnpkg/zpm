@@ -35,6 +35,10 @@ impl LinkMigrationCommand {
             return Err(Error::ProjectNotFound);
         };
 
+        if find_result.detected_package_manager_migration.is_none() {
+            return Err(Error::MissingMigration(detected_root_path));
+        }
+
         set_link(&Link {
             project_cwd: detected_root_path.clone(),
             link_target: LinkTarget::Migration,

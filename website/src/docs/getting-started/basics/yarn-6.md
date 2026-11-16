@@ -28,7 +28,7 @@ These gains are especially impactful in massive monorepos, where install times w
 
 ## Lazy Installs
 
-Previous Yarn versions offered two modes: regular installs (run `yarn install` after every pull) and [Zero Installs](/features/caching#zero-installs) (check install artifacts into the repository). Zero Installs removed the need for explicit installs but came at the cost of repository size, which became prohibitive in large monorepos.
+Previous Yarn versions offered two modes: regular installs (run `yarn install` after every pull) and [Zero Installs](/concepts/zero-installs) (check install artifacts into the repository). Zero Installs removed the need for explicit installs but came at the cost of repository size, which became prohibitive in large monorepos.
 
 Yarn 6.x introduces a third option as the new default: **Lazy Installs**.
 

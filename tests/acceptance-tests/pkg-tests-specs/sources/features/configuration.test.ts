@@ -1,4 +1,10 @@
-import {Filename, PortablePath, ppath, xfs} from '@yarnpkg/fslib';
+import {Filename, PortablePath, npath, ppath, xfs} from '@yarnpkg/fslib';
+
+// Yarn prints the native form of paths but keeps forward slashes as separators,
+// including on Windows (`C:/Users/...`)
+const toPrintedPath = (p: PortablePath) => {
+  return npath.fromPortablePath(p).replace(/\\/g, `/`);
+};
 
 describe(`Features`, () => {
   describe(`Configuration`, () => {
@@ -40,6 +46,33 @@ describe(`Features`, () => {
       })).resolves.toMatchObject({
         stdout: `false\n`,
       });
+    }));
+
+    test(`it should support relative paths in the path settings from the environment`, makeTemporaryEnv({
+      dependencies: {
+        [`peer-deps`]: `1.0.0`,
+        [`no-deps`]: `1.0.0`,
+        [`no-deps-scripted`]: `1.0.0`,
+      },
+      dependenciesMeta: {
+        [`no-deps-scripted`]: {
+          unplugged: true,
+        },
+      },
+    }, {
+      cacheFolder: `relative/cache`,
+      deferredVersionFolder: `relative/versions`,
+      globalFolder: `relative/global`,
+      patchFolder: `relative/patches`,
+      pnpUnpluggedFolder: `relative/unplugged`,
+      virtualFolder: `relative/__virtual__`,
+    }, async ({path, run, source}) => {
+      await expect(run(`install`)).resolves.toMatchObject({code: 0});
+
+      await expect(xfs.readdirPromise(ppath.join(path, `relative/cache` as PortablePath))).resolves.toContainEqual(expect.stringMatching(/^no-deps-npm-1\.0\.0-/));
+      await expect(xfs.readdirPromise(ppath.join(path, `relative/unplugged` as PortablePath))).resolves.toContainEqual(expect.stringMatching(/^no-deps-scripted-npm-1\.0\.0-/));
+
+      await expect(run(`install`, `--immutable`, `--immutable-cache`)).resolves.toMatchObject({code: 0});
     }));
 
     test(`it should skip the home configuration if onConflict: reset is set in the project configuration`, makeTemporaryEnv({
@@ -150,6 +183,62 @@ describe(`Features`, () => {
       });
 
       await expect(run(`config`, `get`, `--json`, `packageExtensions`)).rejects.toMatchObject({stdout: expect.stringContaining(`Invalid ident: @lezer/javascript@*`)});
+    }));
+
+    test(`it should report the project rc file and the setting at fault`, makeTemporaryEnv({
+    }, async ({path, run, source}) => {
+      await xfs.writeFilePromise(ppath.join(path, Filename.rc), [
+        `enableTelemetry: false`,
+        `npmScopes:`,
+        `  foo:`,
+        `    npmAlwaysAuth: 12`,
+      ].join(`\n`));
+
+      const rcPath = toPrintedPath(ppath.join(path, Filename.rc));
+
+      await expect(run(`config`, `get`, `enableScripts`)).rejects.toMatchObject({
+        stdout: expect.stringContaining(`An error occurred while parsing your configuration: ${rcPath}:4:20: npmScopes.foo.npmAlwaysAuth: Invalid value: 12`),
+      });
+    }));
+
+    test(`it should report the home rc file when it is the one at fault`, makeTemporaryEnv({
+    }, async ({path, run, source}) => {
+      await xfs.mkdirPromise(ppath.join(path, `..`), {recursive: true});
+
+      await xfs.writeFilePromise(ppath.join(path, `..`, Filename.rc), `nodeLinker: foo\n`);
+      await xfs.writeFilePromise(ppath.join(path, Filename.rc), `nodeLinker: pnp\n`);
+
+      const rcPath = toPrintedPath(ppath.join(path, `..`, Filename.rc));
+
+      await expect(run(`config`, `get`, `nodeLinker`)).rejects.toMatchObject({
+        stdout: expect.stringContaining(`An error occurred while parsing your configuration: ${rcPath}:1:13: nodeLinker: Invalid enum value (foo)`),
+      });
+    }));
+
+    test(`it should report the rc file containing malformed yaml`, makeTemporaryEnv({
+    }, async ({path, run, source}) => {
+      await xfs.mkdirPromise(ppath.join(path, `..`), {recursive: true});
+
+      await xfs.writeFilePromise(ppath.join(path, `..`, Filename.rc), [
+        `npmScopes:`,
+        `  @foo:`,
+        `    npmAlwaysAuth: true`,
+      ].join(`\n`));
+
+      const rcPath = toPrintedPath(ppath.join(path, `..`, Filename.rc));
+
+      await expect(run(`config`, `get`, `enableScripts`)).rejects.toMatchObject({
+        stdout: expect.stringContaining(`An error occurred while parsing your configuration: ${rcPath}: found character that cannot start any token at line 2 column 3`),
+      });
+    }));
+
+    test(`it should report the environment variable at fault`, makeTemporaryEnv({
+    }, async ({path, run, source}) => {
+      await expect(run(`config`, `get`, `enableScripts`, {
+        env: {YARN_ENABLE_SCRIPTS: `maybe`},
+      })).rejects.toMatchObject({
+        stdout: expect.stringContaining(`An error occurred while parsing your configuration: environment variable YARN_ENABLE_SCRIPTS: enableScripts: Invalid value: maybe`),
+      });
     }));
   });
 });

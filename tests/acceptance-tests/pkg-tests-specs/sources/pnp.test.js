@@ -1501,6 +1501,19 @@ describe(`Plug'n'Play`, () => {
   );
 
   test(
+    `it should remove the lingering node_modules folders even when enableLocalCacheCleanup is false`,
+    makeTemporaryEnv({}, {
+      enableLocalCacheCleanup: false,
+    }, async ({path, run, source}) => {
+      await xfs.mkdirpPromise(`${path}/node_modules/foo`);
+
+      await run(`install`);
+
+      await expect(xfs.readdirPromise(path)).resolves.not.toContain(`node_modules`);
+    }),
+  );
+
+  test(
     `it shouldn't remove the lingering node_modules folders when they contain dot-folders`,
     makeTemporaryEnv({}, async ({path, run, source}) => {
       await xfs.mkdirpPromise(`${path}/node_modules/.cache`);

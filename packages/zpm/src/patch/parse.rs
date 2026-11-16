@@ -1,4 +1,4 @@
-use std::{str::FromStr, sync::LazyLock};
+use std::{borrow::Cow, str::FromStr, sync::LazyLock};
 
 use zpm_utils::Path;
 use regex::Regex;
@@ -21,6 +21,137 @@ static DIFF_LINE_REGEXP: LazyLock<regex::Regex> = LazyLock::new(|| {
 static INDEX_REGEXP: LazyLock<regex::Regex> = LazyLock::new(|| {
     regex::Regex::new(r"(\w+)\.\.(\w+)").unwrap()
 });
+
+/// Git quotes the paths that contain double quotes, backslashes, control
+/// characters, or (unless `core.quotePath` is disabled) non-ASCII bytes, as
+/// C-style strings: `"a/caf\303\251.js"`. Returns the unquoted path, and
+/// what follows the closing quote.
+fn parse_quoted_path(src: &str) -> Option<(String, &str)> {
+    let mut bytes
+        = src.strip_prefix('"')?.bytes().enumerate();
+
+    let mut path
+        = Vec::new();
+
+    while let Some((index, byte)) = bytes.next() {
+        match byte {
+            b'"' => {
+                let rest
+                    = &src[index + 2..];
+
+                return String::from_utf8(path).ok().map(|path| (path, rest));
+            },
+
+            b'\\' => {
+                let (_, escape)
+                    = bytes.next()?;
+
+                path.push(match escape {
+                    b'a' => 0x07,
+                    b'b' => 0x08,
+                    b't' => b'\t',
+                    b'n' => b'\n',
+                    b'v' => 0x0b,
+                    b'f' => 0x0c,
+                    b'r' => b'\r',
+                    b'"' => b'"',
+                    b'\\' => b'\\',
+
+                    // Git always writes three octal digits, each byte of a
+                    // multi-byte character being escaped separately
+                    b'0'..=b'3' => {
+                        let (_, second) = bytes.next()?;
+                        let (_, third) = bytes.next()?;
+
+                        if !matches!(second, b'0'..=b'7') || !matches!(third, b'0'..=b'7') {
+                            return None;
+                        }
+
+                        ((escape - b'0') << 6) | ((second - b'0') << 3) | (third - b'0')
+                    },
+
+                    _ => {
+                        return None;
+                    },
+                });
+            },
+
+            _ => {
+                path.push(byte);
+            },
+        }
+    }
+
+    None
+}
+
+/// Parses the path of a `rename from`/`rename to` line, which git quotes when
+/// needed (cf `parse_quoted_path`).
+fn parse_header_path(src: &str) -> Option<Cow<'_, str>> {
+    if !src.starts_with('"') {
+        return Some(Cow::Borrowed(src));
+    }
+
+    match parse_quoted_path(src)? {
+        (path, "") => Some(Cow::Owned(path)),
+        _ => None,
+    }
+}
+
+/// Parses the path of a `---`/`+++` line, without its `a/`/`b/` prefix. Git
+/// follows unquoted paths that contain spaces with a tab (other tools follow
+/// the path with a tab and a timestamp), which isn't part of the path.
+fn parse_file_line_path(src: &str) -> Option<Cow<'_, str>> {
+    let path = if src.starts_with('"') {
+        let (path, rest)
+            = parse_quoted_path(src)?;
+
+        if !rest.is_empty() && !rest.starts_with('\t') {
+            return None;
+        }
+
+        Cow::Owned(path)
+    } else {
+        Cow::Borrowed(src.split('\t').next().unwrap_or_default())
+    };
+
+    // Same as Berry, we don't check what the prefix is
+    match path {
+        Cow::Borrowed(path) => path.get(2..).map(Cow::Borrowed),
+        Cow::Owned(path) => path.get(2..).map(|path| Cow::Owned(path.to_string())),
+    }
+}
+
+/// Parses the two paths of a `diff --git a/<from> b/<to>` line, without their
+/// prefixes; each of them may be quoted (cf `parse_quoted_path`).
+fn parse_diff_line_paths(line: &str) -> Option<(Cow<'_, str>, Cow<'_, str>)> {
+    let rest
+        = line.strip_prefix("diff --git ")?;
+
+    if rest.starts_with('"') {
+        let (from, rest)
+            = parse_quoted_path(rest)?;
+        let to
+            = parse_header_path(rest.strip_prefix(' ')?.trim_end())?;
+
+        return Some((Cow::Owned(from.strip_prefix("a/")?.to_string()), Cow::Owned(to.strip_prefix("b/")?.to_string())));
+    }
+
+    // Only the destination path is quoted (renames); we look for the opening
+    // quote that makes it a valid quoted path running until the end of the line
+    if rest.trim_end().ends_with('"') {
+        for (index, _) in rest.match_indices(" \"b/") {
+            if let Some(to) = parse_header_path(rest[index + 1..].trim_end()) {
+                return Some((Cow::Borrowed(rest[..index].strip_prefix("a/")?), Cow::Owned(to.strip_prefix("b/")?.to_string())));
+            }
+        }
+    }
+
+    let m
+        = DIFF_LINE_REGEXP.captures(line)?;
+
+    Some((Cow::Borrowed(m.get(1)?.as_str()), Cow::Borrowed(m.get(2)?.as_str())))
+}
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Range {
@@ -178,8 +309,8 @@ impl PatchFilePart {
 struct FileDeets<'a> {
     semver_exclusivity: Option<&'a str>,
 
-    diff_line_from_path: Option<&'a str>,
-    diff_line_to_path: Option<&'a str>,
+    diff_line_from_path: Option<Cow<'a, str>>,
+    diff_line_to_path: Option<Cow<'a, str>>,
 
     old_mode: Option<&'a str>,
     new_mode: Option<&'a str>,
@@ -187,14 +318,14 @@ struct FileDeets<'a> {
     deleted_file_mode: Option<&'a str>,
     new_file_mode: Option<&'a str>,
 
-    rename_from: Option<&'a str>,
-    rename_to: Option<&'a str>,
+    rename_from: Option<Cow<'a, str>>,
+    rename_to: Option<Cow<'a, str>>,
 
     before_hash: Option<&'a str>,
     after_hash: Option<&'a str>,
 
-    from_path: Option<&'a str>,
-    to_path: Option<&'a str>,
+    from_path: Option<Cow<'a, str>>,
+    to_path: Option<Cow<'a, str>>,
 
     hunks: Vec<Hunk>,
 }
@@ -281,11 +412,11 @@ impl<'a> PatchParser<'a> {
 
             self.result.push(PatchFilePart::FileRename {
                 semver_exclusivity: semver_exclusivity.clone(),
-                from: Path::try_from(rename_from)?,
-                to: Path::try_from(rename_to)?,
+                from: Path::try_from(rename_from.as_ref())?,
+                to: Path::try_from(rename_to.as_ref())?,
             });
 
-            current_destination_file_path = Some(Path::try_from(rename_to)?);
+            current_destination_file_path = Some(Path::try_from(rename_to.as_ref())?);
         } else if let Some(deleted_file_mode) = file_patch.deleted_file_mode {
             let path = file_patch.diff_line_from_path
                 .or(file_patch.from_path)
@@ -293,7 +424,7 @@ impl<'a> PatchParser<'a> {
 
             self.result.push(PatchFilePart::FileDeletion {
                 semver_exclusivity: semver_exclusivity.clone(),
-                path: Path::try_from(path)?,
+                path: Path::try_from(path.as_ref())?,
                 mode: parse_file_mode(deleted_file_mode)?,
                 hunk: file_patch.hunks.first().cloned(),
                 hash: file_patch.before_hash.map(|s| s.to_string()),
@@ -305,7 +436,7 @@ impl<'a> PatchParser<'a> {
 
             self.result.push(PatchFilePart::FileCreation {
                 semver_exclusivity: semver_exclusivity.clone(),
-                path: Path::try_from(path)?,
+                path: Path::try_from(path.as_ref())?,
                 mode: parse_file_mode(new_file_mode)?,
                 hunk: file_patch.hunks.first().cloned(),
                 hash: file_patch.after_hash.map(|s| s.to_string()),
@@ -313,7 +444,7 @@ impl<'a> PatchParser<'a> {
         } else {
             current_destination_file_path = file_patch.to_path
                 .or(file_patch.diff_line_to_path)
-                .map(Path::try_from)
+                .map(|path| Path::try_from(path.as_ref()))
                 .transpose()?;
         }
 
@@ -371,12 +502,12 @@ impl<'a> PatchParser<'a> {
                             self.commit_file_patch()?;
                         }
 
-                        let m
-                            = DIFF_LINE_REGEXP.captures(line)
+                        let (from, to)
+                            = parse_diff_line_paths(line)
                                 .ok_or_else(|| Error::InvalidDiffLine(line.to_string()))?;
 
-                        self.current_file_patch.diff_line_from_path = m.get(1).map(|m| m.as_str());
-                        self.current_file_patch.diff_line_to_path = m.get(2).map(|m| m.as_str());
+                        self.current_file_patch.diff_line_from_path = Some(from);
+                        self.current_file_patch.diff_line_to_path = Some(to);
                     }  else if let Some(rest) = line.strip_prefix("old mode ") {
                         self.current_file_patch.old_mode = Some(rest);
                     } else if let Some(rest) = line.strip_prefix("new mode ") {
@@ -386,9 +517,9 @@ impl<'a> PatchParser<'a> {
                     } else if let Some(rest) = line.strip_prefix("new file mode ") {
                         self.current_file_patch.new_file_mode = Some(rest);
                     } else if let Some(rest) = line.strip_prefix("rename from ") {
-                        self.current_file_patch.rename_from = Some(rest);
+                        self.current_file_patch.rename_from = Some(parse_header_path(rest).ok_or_else(|| Error::InvalidPatchPath(line.to_string()))?);
                     } else if let Some(rest) = line.strip_prefix("rename to ") {
-                        self.current_file_patch.rename_to = Some(rest);
+                        self.current_file_patch.rename_to = Some(parse_header_path(rest).ok_or_else(|| Error::InvalidPatchPath(line.to_string()))?);
                     } else if line.starts_with("index ") {
                         if let Some(m) = INDEX_REGEXP.captures(line) {
                             self.current_file_patch.before_hash = m.get(1).map(|m| m.as_str());
@@ -396,10 +527,10 @@ impl<'a> PatchParser<'a> {
                         }
                     } else if let Some(rest) = line.strip_prefix("semver exclusivity ") {
                         self.current_file_patch.semver_exclusivity = Some(rest);
-                    } else if line.starts_with("--- ") {
-                        self.current_file_patch.from_path = Some(&line[6..]);
-                    } else if line.starts_with("+++ ") {
-                        self.current_file_patch.to_path = Some(&line[6..]);
+                    } else if let Some(rest) = line.strip_prefix("--- ") {
+                        self.current_file_patch.from_path = Some(parse_file_line_path(rest).ok_or_else(|| Error::InvalidPatchPath(line.to_string()))?);
+                    } else if let Some(rest) = line.strip_prefix("+++ ") {
+                        self.current_file_patch.to_path = Some(parse_file_line_path(rest).ok_or_else(|| Error::InvalidPatchPath(line.to_string()))?);
                     }
                 }
 

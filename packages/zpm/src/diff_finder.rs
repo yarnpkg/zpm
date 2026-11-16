@@ -48,6 +48,12 @@ pub struct CacheState<T: Archive> {
     #[rkyv(omit_bounds)]
     pub cache: BTreeMap<Path, CacheEntry<T>>,
     pub roots: Vec<Path>,
+
+    /**
+     * Lets the owner of the state discard it when it was written by a
+     * binary that may compute the cached data differently.
+     */
+    pub version: String,
 }
 
 impl<T: Archive> CacheState<T> {
@@ -60,6 +66,7 @@ impl<T: Archive> CacheState<T> {
         Self {
             cache,
             roots,
+            version: String::new(),
         }
     }
 

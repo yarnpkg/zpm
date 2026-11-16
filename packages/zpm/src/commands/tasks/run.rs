@@ -180,6 +180,7 @@ impl TaskRun {
             since: &self.since,
             head: &self.head,
             recursive: self.recursive,
+            worktree: false,
             follow_dependencies: self.follow_dependencies,
             follow_dependents: self.follow_dependents,
             followed_dependencies: &self.followed_dependencies,

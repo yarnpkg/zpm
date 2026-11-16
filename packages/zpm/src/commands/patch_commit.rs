@@ -6,7 +6,7 @@ use zpm_parsers::{Document, JsonDocument};
 use zpm_primitives::{Descriptor, Locator, Range};
 use zpm_utils::{FromFileString, Path, ToFileString, ToHumanString, UrlEncoded};
 
-use crate::{error::Error, git, project};
+use crate::{error::Error, git, manifest::resolutions::ResolutionSelector, project};
 
 /// Generate or save a patch from an edited package
 ///
@@ -153,10 +153,10 @@ impl PatchCommit {
 
                     if dependency_locator == &locator {
                         let patch_descriptor
-                            = Self::make_patch_descriptor(&descriptor, &patch_str);
+                            = Self::make_patch_descriptor(&unpatchified_descriptor, &patch_str);
 
                         if &patch_descriptor != descriptor {
-                            transitive_dependencies.push((descriptor, patch_descriptor));
+                            transitive_dependencies.push((unpatchified_descriptor, patch_descriptor));
                         }
                     }
                 }
@@ -169,12 +169,27 @@ impl PatchCommit {
             let top_level_manifest_content
                 = top_level_manifest_path.fs_read_prealloc()?;
 
+            // Keys already present in the manifest may use a different spelling
+            // for the same selector (for instance the `npm:` prefix Yarn 4 used to
+            // add); we update them in place rather than adding a duplicate entry
+            // that would be shadowed by the existing one.
+            let existing_keys
+                = Self::read_resolution_keys(&top_level_manifest_content);
+
             let mut document
                 = JsonDocument::new(top_level_manifest_content)?;
 
             for (original_descriptor, replacement_descriptor) in &transitive_dependencies {
+                let selector
+                    = ResolutionSelector::from_dependency(original_descriptor)?;
+
+                let key = existing_keys.iter()
+                    .find(|(existing_selector, _)| existing_selector == &selector)
+                    .map(|(_, key)| key.clone())
+                    .unwrap_or_else(|| selector.to_file_string());
+
                 document.set_path(
-                    &["resolutions", &original_descriptor.to_file_string()].into(),
+                    &["resolutions", &key].into(),
                     zpm_parsers::Value::String(replacement_descriptor.range.to_file_string()),
                 )?;
             }
@@ -190,6 +205,20 @@ impl PatchCommit {
             .fs_write(&diff)?;
 
         Ok(())
+    }
+
+    fn read_resolution_keys(manifest_content: &[u8]) -> Vec<(ResolutionSelector, String)> {
+        let Ok(manifest) = serde_json::from_slice::<serde_json::Value>(manifest_content) else {
+            return Vec::new();
+        };
+
+        let Some(resolutions) = manifest.get("resolutions").and_then(|resolutions| resolutions.as_object()) else {
+            return Vec::new();
+        };
+
+        resolutions.keys()
+            .filter_map(|key| ResolutionSelector::from_resolution_key(key).ok().map(|selector| (selector, key.clone())))
+            .collect()
     }
 
     fn ensure_unpatched_descriptor(descriptor: &Descriptor) -> Descriptor {
