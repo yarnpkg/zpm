@@ -483,9 +483,11 @@ impl Project {
         let lockfile_path
             = self.lockfile_path();
 
-        let current_content = lockfile_path
-            .fs_read()
-            .ok_missing()?;
+        // The lockfile is missing on first install; work on the io::Result
+        // so that this doesn't build an error
+        let current_content
+            = std::fs::read(lockfile_path.to_path_buf())
+                .ok_missing()?;
 
         let contents
             = format!("{}\n", JsonDocument::to_string_pretty(lockfile)?);

@@ -45,6 +45,8 @@ Some new features have been implemented. They are not "breaking changes" per se,
 
 - Several Berry configuration settings aren't implemented in Yarn 6 and have been removed from the configuration reference: `cacheMigrationMode`, `changesetIgnorePatterns`, `checksumBehavior`, `constraintsPath`, `defaultLanguageName`, `defaultProtocol`, `enableColors`, `enableHyperlinks`, `enableInlineBuilds`, `enableInlineHunks`, `enableMessageNames`, `enableOfflineMode`, `enableTelemetry`, `ignorePath`, `initFields`, `installStatePath`, `pnpEnableEsmLoader`, `pnpMode`, `progressBarStyle`, `taskPoolConcurrency`, `taskPoolMode`, `telemetryInterval`, `telemetryUserId`, and `yarnPath`.
 
+- Selectors in the `resolutions` field only accept semver ranges, dist-tags, and `npm:` aliases on the overridden package (`pkg@^1.0.0`, `pkg@latest`, `pkg@npm:other@^1.0.0`), and semver ranges on the parent package (`parent@^1.0.0/pkg`, which matches every parent version satisfying the range). Selectors referencing other protocols (`pkg@workspace:^1.0.0`, `pkg@patch:…`, `pkg@file:…`, …) are rejected; use the bare package name (`pkg`) or a `parent/pkg` selector instead. The `npm:` prefix that Yarn 4 added to the keys it generated (`pkg@npm:1.0.0`) is still accepted, but isn't needed anymore.
+
 - The path-first cwd syntax is now preferred: pass the cwd path as first argument on the CLI (for example `yarn ./packages/foo add lodash`, or `yarn /path/to/project install`). As long as it contains a slash, it'll be interpreted as a path (this syntax works with both Yarn Berry and Yarn ZPM). The `--cwd` flag remains supported for compatibility.
 
 ### Internal design

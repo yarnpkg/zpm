@@ -2,6 +2,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use zpm_macro_enum::zpm_enum;
 use zpm_primitives::Ident;
+use zpm_utils::Glob;
 
 use crate::{
     error::Error,
@@ -63,6 +64,8 @@ pub struct WorkspaceSelection<'a> {
     pub head: &'a Option<String>,
     /// Follow dependencies, or dependents when combined with `--since` (`--recursive`)
     pub recursive: bool,
+    /// Add the workspaces nested in the selected ones through their `workspaces` field (`--worktree`)
+    pub worktree: bool,
     /// Add the transitive dependencies of the selected workspaces (`--follow-dependencies`)
     pub follow_dependencies: bool,
     /// Add the transitive dependents of the selected workspaces (`--follow-dependents`)
@@ -82,6 +85,7 @@ impl<'a> WorkspaceSelection<'a> {
     /// alone, which only filters).
     pub fn is_active(&self) -> bool {
         self.has_explicit_seeds()
+            || self.worktree
             || self.follows_dependencies()
             || self.follows_dependents()
             || self.has_filters()
@@ -130,13 +134,23 @@ impl<'a> WorkspaceSelection<'a> {
         if !self.has_explicit_seeds() {
             // The graph options alone apply to the active workspace; the
             // filters alone apply to the whole project.
-            if self.follows_dependencies() || self.follows_dependents() {
+            if self.worktree || self.follows_dependencies() || self.follows_dependents() {
                 seeds.insert(project.active_workspace()?.name.clone());
             } else if self.has_filters() {
                 seeds.extend(project.workspaces.iter().map(|w| w.name.clone()));
             } else {
                 return Err(Error::MissingWorkspaceSelection);
             }
+        }
+
+        if self.worktree {
+            let children: BTreeMap<Ident, BTreeSet<Ident>>
+                = project.workspaces.iter()
+                    .filter(|w| !w.manifest.workspaces.packages.is_empty())
+                    .map(|w| (w.name.clone(), child_workspaces(project, w)))
+                    .collect();
+
+            seeds = traverse(&seeds, &children);
         }
 
         let mut selection
@@ -183,6 +197,37 @@ impl<'a> WorkspaceSelection<'a> {
 
         !self.exclude.iter().any(|glob| glob.check(workspace))
     }
+}
+
+/// The workspaces matched by the `workspaces` field of a workspace (the same
+/// way they are discovered when loading the project).
+fn child_workspaces(project: &Project, workspace: &Workspace) -> BTreeSet<Ident> {
+    let globs: Vec<(Glob, bool)>
+        = workspace.manifest.workspaces.packages.iter()
+            .filter_map(|pattern| {
+                let (pattern, is_positive) = match pattern.strip_prefix('!') {
+                    Some(pattern) => (pattern, false),
+                    None => (pattern.as_str(), true),
+                };
+
+                let glob
+                    = Glob::parse(workspace.rel_path.with_join_str(pattern).as_str()).ok()?;
+
+                Some((glob, is_positive))
+            })
+            .collect();
+
+    project.workspaces.iter()
+        .filter(|candidate| candidate.rel_path != workspace.rel_path)
+        .filter(|candidate| {
+            let rel_path
+                = candidate.rel_path.as_str();
+
+            globs.iter().any(|(glob, is_positive)| *is_positive && glob.is_match(rel_path))
+                && !globs.iter().any(|(glob, is_positive)| !*is_positive && glob.is_match(rel_path))
+        })
+        .map(|candidate| candidate.name.clone())
+        .collect()
 }
 
 fn invert(map: &BTreeMap<Ident, BTreeSet<Ident>>) -> BTreeMap<Ident, BTreeSet<Ident>> {

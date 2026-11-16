@@ -65,7 +65,9 @@ impl PackageMap {
 /// Reads a package map left by a previous install; `None` when absent
 /// or unreadable (in which case the linker just syncs everything).
 pub fn load_package_map(package_map_path: &Path) -> Option<PackageMap> {
-    let src = package_map_path.fs_read_text().ok()?;
+    // Not going through `fs_read_text`, as the errors are discarded (and
+    // the file is missing on first install)
+    let src = std::fs::read_to_string(package_map_path.to_path_buf()).ok()?;
 
     JsonDocument::hydrate_from_str(&src).ok()
 }

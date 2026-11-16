@@ -13,7 +13,7 @@ use serde::{Deserialize, Serialize};
 use zpm_utils::{FromFileString, ToFileString};
 
 use crate::{
-    build, cache::CompositeCache, constraints::check_constraints, content_flags::ContentFlags, error::Error, fetchers::{PackageData, SyncFetchAttempt, fetch_locator, patch::has_builtin_patch, try_fetch_locator_sync}, graph::WaitMap, http_npm, linker, lockfile::{Lockfile, LockfileCatalogs, LockfileEntry, LockfileMetadata, LockfilePackageExtension, LockfileProject, catalogs_from_config}, manifest::resolutions::{ResolutionSelector, ResolutionsField}, primitives_exts::{InnerDependencyKind, RangeExt}, project::{InstallMode, Project}, report::{self, ReportContext, async_section, current_report, with_context_result}, resolvers::{Resolution, SyncResolutionAttempt, catalog::{catalog_name, lookup_catalog_entry_in}, resolve_descriptor, resolve_locator, try_resolve_descriptor_sync, workspace::resolve_locator_ident}, tree_resolver::{ResolutionTree, TreeResolver}
+    build, cache::CompositeCache, constraints::check_constraints, content_flags::ContentFlags, error::Error, fetchers::{PackageData, SyncFetchAttempt, fetch_locator, patch::has_builtin_patch, try_fetch_locator_sync}, graph::WaitMap, http_npm, linker, lockfile::{Lockfile, LockfileCatalogs, LockfileEntry, LockfileMetadata, LockfilePackageExtension, LockfileProject, catalogs_from_config}, manifest::resolutions::{ResolutionSelector, ResolutionsField}, primitives_exts::{InnerDependencyKind, RangeExt}, project::{InstallMode, Project}, report::{self, ReportContext, async_section, current_report, with_context_result}, resolvers::{Resolution, SyncResolutionAttempt, catalog::{catalog_name, lookup_catalog_entry_in, lookup_catalog_peer_range_in}, resolve_descriptor, resolve_locator, try_resolve_descriptor_sync, workspace::resolve_locator_ident}, tree_resolver::{ResolutionTree, TreeResolver}
 };
 
 #[derive(Clone)]
@@ -905,6 +905,10 @@ pub struct InstallState {
     pub production: bool,
 
     pub install_config_hash: Option<Hash64>,
+
+    /// The `ContentFlags::VERSION` the content flags were computed with;
+    /// flags from another version are recomputed rather than reused.
+    pub content_flags_version: u32,
     pub content_flags: BTreeMap<Locator, ContentFlags>,
     pub resolution_tree: ResolutionTree,
     pub descriptor_to_locator: BTreeMap<Descriptor, Locator>,
@@ -945,6 +949,7 @@ impl Default for InstallState {
             installed_workspaces: Some(BTreeSet::new()),
             production: false,
             install_config_hash: None,
+            content_flags_version: ContentFlags::VERSION,
             content_flags: BTreeMap::new(),
             resolution_tree: ResolutionTree::default(),
             descriptor_to_locator: BTreeMap::new(),
@@ -1843,6 +1848,7 @@ impl<'a> InstallManager<'a> {
     fn record_fetch(&mut self, locator: Locator, package_data: PackageData) -> Result<(), Error> {
         let content_flags
             = self.previous_state
+                .filter(|previous_state| previous_state.content_flags_version == ContentFlags::VERSION)
                 .and_then(|previous_state| previous_state.content_flags.get(&locator))
                 .cloned()
                 .map_or_else(|| ContentFlags::extract(&locator, &package_data), Ok)?;
@@ -2146,6 +2152,30 @@ pub fn normalize_resolutions_with(normalizer: &DependencyNormalizer<'_>, resolut
                 }
             }
         }
+    }
+
+    // Workspaces can reference catalogs in their peer dependencies; they
+    // never reach the published packages (`yarn pack` replaces them), so a
+    // stray one coming from elsewhere degrades the same way as the other
+    // peer ranges we can't use.
+    for (ident, peer_range) in peer_dependencies.iter_mut() {
+        let PeerRange::Catalog(params) = peer_range else {
+            continue;
+        };
+
+        if !resolution.locator.reference.is_workspace_reference() {
+            *peer_range = SemverPeerRange {range: zpm_semver::Range::any()}.into();
+            continue;
+        }
+
+        *peer_range = lookup_catalog_peer_range_in(normalizer.catalogs, params, &resolution.locator, ident, |catalog_name| {
+            if let Some(rule_usage) = normalizer.rule_usage {
+                rule_usage.lock().unwrap().catalog_entries
+                    .entry(catalog_name.to_string())
+                    .or_default()
+                    .insert(ident.clone());
+            }
+        })?;
     }
 
     dependencies.retain(|_, descriptor| !is_removed_dependency(normalizer, resolution, descriptor));
