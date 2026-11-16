@@ -126,7 +126,7 @@ impl LockfileMigration {
             )?;
         }
 
-        Configuration::validate(&document)
+        Configuration::validate(rc_path, &document)
             .map_err(|e| Error::ConfigurationParseError(Arc::new(e)))?;
 
         rc_path

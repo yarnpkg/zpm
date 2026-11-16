@@ -162,7 +162,8 @@ mod tests {
             Partial::Missing,
             Partial::Value(project),
             || panic!("No configuration found"),
-        )
+        ).apply_env_overrides(&context)
+            .expect("The environment should be valid")
     }
 
     #[test]

