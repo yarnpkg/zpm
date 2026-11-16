@@ -479,7 +479,7 @@
     },
     "workspaces": {
       "title": "Folder glob patterns referencing the workspaces of the project.",
-      "description": "Workspaces are an optional feature used by monorepos to split a large project into semi-independent subprojects, each one listing their own set of dependencies. The `workspaces` field is usually a list of glob patterns that match all directories that should become workspaces of your application. Consult the [workspaces documentation](/features/workspaces) for more information.",
+      "description": "Workspaces are an optional feature used by monorepos to split a large project into semi-independent subprojects, each one listing their own set of dependencies. The `workspaces` field is usually a list of glob patterns that match all directories that should become workspaces of your application. Consult the [workspaces documentation](/concepts/workspaces) for more information.",
       "type": ["array", "object"],
       "items": {
         "type": "string"

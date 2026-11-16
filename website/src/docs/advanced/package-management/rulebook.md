@@ -37,13 +37,13 @@ First, let's check that this layout is valid: Gatsby still gets its Lodash 4 dep
 
 If Babel had instead defined Lodash 1 as its own dependency, the package manager would have been able to encode this constraint and ensure that the requirement would have been met regardless of the hoisting.
 
-**Solution:** In most cases (when the missing dependency is a utility package), the fix is really just to add the missing entry to the [`dependencies` field](/configuration/manifest#dependencies). While often enough, a few more complex cases sometimes arise:
+**Solution:** In most cases (when the missing dependency is a utility package), the fix is really just to add the missing entry to the [`dependencies` field](/configuration/manifest#field-dependencies). While often enough, a few more complex cases sometimes arise:
 
-- If your package is a plugin (for example `babel-plugin-transform-commonjs`) and the missing dependency is the core (for example `babel-core`), you would need to instead register the dependency inside the [`peerDependencies` field](/configuration/manifest#peerDependencies).
+- If your package is a plugin (for example `babel-plugin-transform-commonjs`) and the missing dependency is the core (for example `babel-core`), you would need to instead register the dependency inside the [`peerDependencies` field](/configuration/manifest#field-peerdependencies).
 
 - If your package is something that automatically loads plugins (for example `eslint`), peer dependencies obviously aren't an option as you can't reasonably list all plugins. Instead, you should use the [`createRequire` function](https://nodejs.org/api/module.html#module_module_createrequire_filename) (or its [polyfill](https://github.com/nuxt-contrib/create-require)) to load plugins _on behalf of_ the configuration file that lists the plugins to load - be it the package.json or a custom one like the `.eslintrc.js` file.
 
-- If your package only requires the dependency in specific cases that the user control (for example `mikro-orm` which only depends on `sqlite3` if the consumer actually uses a SQLite3 database), use the [`peerDependenciesMeta` field](/configuration/manifest#peerDependenciesMeta.optional) to declare the peer dependency as optional and silence any warning when unmet.
+- If your package only requires the dependency in specific cases that the user control (for example `mikro-orm` which only depends on `sqlite3` if the consumer actually uses a SQLite3 database), use the [`peerDependenciesMeta` field](/configuration/manifest#field-peerdependenciesmetanameoptional) to declare the peer dependency as optional and silence any warning when unmet.
 
 - If your package is a meta-package of utilities (for example Next.js, which itself depends on Webpack so that its consumers don't have to do it), the situation is a bit complicated and you have two different options:
 
@@ -76,7 +76,7 @@ Note that while `createRequire` is Node 12+, a polyfill exists under the name [`
 
 **Why?** The `.bin` folder is an implementation detail, and may not exist at all depending on the install strategy.
 
-**Solution:** If you're writing a [script](/configuration/manifest#scripts), you can just refer to the binary by its name! So instead of `node_modules/.bin/jest -w`, prefer just writing `jest -w` which will work just fine. If for some reason `jest` isn't available, check that the current package properly [defines it as a dependency](#a-package-should-only-require-what-it-lists-in-its-dependencies).
+**Solution:** If you're writing a [script](/configuration/manifest#field-scripts), you can just refer to the binary by its name! So instead of `node_modules/.bin/jest -w`, prefer just writing `jest -w` which will work just fine. If for some reason `jest` isn't available, check that the current package properly [defines it as a dependency](#packages-should-only-ever-require-what-they-formally-list-in-their-dependencies).
 
 Sometimes you may find yourself having slightly more complex needs, for example if you wish to spawn a script with specific Node flags. Depending on the context we recommend passing options via the [`NODE_OPTIONS` environment variable](https://nodejs.org/api/cli.html#cli_node_options_options) rather than the CLI, but if that's not an option you can use `yarn bin name` to get the specified binary path:
 
@@ -108,7 +108,7 @@ The `$npm_execpath` environment variable will get replaced by the right binary d
 
 **Solution:** Just write in another directory rather than your own package. Anything would work, but a very common idiom is to use the `node_modules/.cache` folder in order to store cache data - that's for example what Babel, Webpack, and more do.
 
-If you absolutely need to write into your package's source folder (but really, we never came across this use case before), you still have the option to use [`preferUnplugged`](/configuration/manifest#preferUnplugged) to instruct Yarn to disable optimizations on your package and store it inside its own project-local copy, where you'll be able to mutate it at will.
+If you absolutely need to write into your package's source folder (but really, we never came across this use case before), you still have the option to use [`preferUnplugged`](/configuration/manifest#field-preferunplugged) to instruct Yarn to disable optimizations on your package and store it inside its own project-local copy, where you'll be able to mutate it at will.
 
 ## Packages should use the `prepack` script to generate dist files before publishing
 

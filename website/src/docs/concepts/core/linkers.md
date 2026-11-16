@@ -29,7 +29,7 @@ Under this mode Yarn will generate a single Node.js loader file directory refere
 | Semantic dependency errors | |
 | Perfect hoisting optimizations | |
 | Provides a [dependency tree API](/advanced/pnpapi) | |
-| Can be upgraded into [zero-installs](/features/caching#zero-installs) | |
+| Can be upgraded into [zero-installs](/concepts/zero-installs) | |
 
 </div>
 
