@@ -84,3 +84,51 @@ fn test_version_max_safe_component_length() {
     let version = "1".repeat(17);
     assert!(Version::from_file_string(&version).is_err());
 }
+
+#[rstest]
+#[case("1.2.3")]
+#[case("0.0.0")]
+#[case("v1.2.3")]
+#[case("10.20.30")]
+#[case("1.2.3-0")]
+#[case("1.2.3-rc.1")]
+#[case("1.2.3-0a.01a.-")]
+#[case("1.2.3-alpha-1.beta--2")]
+#[case("1.2.3+build")]
+#[case("1.2.3+001.sha-5114f85")]
+#[case("1.2.3-rc.1+build.2")]
+#[case(" 1.2.3")]
+#[case("1.2.3 ")]
+fn test_version_from_strict_str_valid(#[case] version: &str) {
+    assert_eq!(Version::from_strict_str(version), Some(Version::from_file_string(version.trim()).unwrap()));
+}
+
+// Each of these is rejected by node-semver's strict mode (`new SemVer(...)`)
+#[rstest]
+#[case("")]
+#[case("1")]
+#[case("1.0")]
+#[case("1.x")]
+#[case("1.2.x")]
+#[case("*")]
+#[case("x")]
+#[case("01.2.3")]
+#[case("1.02.3")]
+#[case("1.2.03")]
+#[case("1.2.3-01")]
+#[case("1.2.3.4")]
+#[case("1.2.3-")]
+#[case("1.2.3-rc.")]
+#[case("1.2.3-rc..1")]
+#[case("1.2.3+")]
+#[case("1.2.3_beta")]
+#[case("1.2.3-béta")]
+#[case("=1.2.3")]
+#[case("V1.2.3")]
+#[case("1.2.3-rc 1")]
+#[case(">=1.2.3")]
+#[case("1.2.9007199254740992")]
+#[case("latest")]
+fn test_version_from_strict_str_invalid(#[case] version: &str) {
+    assert_eq!(Version::from_strict_str(version), None);
+}
