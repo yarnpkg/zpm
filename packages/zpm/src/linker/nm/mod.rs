@@ -124,9 +124,10 @@ fn write_bin_shims(bin_shims: &[(Path, Path)]) -> Result<(), Error> {
 
 fn write_bin_shim(path: &Path, data: String) -> Result<(), Error> {
     // Writing through a symlink (say, from a previous install made from
-    // WSL) would overwrite the target
+    // WSL) would overwrite the target. The shim is usually missing (first
+    // install), which mustn't cost a `PathError` (and its backtrace)
     let is_file
-        = path.fs_symlink_metadata().ok_missing()?
+        = path.fs_symlink_metadata_if_exists()?
             .map(|metadata| metadata.is_file());
 
     if is_file == Some(false) {
