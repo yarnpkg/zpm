@@ -4,7 +4,7 @@ use chrono::{DateTime, Utc};
 use colored::Colorize;
 use futures::future::{BoxFuture, FutureExt};
 use futures::stream::{FuturesUnordered, StreamExt};
-use rayon::iter::{IntoParallelIterator, ParallelIterator};
+use rayon::iter::{IntoParallelIterator, IntoParallelRefIterator, ParallelIterator};
 use zpm_config::PackageExtension;
 use zpm_primitives::{Descriptor, GitRange, Ident, Locator, PatchRange, PeerRange, Range, Reference, RegistrySemverRange, RegistryTagRange, SemverDescriptor, SemverPeerRange, WorkspaceIdentRange, WorkspaceIdentReference};
 use zpm_utils::{DataType, Hash64, IoResultExt, Path, SystemSet, ToHumanString, UrlEncoded};
@@ -1005,13 +1005,6 @@ impl Install {
                 return;
             }
 
-            let data
-                = crate::peer_requirements::compute(project, &self.install_state);
-
-            if data.warnings.is_empty() {
-                return;
-            }
-
             let mut project_lines: Vec<String> = Vec::new();
             let mut has_transitive = false;
 
@@ -1553,18 +1546,38 @@ impl<'a> InstallManager<'a> {
                 self.record_resolution(resolution, original_resolution, package_data)?;
             }
 
-            for (locator, result) in fetch_map.into_results() {
-                let Ok(FetchResult {package_data, ..}) = result else {
-                    unreachable!("Already handled above");
-                };
+            let fetches = fetch_map.into_results()
+                .into_iter()
+                .map(|(locator, result)| {
+                    let Ok(FetchResult {package_data, ..}) = result else {
+                        unreachable!("Already handled above");
+                    };
 
-                self.record_fetch(locator, package_data)?;
-            }
+                    (locator, package_data)
+                })
+                .collect();
+
+            self.record_fetches(fetches)?;
 
             Ok::<(), Error>(())
         }).await?;
 
         let check_checksums = self.context.check_checksums;
+
+        // Conditional locators (os/cpu/libc-specific packages) keep their
+        // checksum out of the lockfile so it stays the same on every
+        // architecture; the previous install shadowed it in its state
+        // instead. Cache archives are deterministic for a given install
+        // configuration, so when it didn't change we can trust that shadow
+        // like we trust the lockfile checksums, rather than re-hashing
+        // archives that often weigh 100MB+ on every install.
+        let current_install_config_hash = self.context.project
+            .map(|project| project.install_config_hash());
+
+        let reusable_cache_checksums = self.previous_state
+            .filter(|_| !check_checksums)
+            .filter(|state| state.install_config_hash.is_some() && state.install_config_hash == current_install_config_hash)
+            .map(|state| &state.cache_checksums);
 
         let missing_checksums = self.result.lockfile.entries.values()
             .filter(|entry| {
@@ -1574,13 +1587,25 @@ impl<'a> InstallManager<'a> {
                     return true;
                 }
 
-                let previous_entry
-                    = self.initial_lockfile.entries.get(&entry.resolution.locator);
+                let locator
+                    = &entry.resolution.locator;
 
-                let has_checksum
-                    = previous_entry.map_or(false, |s| s.checksum.is_some());
+                // Freshly fetched archives were hashed as they were written
+                // to the cache; that checksum takes precedence below anyway.
+                let has_fresh_checksum = self.result.package_data.get(locator)
+                    .is_some_and(|package_data| package_data.checksum().is_some());
 
-                !has_checksum
+                if has_fresh_checksum {
+                    return false;
+                }
+
+                let has_lockfile_checksum = self.initial_lockfile.entries.get(locator)
+                    .is_some_and(|previous_entry| previous_entry.checksum.is_some());
+
+                let has_cache_checksum = reusable_cache_checksums
+                    .is_some_and(|cache_checksums| cache_checksums.contains_key(locator));
+
+                !has_lockfile_checksum && !has_cache_checksum
             })
             .flat_map(|entry| {
                 let package_data = self.result.package_data.get(&entry.resolution.locator)
@@ -1633,7 +1658,8 @@ impl<'a> InstallManager<'a> {
                     None
                 })
                 .or_else(|| previous_checksum.cloned())
-                .or_else(|| late_checksums.get(&entry.resolution.locator).cloned());
+                .or_else(|| late_checksums.get(&entry.resolution.locator).cloned())
+                .or_else(|| reusable_cache_checksums.and_then(|cache_checksums| cache_checksums.get(&entry.resolution.locator)).cloned());
 
             let is_conditional_locator
                 = self.result.install_state.conditional_locators
@@ -1846,16 +1872,31 @@ impl<'a> InstallManager<'a> {
     }
 
     fn record_fetch(&mut self, locator: Locator, package_data: PackageData) -> Result<(), Error> {
-        let content_flags
+        self.record_fetches(vec![(locator, package_data)])
+    }
+
+    /// Records fetched packages along with their content flags. Packages
+    /// the previous install didn't know about need their archives to be
+    /// inspected, which is IO we parallelize across all of them.
+    fn record_fetches(&mut self, fetches: Vec<(Locator, PackageData)>) -> Result<(), Error> {
+        let previous_content_flags
             = self.previous_state
                 .filter(|previous_state| previous_state.content_flags_version == ContentFlags::VERSION)
-                .and_then(|previous_state| previous_state.content_flags.get(&locator))
-                .cloned()
-                .map_or_else(|| ContentFlags::extract(&locator, &package_data), Ok)?;
+                .map(|previous_state| &previous_state.content_flags);
 
-        self.result.package_data.insert(locator.clone(), package_data);
+        let content_flags = fetches.par_iter()
+            .map(|(locator, package_data)| {
+                previous_content_flags
+                    .and_then(|content_flags| content_flags.get(locator))
+                    .cloned()
+                    .map_or_else(|| ContentFlags::extract(locator, package_data), Ok)
+            })
+            .collect::<Result<Vec<_>, Error>>()?;
 
-        self.result.install_state.content_flags.insert(locator, content_flags);
+        for ((locator, package_data), content_flags) in fetches.into_iter().zip(content_flags) {
+            self.result.package_data.insert(locator.clone(), package_data);
+            self.result.install_state.content_flags.insert(locator, content_flags);
+        }
 
         Ok(())
     }

@@ -119,12 +119,12 @@ impl SystemSet {
     /// The set only containing the system we're currently running on.
     pub fn from_current() -> Self {
         let current
-            = System::from_current();
+            = System::current();
 
         Self {
-            arch: Some(current.arch.into_iter().collect()),
-            os: Some(current.os.into_iter().collect()),
-            libc: Some(current.libc.into_iter().collect()),
+            arch: Some(current.arch.iter().cloned().collect()),
+            os: Some(current.os.iter().cloned().collect()),
+            libc: Some(current.libc.iter().cloned().collect()),
         }
     }
 }

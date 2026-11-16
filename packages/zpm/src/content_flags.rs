@@ -278,10 +278,10 @@ impl ContentFlags {
     }
 
     fn extract_zip(locator: &Locator, archive_path: &Path) -> Result<Self, Error> {
-        let package_bytes
-            = archive_path.fs_read()?;
-
         if matches!(locator.reference, Reference::PypiShorthand(_) | Reference::PypiRegistry(_)) {
+            let package_bytes
+                = archive_path.fs_read()?;
+
             // Source distributions (tarballs, or zips cached as `.src.zip`)
             // only know their console scripts once built, which the venv
             // linker takes care of
@@ -301,8 +301,14 @@ impl ContentFlags {
             });
         }
 
-        let first_entry
-            = zpm_formats::zip::first_entry_from_zip(&package_bytes)?;
+        // We only need the manifest (the first entry) and the file names, so
+        // we skip the file contents; reading them would make this pass as
+        // expensive as the packages are large (100MB+ for some)
+        let index
+            = zpm_formats::zip::read_zip_index(archive_path)?;
+
+        let first_entry = index.first_entry
+            .ok_or_else(|| zpm_formats::Error::InvalidZipFile("Empty".to_string()))?;
 
         let meta_manifest: Manifest
             = JsonDocument::hydrate_from_slice(&first_entry.data)?;
@@ -312,13 +318,10 @@ impl ContentFlags {
             .map(|(k, s)| build::Command::Script {event: Some(k.to_string()), script: s.to_string()})
             .collect::<Vec<_>>();
 
-        let entries
-            = zpm_formats::zip::entries_from_zip(&package_bytes)?;
-
         let binding_gyp_name
             = Path::from_str(&format!("node_modules/{}/binding.gyp", locator.ident.as_str()))?;
         let has_binding_gyp
-            = entries.iter().any(|entry| entry.name == binding_gyp_name);
+            = index.names.iter().any(|name| *name == binding_gyp_name);
 
         if has_implicit_node_gyp_build(&meta_manifest, has_binding_gyp) {
             build_commands.push(build::Command::Program {
@@ -330,7 +333,7 @@ impl ContentFlags {
         let prefer_extracted
             = meta_manifest.prefer_unplugged;
         let suggest_extracted
-            = entries.iter().any(|entry| UNPLUG_EXT_REGEX.is_match(&entry.name.as_str()));
+            = index.names.iter().any(|name| UNPLUG_EXT_REGEX.is_match(name.as_str()));
 
         Ok(ContentFlags {
             binaries: extract_binaries(meta_manifest.name, meta_manifest.bin),
