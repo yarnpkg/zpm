@@ -186,6 +186,15 @@ pub enum Error {
     #[error("Catalog entry references itself ({catalog}:{})", ident.to_print_string())]
     CatalogCycle { catalog: String, ident: Ident },
 
+    #[error("The {} peer dependency of {} references the {catalog} catalog, which doesn't exist", ident.to_print_string(), locator.to_print_string())]
+    PeerCatalogNotFound { locator: Locator, ident: Ident, catalog: String },
+
+    #[error("The {} peer dependency of {} references the {catalog} catalog, which doesn't have an entry for it", ident.to_print_string(), locator.to_print_string())]
+    PeerCatalogEntryNotFound { locator: Locator, ident: Ident, catalog: String },
+
+    #[error("The {} peer dependency of {} references the {catalog} catalog, whose entry ({range}) can't be used as a peer range", ident.to_print_string(), locator.to_print_string())]
+    InvalidPeerCatalogEntry { locator: Locator, ident: Ident, catalog: String, range: String },
+
     #[error("Package manifest not found ({})", .0.to_print_string())]
     ManifestNotFound(Path),
 
