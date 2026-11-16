@@ -186,6 +186,22 @@ mod tests {
         assert_eq!(settings_from("pypiMinimalAgeGate: 1440", &[]).pypi_minimal_age_gate.value, 1440 * MINUTE);
         assert_eq!(settings_from("daemonDefaultWarmupPeriod: 2", &[]).daemon_default_warmup_period.value, Duration::from_secs(2));
         assert_eq!(settings_from("daemonDefaultWarmupPeriod: 500ms", &[]).daemon_default_warmup_period.value, Duration::from_millis(500));
+
+        let http_table: &[(&str, Duration)] = &[
+            ("httpTimeout: 60000", MINUTE),
+            ("httpTimeout: \"1500\"", Duration::from_millis(1500)),
+            ("httpTimeout: 1m", MINUTE),
+            ("httpTimeout: 30s", Duration::from_secs(30)),
+            ("httpTimeout: 1500ms", Duration::from_millis(1500)),
+            ("httpTimeout: 0.5s", Duration::from_millis(500)),
+        ];
+
+        for (text, expected) in http_table {
+            assert_eq!(settings_from(text, &[]).http_timeout.value, *expected, "{text}");
+        }
+
+        assert_eq!(settings_from("slowNetworkTimeout: 2000", &[]).slow_network_timeout.value, Duration::from_secs(2));
+        assert_eq!(settings_from("slowNetworkTimeout: 10s", &[]).slow_network_timeout.value, Duration::from_secs(10));
     }
 
     #[test]
@@ -196,16 +212,20 @@ mod tests {
         assert_eq!(settings.npm_minimal_age_gate.value, 1440 * MINUTE);
         assert_eq!(settings.pypi_minimal_age_gate.value, Duration::ZERO);
         assert_eq!(settings.daemon_default_warmup_period.value, Duration::from_secs(1));
+        assert_eq!(settings.http_timeout.value, MINUTE);
+        assert_eq!(settings.slow_network_timeout.value, Duration::from_secs(5));
     }
 
     #[test]
     fn environment_values_without_unit_should_use_the_setting_unit() {
         let settings
-            = settings_from("{}", &[("YARN_NPM_MINIMAL_AGE_GATE", "1440"), ("YARN_PYPI_MINIMAL_AGE_GATE", "90s"), ("YARN_DAEMON_DEFAULT_WARMUP_PERIOD", "3")]);
+            = settings_from("{}", &[("YARN_NPM_MINIMAL_AGE_GATE", "1440"), ("YARN_PYPI_MINIMAL_AGE_GATE", "90s"), ("YARN_DAEMON_DEFAULT_WARMUP_PERIOD", "3"), ("YARN_HTTP_TIMEOUT", "1500"), ("YARN_SLOW_NETWORK_TIMEOUT", "2s")]);
 
         assert_eq!(settings.npm_minimal_age_gate.value, 1440 * MINUTE);
         assert_eq!(settings.pypi_minimal_age_gate.value, Duration::from_secs(90));
         assert_eq!(settings.daemon_default_warmup_period.value, Duration::from_secs(3));
+        assert_eq!(settings.http_timeout.value, Duration::from_millis(1500));
+        assert_eq!(settings.slow_network_timeout.value, Duration::from_secs(2));
     }
 
     #[test]
