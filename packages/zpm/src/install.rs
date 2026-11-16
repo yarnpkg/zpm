@@ -1005,13 +1005,6 @@ impl Install {
                 return;
             }
 
-            let data
-                = crate::peer_requirements::compute(project, &self.install_state);
-
-            if data.warnings.is_empty() {
-                return;
-            }
-
             let mut project_lines: Vec<String> = Vec::new();
             let mut has_transitive = false;
 
