@@ -5,6 +5,17 @@ use zpm_utils::{tree, AbstractValue, ToFileString};
 use crate::{daemons, errors::Error};
 
 /// List live Yarn daemons
+///
+/// ## Examples
+///
+/// List the running daemons
+///
+/// `yarn switch daemon`
+///
+/// List the running daemons as JSON
+///
+/// `yarn switch daemon --json`
+///
 #[cli::command]
 #[cli::path("switch", "daemon")]
 #[cli::category("Daemon management")]

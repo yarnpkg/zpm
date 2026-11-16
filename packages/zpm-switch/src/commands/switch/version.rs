@@ -1,6 +1,13 @@
 use clipanion::cli;
 
 /// Print the version of the current Yarn Switch binary
+///
+/// ## Examples
+///
+/// Print the version of Yarn Switch
+///
+/// `yarn switch --version`
+///
 #[cli::command]
 #[cli::path("switch")]
 #[cli::category("Switch commands")]

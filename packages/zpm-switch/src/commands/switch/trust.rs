@@ -30,6 +30,13 @@ impl TrustLevel {
 }
 
 /// Check whether a project is trusted by Yarn Switch
+///
+/// ## Examples
+///
+/// Check whether a project is trusted
+///
+/// `yarn switch trust --check ~/projects/my-app`
+///
 #[cli::command]
 #[cli::path("switch", "trust")]
 #[cli::category("Project trust")]
@@ -58,6 +65,21 @@ impl TrustCheckCommand {
 }
 
 /// Set the Yarn Switch trust state for a project
+///
+/// ## Examples
+///
+/// Trust a project
+///
+/// `yarn switch trust --set true ~/projects/my-app`
+///
+/// Distrust a project
+///
+/// `yarn switch trust --set false ~/projects/my-app`
+///
+/// Forget the trust decision for a project
+///
+/// `yarn switch trust --set null ~/projects/my-app`
+///
 #[cli::command]
 #[cli::path("switch", "trust")]
 #[cli::category("Project trust")]

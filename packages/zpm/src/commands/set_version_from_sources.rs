@@ -21,6 +21,16 @@ fn get_branch_ref(branch: &str) -> String {
 ///
 /// This command clones or updates a ZPM repository, builds a fresh Yarn binary, and links the current project to that binary through Yarn Switch.
 ///
+/// ## Examples
+///
+/// Build Yarn from the `main` branch
+///
+/// `yarn set version from sources`
+///
+/// Build Yarn from a pull request
+///
+/// `yarn set version from sources --branch 1234`
+///
 #[cli::command]
 #[cli::path("set", "version", "from", "sources")]
 #[cli::category("Configuration commands")]

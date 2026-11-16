@@ -17,6 +17,12 @@ use crate::{
 /// This command checks that every workspace changed since the branch base, plus its affected dependents, has either a release decision or a decline
 /// entry in `.yarn/versions`.
 ///
+/// ## Examples
+///
+/// Check that all changed workspaces have a release decision
+///
+/// `yarn version check`
+///
 #[cli::command]
 #[cli::path("version", "check")]
 #[cli::category("Project management")]

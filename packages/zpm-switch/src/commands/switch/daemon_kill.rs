@@ -9,6 +9,13 @@ use crate::{
 };
 
 /// Stop the daemon for the current project
+///
+/// ## Examples
+///
+/// Stop the daemon of the current project
+///
+/// `yarn switch daemon --kill`
+///
 #[cli::command]
 #[cli::path("switch", "daemon")]
 #[cli::category("Daemon management")]

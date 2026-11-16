@@ -22,6 +22,17 @@ use crate::{
 ///
 /// If the `--relative` flag is set, the paths will be stored as relative paths rather
 /// than absolute paths.
+///
+/// ## Examples
+///
+/// Register one or more remote workspaces for use in the current project
+///
+/// `yarn link ~/ts-loader ~/jest`
+///
+/// Register all workspaces from a remote project for use in the current project
+///
+/// `yarn link ~/jest --all`
+///
 #[cli::command]
 #[cli::path("link")]
 #[cli::category("Dependency management")]

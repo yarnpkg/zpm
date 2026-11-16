@@ -11,6 +11,16 @@ use crate::{error::Error, project, script::ScriptEnvironment};
 ///
 /// The spawned process receives the same project environment as scripts and binaries, including Plug'n'Play injection when the project uses PnP.
 ///
+/// ## Examples
+///
+/// Execute a single shell command
+///
+/// `yarn exec echo Hello World`
+///
+/// Execute a shell script
+///
+/// `yarn exec "tsc --version && node --version"`
+///
 #[cli::command(proxy)]
 #[cli::path("exec")]
 #[cli::category("Scripting commands")]

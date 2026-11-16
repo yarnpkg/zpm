@@ -31,6 +31,24 @@ use crate::{
 /// If both `-v,--verbose` and `--json` are set, Yarn also returns cross-dependencies between workspaces (useful when you
 /// wish to automatically generate Bazel rules).
 ///
+/// ## Examples
+///
+/// List all workspaces
+///
+/// `yarn workspaces list`
+///
+/// List all workspaces and their cross-dependencies as NDJSON
+///
+/// `yarn workspaces list --json -v`
+///
+/// List the workspaces changed since the configured base refs
+///
+/// `yarn workspaces list --since`
+///
+/// List the workspaces changed since `main`, along with their dependents
+///
+/// `yarn workspaces list --since main -R`
+///
 #[cli::command]
 #[cli::path("workspaces", "list")]
 #[cli::category("Workspace commands")]

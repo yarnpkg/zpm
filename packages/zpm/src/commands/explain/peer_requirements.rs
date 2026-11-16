@@ -17,6 +17,16 @@ use crate::{
 ///
 /// **Note:** A hash is a seven-letter code consisting of the letter 'p' followed by six characters that can be obtained from peer dependency warnings or from the list of all peer requirements (`yarn explain peer-requirements`).
 ///
+/// ## Examples
+///
+/// Explain the corresponding peer requirement for a hash
+///
+/// `yarn explain peer-requirements p8d4da8`
+///
+/// List all peer requirements
+///
+/// `yarn explain peer-requirements`
+///
 #[cli::command]
 #[cli::path("explain", "peer-requirements")]
 #[cli::category("Dependency management")]

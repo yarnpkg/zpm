@@ -4,6 +4,13 @@ use zpm_utils::{get_system_string};
 use crate::{cache, errors::Error};
 
 /// Check whether Yarn versions are cached
+///
+/// ## Examples
+///
+/// Check whether Yarn 4.12.0 is in the Switch cache
+///
+/// `yarn switch cache --check 4.12.0`
+///
 #[cli::command]
 #[cli::path("switch", "cache")]
 #[cli::category("Cache management")]

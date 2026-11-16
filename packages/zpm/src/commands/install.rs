@@ -39,6 +39,24 @@ use crate::{error::Error, immutable, project::{self, InstallMode, RunInstallOpti
 ///
 /// - `update-lockfile` will skip the link step altogether, and only fetch packages that are missing from the lockfile (or that have no associated checksums). This mode is typically used by tools like Renovate or Dependabot to keep a lockfile up-to-date without incurring the full install cost.
 ///
+/// ## Examples
+///
+/// Install the project
+///
+/// `yarn install`
+///
+/// Validate a project when using Zero-Installs
+///
+/// `yarn install --immutable --immutable-cache`
+///
+/// Validate a project when using Zero-Installs (slightly safer if you accept external PRs)
+///
+/// `yarn install --immutable --immutable-cache --check-cache`
+///
+/// Update the lockfile without linking the packages
+///
+/// `yarn install --mode=update-lockfile`
+///
 #[cli::command(default)]
 #[cli::path("install")]
 #[cli::category("Dependency management")]

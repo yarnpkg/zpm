@@ -8,6 +8,12 @@ use crate::{cwd::get_final_cwd, errors::Error, links::{Link, LinkTarget, set_lin
 /// After this command succeeds, Yarn commands run in the project will execute the specified local binary instead of the version from
 /// `packageManager`. Use this for local Yarn development builds.
 ///
+/// ## Examples
+///
+/// Run a local build of Yarn in the current project
+///
+/// `yarn switch link ~/zpm/target/release/yarn-bin`
+///
 #[cli::command]
 #[cli::path("switch", "link")]
 #[cli::category("Local Yarn development")]

@@ -16,6 +16,16 @@ use crate::{constraints::{check_constraints, structs::{ConstraintsOutput, Worksp
 ///
 /// Constraints are configured through JavaScript or TypeScript constraint files.
 ///
+/// ## Examples
+///
+/// Check that all constraints are satisfied
+///
+/// `yarn constraints`
+///
+/// Autofix all unmet constraints
+///
+/// `yarn constraints --fix`
+///
 #[cli::command]
 #[cli::path("constraints")]
 #[cli::category("Project management")]

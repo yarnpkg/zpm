@@ -26,6 +26,24 @@ use crate::{
 /// This command accepts glob patterns inside the scope and name components (not the range). Make sure to escape the patterns to prevent your own
 /// shell from trying to expand them.
 ///
+/// ## Examples
+///
+/// Unplug the lodash dependency from the active workspace
+///
+/// `yarn unplug lodash`
+///
+/// Unplug all instances of lodash referenced by any workspace
+///
+/// `yarn unplug lodash -A`
+///
+/// Unplug all instances of lodash referenced by the active workspace and its dependencies
+///
+/// `yarn unplug lodash -R`
+///
+/// Stop unplugging lodash
+///
+/// `yarn unplug lodash --revert`
+///
 #[cli::command]
 #[cli::path("unplug")]
 #[cli::category("Dependency management")]

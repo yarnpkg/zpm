@@ -13,7 +13,14 @@ use crate::project::Project;
 /// background. The task will be terminated and its status will be set to
 /// "stopped".
 ///
-/// Use `yarn tasks list` to see the names of running tasks that can be stopped.
+/// Use `yarn tasks` to see the names of running tasks that can be stopped.
+///
+/// ## Examples
+///
+/// Stop the `server` long-lived task
+///
+/// `yarn tasks stop server`
+///
 #[cli::command]
 #[cli::path("tasks", "stop")]
 #[cli::category("Task management commands")]

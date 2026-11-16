@@ -12,6 +12,17 @@ use crate::project::Project;
 /// This command retrieves the most recent task events from the daemon,
 /// including task starts, completions, failures, and cancellations.
 /// Up to 1000 events are retained by the daemon.
+///
+/// ## Examples
+///
+/// Show the recent task events
+///
+/// `yarn tasks history`
+///
+/// Show the recent task events as NDJSON
+///
+/// `yarn tasks history --json`
+///
 #[cli::command]
 #[cli::path("tasks", "history")]
 #[cli::category("Task management commands")]

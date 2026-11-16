@@ -8,6 +8,16 @@ use crate::{error::Error, project, script::ScriptEnvironment};
 ///
 /// This command runs Node.js with the current project's environment, including Plug'n'Play injection when the project uses PnP.
 ///
+/// ## Examples
+///
+/// Run a Node script
+///
+/// `yarn node ./my-script.js`
+///
+/// Evaluate a script with access to the project dependencies
+///
+/// `yarn node -e "console.log(require.resolve('lodash'))"`
+///
 #[cli::command(proxy)]
 #[cli::path("node")]
 #[cli::category("Scripting commands")]

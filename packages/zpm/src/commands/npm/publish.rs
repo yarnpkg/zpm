@@ -38,6 +38,24 @@ enum NpmPublishAccess {
 /// With `--staged`, the package is staged for later approval without requiring two-factor authentication. Use
 /// `yarn npm stage list`, `yarn npm stage approve`, and `yarn npm stage reject` to manage staged packages.
 ///
+/// ## Examples
+///
+/// Publish the active workspace
+///
+/// `yarn npm publish`
+///
+/// Publish the active workspace under the `next` tag
+///
+/// `yarn npm publish --tag next`
+///
+/// Stage the active workspace for later approval
+///
+/// `yarn npm publish --staged`
+///
+/// Print what would be published without uploading anything
+///
+/// `yarn npm publish --dry-run`
+///
 #[cli::command]
 #[cli::path("npm", "publish")]
 #[cli::category("Npm-related commands")]

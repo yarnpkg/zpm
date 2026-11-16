@@ -18,6 +18,16 @@ use crate::{error::Error, fetchers::PackageData, install::InstallResult, project
 ///
 /// If the package is already patched, Yarn starts from the original package by default. Use `-u,--update` to apply the existing patch before editing.
 ///
+/// ## Examples
+///
+/// Extract lodash so it can be patched
+///
+/// `yarn patch lodash`
+///
+/// Extract lodash with its existing patch already applied
+///
+/// `yarn patch -u lodash`
+///
 #[cli::command]
 #[cli::path("patch")]
 #[cli::category("Dependency management")]

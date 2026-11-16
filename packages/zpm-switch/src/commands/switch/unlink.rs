@@ -7,6 +7,16 @@ use crate::{links::unset_link, cwd::get_final_cwd, errors::Error, manifest::find
 ///
 /// This command removes a local binary link or migration link so the project goes back to the version declared in `packageManager`.
 ///
+/// ## Examples
+///
+/// Remove the link of the current project
+///
+/// `yarn switch unlink`
+///
+/// Remove the link of another project
+///
+/// `yarn switch unlink ~/projects/my-app`
+///
 #[cli::command]
 #[cli::path("switch", "unlink")]
 #[cli::category("Local Yarn development")]
