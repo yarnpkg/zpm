@@ -46,13 +46,47 @@ pub enum Limit {
 /// Run a command in multiple workspaces
 ///
 /// This command selects workspaces from the project and runs the given command in each of them. Workspaces can be selected explicitly, by dependency
-/// relationship, by change detection, or by include/exclude patterns.
+/// relationship, by change detection, or by include/exclude patterns:
 ///
-/// By default commands run sequentially. Use `-p,--parallel` to run them concurrently, and `--topological` to respect workspace dependency order.
+/// - `-A,--all` selects every workspace of the project.
+///
+/// - `-R,--recursive` selects the current workspace and its transitive workspace dependencies (or, combined with `--since`, the changed
+///   workspaces and their transitive dependents).
+///
+/// - `-W,--worktree` selects the current workspace and the workspaces nested in it through its `workspaces` field, recursively.
+///
+/// - `--from` selects the workspaces matching the given glob patterns (idents or paths) instead of the current workspace, as starting point for
+///   `-R,--recursive` and `-W,--worktree`.
+///
+/// - `--since` selects the workspaces changed since the given ref, or since the refs listed in `changesetBaseRefs` when no ref is given.
+///
+/// - `--include` and `--exclude` keep or drop the workspaces matching the given glob patterns, and `--no-private` drops private workspaces.
+///
+/// By default commands run sequentially. Use `-p,--parallel` to run them concurrently (up to `-j,--jobs` at a time, or `-j unlimited`), and
+/// `-i,--interlaced` to print their output as it is produced rather than once each command exits. With `-t,--topological`, a command only starts
+/// once it has finished in the workspaces the current one depends on (through the dependency kinds set by `--followed-dependencies`);
+/// `--topological-dev` always takes both `dependencies` and `devDependencies` into account.
+///
+/// The `-v,--verbose` flag can be passed up to twice: once to prefix output lines with the originating workspace's name, and again to include
+/// start/finish/timing log lines. Maximum verbosity is enabled by default in terminal environments.
+///
+/// Use `-n,--dry-run` to print the workspaces the command would run in, in order, without running it.
 ///
 /// When both `--follow-dependents` and `--follow-dependencies` are set, the dependents are added first and the dependencies are then
 /// followed from the whole resulting set, so the selection contains everything needed to build each dependent (equivalent to pnpm's
 /// `--filter '...{pkg}...'`).
+///
+/// If the command is `run` and the script doesn't exist in a workspace, that workspace is skipped.
+///
+/// For example:
+///
+/// - `yarn workspaces foreach -A run build` runs the `build` script in every workspace.
+///
+/// - `yarn workspaces foreach -Apt run build` does the same in parallel, building workspace dependencies first.
+///
+/// - `yarn workspaces foreach -Rpt --from '{workspace-a,workspace-b}' run build` builds two workspaces and all their dependencies.
+///
+/// - `yarn workspaces foreach -A --no-private npm publish --tolerate-republish` publishes all public workspaces.
 ///
 #[cli::command(proxy)]
 #[cli::path("workspaces", "foreach")]
@@ -75,8 +109,12 @@ pub struct WorkspacesForeach {
     head: Option<String>,
 
     /// Include workspace dependencies of the selected workspaces
-    #[cli::option("--recursive", default = false)]
+    #[cli::option("-R,--recursive", default = false)]
     recursive: bool,
+
+    /// Include the workspaces nested in the selected workspaces
+    #[cli::option("-W,--worktree", default = false)]
+    worktree: bool,
 
     /// Follow dependencies when expanding the workspace selection
     #[cli::option("--follow-dependencies", default = false)]
@@ -111,8 +149,12 @@ pub struct WorkspacesForeach {
     jobs: Limit,
 
     /// Run workspaces in topological order
-    #[cli::option("--topological", default = false)]
+    #[cli::option("-t,--topological", default = false)]
     is_topological: bool,
+
+    /// Run workspaces in topological order, taking both regular and dev dependencies into account
+    #[cli::option("--topological-dev", default = false)]
+    is_topological_dev: bool,
 
     /// Increase output verbosity; can be repeated
     #[cli::option("-v,--verbose", default = if zpm_utils::is_terminal() {2} else {0}, counter)]
@@ -121,6 +163,10 @@ pub struct WorkspacesForeach {
     /// Include private workspaces
     #[cli::option("--private", default = true)]
     private: bool,
+
+    /// Print the workspaces the command would run in, without running it
+    #[cli::option("-n,--dry-run", default = false)]
+    dry_run: bool,
 
     /// Command to run in each selected workspace
     command: String,
@@ -153,6 +199,10 @@ impl WorkspacesForeach {
 
         let selection
             = self.selection(&project, args.clone()).await?;
+
+        if self.dry_run {
+            return self.execute_dry_run(&project, selection);
+        }
 
         match selection {
             Selection::List(idents) => {
@@ -203,6 +253,7 @@ impl WorkspacesForeach {
             since: &self.since,
             head: &self.head,
             recursive: self.recursive,
+            worktree: self.worktree,
             follow_dependencies: self.follow_dependencies,
             follow_dependents: self.follow_dependents,
             followed_dependencies: &self.followed_dependencies,
@@ -220,6 +271,28 @@ impl WorkspacesForeach {
             println!();
             println!("Completed {} tasks in {}", DataType::Number.colorize(&format!("{}", task_count)), Unit::duration(duration.as_secs_f64()).to_print_string());
         }
+    }
+
+    fn execute_dry_run(&self, project: &Project, selection: Selection) -> Result<ExitCode, Error> {
+        let idents = match selection {
+            Selection::List(idents) => idents,
+            Selection::Topological(islands) => islands.into_iter().flat_map(|island| island.idents).collect(),
+        };
+
+        for ident in idents {
+            let workspace
+                = project.workspace_by_ident(&ident)?;
+
+            let rel_path = match workspace.rel_path.is_empty() {
+                true => ".".to_string(),
+                false => workspace.rel_path.to_file_string(),
+            };
+
+            println!("- {}", rel_path);
+            println!("  {}", workspace.locator_path().to_print_string());
+        }
+
+        Ok(ExitCode::SUCCESS)
     }
 
     async fn execute_list(&self, project: &Project, idents: Vec<Ident>, args: Vec<String>) -> Result<ExitCode, Error> {
@@ -428,7 +501,7 @@ impl WorkspacesForeach {
             });
         }
 
-        if self.is_topological {
+        if self.is_topological || self.is_topological_dev {
             Ok(Selection::Topological(self.topological_sort(project, &selection)))
         } else {
             Ok(Selection::List(selection.into_iter().collect()))
@@ -446,7 +519,12 @@ impl WorkspacesForeach {
                     .expect("We should only be selecting workspaces");
 
             // Get dependencies that are also in the selection
-            let deps: BTreeSet<Ident> = self.followed_dependencies.of(workspace)
+            let followed_dependencies = match self.is_topological_dev {
+                true => &FollowedDependencies::All,
+                false => &self.followed_dependencies,
+            };
+
+            let deps: BTreeSet<Ident> = followed_dependencies.of(workspace)
                 .into_iter()
                 .filter(|dep| selection.contains(dep))
                 .collect();

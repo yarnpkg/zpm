@@ -22,6 +22,7 @@ use crate::{
     http_npm,
     install::{InstallContext, InstallManager, InstallResult, InstallState},
     lockfile::{Lockfile, LockfileMetadata, LockfileProject, from_legacy_berry_lockfile, from_pnpm_node_modules},
+    lockfile_migration::{LockfileMigration, migrate_legacy_lockfile_settings},
     manifest::{Manifest, helpers::read_manifest_with_size},
     manifest_finder::CachedManifestFinder,
     npm::NpmEntryExt,
@@ -220,6 +221,17 @@ impl Project {
         if config.settings.enable_migration_mode.value {
             config.settings.enable_global_cache.value = true;
             config.settings.enable_global_cache.source = config.settings.enable_migration_mode.source;
+
+            // The root lockfile keeps the format of the release we migrate
+            // from, so we can't persist the lockfile migration settings; we
+            // apply them to every command instead (so that the install config
+            // hash stays stable between installs).
+            if let Some(migration) = LockfileMigration::detect(&config, &project_cwd)? {
+                let source
+                    = config.settings.enable_migration_mode.source;
+
+                migration.apply(&mut config.settings, source);
+            }
         }
 
         let clone_concurrency
@@ -513,9 +525,11 @@ impl Project {
         let lockfile_path
             = self.lockfile_path();
 
-        let current_content = lockfile_path
-            .fs_read()
-            .ok_missing()?;
+        // The lockfile is missing on first install; work on the io::Result
+        // so that this doesn't build an error
+        let current_content
+            = std::fs::read(lockfile_path.to_path_buf())
+                .ok_missing()?;
 
         let contents
             = format!("{}\n", JsonDocument::to_string_pretty(lockfile)?);
@@ -610,8 +624,11 @@ impl Project {
         let enable_immutable_cache
             = self.config.settings.enable_immutable_cache.value;
 
+        // We only prune the local cache when it lives in the folder Yarn picks by
+        // default; a custom cacheFolder may be shared or contain unrelated files.
         let cleanable_local_cache
-            = matches!(self.config.settings.cache_folder.source, Source::Default);
+            = self.config.settings.enable_local_cache_cleanup.value
+                && matches!(self.config.settings.cache_folder.source, Source::Default);
 
         let name_suffix = match compression_algorithm {
             Some(zpm_formats::CompressionAlgorithm::Deflate(_)) => format!("-d{}", compression_algorithm.unwrap().to_file_string()),
@@ -1530,6 +1547,17 @@ impl Project {
     }
 
     pub fn package_visible_binaries(&self, locator: &Locator) -> Result<BTreeMap<String, Binary>, Error> {
+        let binaries = self.package_visible_binaries_with_providers(locator)?
+            .into_iter()
+            .map(|(name, (_, binary))| (name, binary))
+            .collect();
+
+        Ok(binaries)
+    }
+
+    /// Same as `package_visible_binaries`, but also returns the locator of
+    /// the package that provides each binary.
+    pub fn package_visible_binaries_with_providers(&self, locator: &Locator) -> Result<BTreeMap<String, (Locator, Binary)>, Error> {
         let install_state = self.install_state.as_ref()
             .ok_or(Error::InstallStateNotFound)?;
 
@@ -1543,21 +1571,23 @@ impl Project {
             = BTreeMap::new();
 
         for (ident, descriptor) in &resolution.dependencies {
-            let locator = install_state.resolution_tree.descriptor_to_locator.get(descriptor)
+            let dependency_locator = install_state.resolution_tree.descriptor_to_locator.get(descriptor)
                 .expect("Expected resolution to be found in the resolution tree");
 
             // Packages may be missing from locations_by_package when they
             // haven't been installed due to being unsupported on the current
             // platform. In this case, we ignore its binaries.
             //
-            if let Some(dependency_location) = self.find_visible_dependency_location(package_location, ident, locator)? {
-                all_bins.extend(self.package_binaries_at(locator, &dependency_location)?);
+            if let Some(dependency_location) = self.find_visible_dependency_location(package_location, ident, dependency_locator)? {
+                all_bins.extend(self.package_binaries_at(dependency_locator, &dependency_location)?.into_iter()
+                    .map(|(name, binary)| (name, (dependency_locator.clone(), binary))));
             }
         }
 
-        all_bins.extend(self.package_binaries_at(locator, package_location)?);
+        all_bins.extend(self.package_binaries_at(locator, package_location)?.into_iter()
+            .map(|(name, binary)| (name, (locator.clone(), binary))));
 
-        Ok(BTreeMap::from_iter(all_bins.into_iter()))
+        Ok(all_bins)
     }
 
     pub fn find_binary(&self, name: &str) -> Result<Binary, Error> {
@@ -1768,6 +1798,11 @@ impl Project {
             = background_writes.clone();
 
         let install_outcome = with_report_result(report, async {
+            // Must run before anything reads the settings it may change (git
+            // approvals, age gate, build scripts), since the legacy lockfile
+            // gets replaced at the end of this install.
+            migrate_legacy_lockfile_settings(self)?;
+
             let package_cache
                 = self.package_cache()?;
 

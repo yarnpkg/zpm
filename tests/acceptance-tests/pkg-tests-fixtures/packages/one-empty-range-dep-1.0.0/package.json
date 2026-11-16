@@ -1,0 +1,7 @@
+{
+    "name": "one-empty-range-dep",
+    "version": "1.0.0",
+    "dependencies": {
+        "no-deps": ""
+    }
+}

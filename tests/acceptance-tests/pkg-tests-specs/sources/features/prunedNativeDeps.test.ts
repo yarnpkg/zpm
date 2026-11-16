@@ -44,6 +44,89 @@ describe(`Features`, () => {
       }));
     }
 
+    for (const libc of [`glibc`, `musl`]) {
+      it(`should accept the string form of the os, cpu, and libc fields (${libc})`, makeTemporaryEnv({
+        dependencies: {
+          [`optional-native-string`]: `1.0.0`,
+        },
+      }, async ({path, run, source}) => {
+        const recording = await startRegistryRecording(async () => {
+          await run(`install`, {
+            env: {
+              YARN_CPU_OVERRIDE: `x64`,
+              YARN_OS_OVERRIDE: `foo`,
+              YARN_LIBC_OVERRIDE: libc,
+            },
+          });
+        });
+
+        const tarballRequests = recording.filter(request => {
+          return request.type === RequestType.PackageTarball;
+        }).sort((a, b) => {
+          const aJson = JSON.stringify(a);
+          const bJson = JSON.stringify(b);
+          return aJson < bJson ? -1 : aJson > bJson ? 1 : 0;
+        });
+
+        expect(tarballRequests).toEqual([{
+          type: RequestType.PackageTarball,
+          localName: `native-string-libc-${libc}`,
+          version: `1.0.0`,
+        }, {
+          type: RequestType.PackageTarball,
+          localName: `optional-native-string`,
+          version: `1.0.0`,
+        }]);
+      }));
+    }
+
+    it(`should accept the string form of the os, cpu, and libc fields with supportedArchitectures`, makeTemporaryEnv({
+      dependencies: {
+        [`optional-native-string`]: `1.0.0`,
+      },
+    }, async ({path, run, source}) => {
+      await xfs.writeJsonPromise(ppath.join(path, Filename.rc), {
+        supportedArchitectures: {
+          os: [`foo`],
+          cpu: [`x64`],
+          libc: [`glibc`],
+        },
+      });
+
+      const recording = await startRegistryRecording(async () => {
+        await run(`install`);
+      });
+
+      const tarballRequests = recording.filter(request => {
+        return request.type === RequestType.PackageTarball;
+      }).sort((a, b) => {
+        const aJson = JSON.stringify(a);
+        const bJson = JSON.stringify(b);
+        return aJson < bJson ? -1 : aJson > bJson ? 1 : 0;
+      });
+
+      expect(tarballRequests).toEqual([{
+        type: RequestType.PackageTarball,
+        localName: `native-string-libc-glibc`,
+        version: `1.0.0`,
+      }, {
+        type: RequestType.PackageTarball,
+        localName: `optional-native-string`,
+        version: `1.0.0`,
+      }]);
+
+      // The lockfile must still list every variant
+      await run(`install`, `--immutable`);
+    }));
+
+    it(`should accept the string form of the os, cpu, and libc fields in workspaces`, makeTemporaryEnv({
+      os: `foo`,
+      cpu: `x64`,
+      libc: `glibc`,
+    }, async ({path, run, source}) => {
+      await run(`install`);
+    }));
+
     it(`should resolve all dependencies, regardless of the system`, makeTemporaryEnv({
       dependencies: {
         [`optional-native`]: `1.0.0`,

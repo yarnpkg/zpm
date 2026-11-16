@@ -679,7 +679,7 @@ mod tests {
     use hyper_util::rt::TokioIo;
     use tokio::{net::TcpListener, task::JoinHandle};
     use zpm_config::ConfigurationContext;
-    use zpm_utils::LastModifiedAt;
+    use zpm_utils::{LastModifiedAt, Path, ToFileString};
 
     use super::*;
 
@@ -710,7 +710,7 @@ mod tests {
 
     fn test_client(network_concurrency: usize) -> Arc<HttpClient> {
         let context = ConfigurationContext {
-            env: BTreeMap::new(),
+            env: BTreeMap::from([("YARN_GLOBAL_FOLDER".to_string(), Path::temp_root_dir().unwrap().with_join_str("zpm-test").to_file_string())]),
             user_cwd: None,
             project_cwd: None,
             package_cwd: None,

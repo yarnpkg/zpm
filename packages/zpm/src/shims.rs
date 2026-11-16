@@ -153,15 +153,72 @@ pub fn make_sh_shim(argv0: &str, args: &[String]) -> String {
     format!("#!/bin/sh\nexec \"{}\"{} \"$@\"\n", argv0, escaped_args)
 }
 
+/// Whether a word can be written as-is in both the `.cmd` and the POSIX
+/// shell shims. Interpreter names and the flags of a shebang almost always
+/// qualify, which keeps the shims as readable as cmd-shim's (which pastes
+/// them verbatim); anything else gets quoted.
+fn is_shim_safe_word(word: &str) -> bool {
+    !word.is_empty() && word.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.' | '/' | ':' | '=' | '+' | '@'))
+}
+
 /// What should be executed to run a script located inside a
 /// `node_modules/.bin` folder on Windows.
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum RelativeShimTarget {
-    /// The target is a Node.js script.
-    Node,
-    /// The target must be run through the given interpreter.
+    /// The target must be run through the given interpreter, with the
+    /// given arguments inserted before the target path.
     Interpreter(String, Vec<String>),
     /// The target can be executed directly.
     Direct,
+}
+
+impl RelativeShimTarget {
+    /// Figures out how to run the target the way `@zkochan/cmd-shim` (used
+    /// by npm, pnpm, and Berry) does: through the interpreter of its
+    /// shebang (as returned by `parse_shebang`) or, when it has none, the
+    /// interpreter associated with its extension. Targets with an unknown
+    /// extension are executed directly.
+    ///
+    /// ```
+    /// use zpm::shims::RelativeShimTarget;
+    /// use zpm_utils::Path;
+    ///
+    /// let shebang = Some(("node".to_string(), vec!["--no-warnings".to_string()]));
+    ///
+    /// assert_eq!(RelativeShimTarget::new(&Path::try_from("../pkg/cli").unwrap(), shebang), RelativeShimTarget::Interpreter("node".to_string(), vec!["--no-warnings".to_string()]));
+    /// assert_eq!(RelativeShimTarget::new(&Path::try_from("../pkg/cli.js").unwrap(), None), RelativeShimTarget::Interpreter("node".to_string(), vec![]));
+    /// assert_eq!(RelativeShimTarget::new(&Path::try_from("../pkg/cli.bat").unwrap(), None), RelativeShimTarget::Interpreter("cmd".to_string(), vec!["/C".to_string()]));
+    /// assert_eq!(RelativeShimTarget::new(&Path::try_from("../pkg/cli.exe").unwrap(), None), RelativeShimTarget::Direct);
+    /// ```
+    pub fn new(target_path: &Path, shebang: Option<(String, Vec<String>)>) -> Self {
+        if let Some((program, args)) = shebang {
+            return Self::Interpreter(program, args);
+        }
+
+        let extension
+            = target_path.extname().map(|ext| ext.to_ascii_lowercase());
+
+        let (program, args): (&str, &[&str]) = match extension.as_deref() {
+            Some(".js" | ".cjs" | ".mjs")
+                => ("node", &[]),
+
+            // cmd requires the `/C` flag to execute batch files
+            Some(".cmd" | ".bat")
+                => ("cmd", &["/C"]),
+
+            Some(".ps1")
+                => ("pwsh", &[]),
+
+            Some(".sh")
+                => ("sh", &[]),
+
+            _ => {
+                return Self::Direct;
+            },
+        };
+
+        Self::Interpreter(program.to_string(), args.iter().map(|arg| arg.to_string()).collect())
+    }
 }
 
 /// Generates the `.cmd` shim for a binary located at `target_rel_path`
@@ -171,17 +228,19 @@ pub fn make_relative_cmd_shim(target_rel_path: &Path, target: &RelativeShimTarge
         = format!(r#""%~dp0\{}""#, target_rel_path.to_file_string().replace('/', "\\").replace('%', "%%"));
 
     let invocation = match target {
-        RelativeShimTarget::Node => {
-            format!("@node {}", target_expr)
-        },
-
         RelativeShimTarget::Interpreter(program, args) => {
-            let mut line
-                = format!(r#"@"{}""#, program.replace('/', "\\").replace('%', "%%"));
+            let mut line = match is_shim_safe_word(program) {
+                true => format!("@{}", program),
+                false => format!(r#"@"{}""#, program.replace('/', "\\").replace('%', "%%")),
+            };
 
             for arg in args {
                 line.push(' ');
-                line.push_str(&cmd_escape_arg(arg));
+
+                match is_shim_safe_word(arg) {
+                    true => line.push_str(arg),
+                    false => line.push_str(&cmd_escape_arg(arg)),
+                }
             }
 
             line.push(' ');
@@ -200,21 +259,36 @@ pub fn make_relative_cmd_shim(target_rel_path: &Path, target: &RelativeShimTarge
 /// Generates the POSIX shell shim (used by Git Bash and similar shells) for
 /// a binary located at `target_rel_path` (relative to the directory
 /// containing the shim).
+///
+/// Under MSYS2, MinGW, and Cygwin (which includes Git Bash), `$0` is a
+/// POSIX path (`/c/proj/...`) when the shim is reached through the `PATH`
+/// or an absolute path. Native Windows programs such as `node.exe` can't
+/// read it when the shell's argument conversion is disabled, so we turn
+/// the shim's folder into a Windows path with `cygpath` first, like
+/// cmd-shim does.
 pub fn make_relative_sh_shim(target_rel_path: &Path, target: &RelativeShimTarget) -> String {
     let target_expr
         = format!("\"$basedir/{}\"", target_rel_path.to_file_string());
 
     let invocation = match target {
-        RelativeShimTarget::Node => {
-            format!("node {}", target_expr)
-        },
-
         RelativeShimTarget::Interpreter(program, args) => {
-            let escaped_args = args.iter()
-                .map(|arg| format!(" {}", sh_escape_arg(arg)))
-                .collect::<String>();
+            let mut line = match is_shim_safe_word(program) {
+                true => program.clone(),
+                false => sh_escape_arg(program),
+            };
 
-            format!("\"{}\"{} {}", program, escaped_args, target_expr)
+            for arg in args {
+                line.push(' ');
+
+                match is_shim_safe_word(arg) {
+                    true => line.push_str(arg),
+                    false => line.push_str(&sh_escape_arg(arg)),
+                }
+            }
+
+            line.push(' ');
+            line.push_str(&target_expr);
+            line
         },
 
         RelativeShimTarget::Direct => {
@@ -222,7 +296,21 @@ pub fn make_relative_sh_shim(target_rel_path: &Path, target: &RelativeShimTarget
         },
     };
 
-    format!("#!/bin/sh\nbasedir=$(dirname \"$(echo \"$0\" | sed -e 's,\\\\,/,g')\")\nexec {} \"$@\"\n", invocation)
+    // The header is the same as cmd-shim's, byte for byte
+    format!(concat!(
+        "#!/bin/sh\n",
+        "basedir=$(dirname \"$(echo \"$0\" | sed -e 's,\\\\,/,g')\")\n",
+        "\n",
+        "case `uname` in\n",
+        "    *CYGWIN*|*MINGW*|*MSYS*)\n",
+        "        if command -v cygpath > /dev/null 2>&1; then\n",
+        "            basedir=`cygpath -w \"$basedir\"`\n",
+        "        fi\n",
+        "    ;;\n",
+        "esac\n",
+        "\n",
+        "exec {} \"$@\"\n",
+    ), invocation)
 }
 
 /// Extracts the interpreter and its arguments from a shebang line. The
@@ -236,6 +324,7 @@ pub fn make_relative_sh_shim(target_rel_path: &Path, target: &RelativeShimTarget
 /// assert_eq!(parse_shebang(b"#!/bin/sh\necho hi"), Some(("sh".to_string(), vec![])));
 /// assert_eq!(parse_shebang(b"#!/usr/bin/env python3 -u\n"), Some(("python3".to_string(), vec!["-u".to_string()])));
 /// assert_eq!(parse_shebang(b"#!/usr/bin/env -S node --no-warnings\n"), Some(("node".to_string(), vec!["--no-warnings".to_string()])));
+/// assert_eq!(parse_shebang(b"#!/usr/bin/env -Snode --no-warnings\n"), Some(("node".to_string(), vec!["--no-warnings".to_string()])));
 /// assert_eq!(parse_shebang(b"#!/usr/bin/env bash\r\n"), Some(("bash".to_string(), vec![])));
 /// assert_eq!(parse_shebang(b"console.log(42)"), None);
 /// ```
@@ -260,6 +349,8 @@ pub fn parse_shebang(data: &[u8]) -> Option<(String, Vec<String>)> {
 
         if program == "-S" {
             program = tokens.next()?;
+        } else if let Some(split_program) = program.strip_prefix("-S") {
+            program = split_program;
         }
     }
 
@@ -466,19 +557,161 @@ mod tests {
         );
     }
 
+    const RELATIVE_CMD_SHIM_PREFIX: &str
+        = "@goto #_undefined_# 2>NUL || @title %COMSPEC% & @setlocal & ";
+
+    const RELATIVE_SH_SHIM_PREFIX: &str = concat!(
+        "#!/bin/sh\n",
+        "basedir=$(dirname \"$(echo \"$0\" | sed -e 's,\\\\,/,g')\")\n",
+        "\n",
+        "case `uname` in\n",
+        "    *CYGWIN*|*MINGW*|*MSYS*)\n",
+        "        if command -v cygpath > /dev/null 2>&1; then\n",
+        "            basedir=`cygpath -w \"$basedir\"`\n",
+        "        fi\n",
+        "    ;;\n",
+        "esac\n",
+        "\n",
+    );
+
+    // The shims generated for a `node_modules/.bin/cli` entry pointing to a
+    // file with the given content: (target, content, `.cmd` shim minus its
+    // prefix, sh shim minus its prefix).
+    //
+    // They were derived from the output of `@zkochan/cmd-shim@7.0.0` (the
+    // version Berry uses) for the same files. The sh prefix is identical to
+    // cmd-shim's; the commands run the same programs with the same arguments,
+    // with these differences:
+    //
+    // - the `.cmd` shims are a single line using the Ctrl-C trick described
+    //   in `make_cmd_shim`, without cmd-shim's `IF EXIST "%~dp0\node.exe"`
+    //   branch (and its sh counterpart, `if [ -x "$basedir/node" ]`);
+    // - absolute interpreter paths are reduced to their basename (cmd-shim
+    //   keeps `/bin/sh` and `/usr/bin/node`, which don't exist on Windows);
+    // - the sh shims always `exec`, and runs of spaces are collapsed.
+    const RELATIVE_SHIM_CASES: &[(&str, &str, &str, &str)] = &[
+        // env-node
+        ("../pkg/cli.js", "#!/usr/bin/env node\nconsole.log(42);\n",
+            "@node \"%~dp0\\..\\pkg\\cli.js\" %*\r\n",
+            "exec node \"$basedir/../pkg/cli.js\" \"$@\"\n"),
+
+        // env-s-node
+        ("../pkg/cli.js", "#!/usr/bin/env -S node --enable-source-maps\nconsole.log(42);\n",
+            "@node --enable-source-maps \"%~dp0\\..\\pkg\\cli.js\" %*\r\n",
+            "exec node --enable-source-maps \"$basedir/../pkg/cli.js\" \"$@\"\n"),
+
+        // env-s-node-ts
+        ("../pkg/cli.ts", "#!/usr/bin/env -S node --experimental-strip-types --no-warnings\nconsole.log(42);\n",
+            "@node --experimental-strip-types --no-warnings \"%~dp0\\..\\pkg\\cli.ts\" %*\r\n",
+            "exec node --experimental-strip-types --no-warnings \"$basedir/../pkg/cli.ts\" \"$@\"\n"),
+
+        // env-node-crlf
+        ("../pkg/cli.js", "#!/usr/bin/env node\r\nconsole.log(42);\r\n",
+            "@node \"%~dp0\\..\\pkg\\cli.js\" %*\r\n",
+            "exec node \"$basedir/../pkg/cli.js\" \"$@\"\n"),
+
+        // env-node-args
+        ("../pkg/cli.js", "#!/usr/bin/env node --no-warnings\nconsole.log(42);\n",
+            "@node --no-warnings \"%~dp0\\..\\pkg\\cli.js\" %*\r\n",
+            "exec node --no-warnings \"$basedir/../pkg/cli.js\" \"$@\"\n"),
+
+        // env-s-attached
+        ("../pkg/cli.js", "#!/usr/bin/env -Snode --no-warnings\nconsole.log(42);\n",
+            "@node --no-warnings \"%~dp0\\..\\pkg\\cli.js\" %*\r\n",
+            "exec node --no-warnings \"$basedir/../pkg/cli.js\" \"$@\"\n"),
+
+        // abs-node
+        ("../pkg/cli.js", "#!/usr/bin/node\nconsole.log(42);\n",
+            "@node \"%~dp0\\..\\pkg\\cli.js\" %*\r\n",
+            "exec node \"$basedir/../pkg/cli.js\" \"$@\"\n"),
+
+        // env-bash
+        ("../pkg/cli", "#!/usr/bin/env bash\necho hi\n",
+            "@bash \"%~dp0\\..\\pkg\\cli\" %*\r\n",
+            "exec bash \"$basedir/../pkg/cli\" \"$@\"\n"),
+
+        // env-python
+        ("../pkg/cli.py", "#!/usr/bin/env python3 -u\nprint(1)\n",
+            "@python3 -u \"%~dp0\\..\\pkg\\cli.py\" %*\r\n",
+            "exec python3 -u \"$basedir/../pkg/cli.py\" \"$@\"\n"),
+
+        // bin-sh
+        ("../pkg/cli.sh", "#!/bin/sh\necho hi\n",
+            "@sh \"%~dp0\\..\\pkg\\cli.sh\" %*\r\n",
+            "exec sh \"$basedir/../pkg/cli.sh\" \"$@\"\n"),
+
+        // no-shebang-js
+        ("../pkg/cli.js", "console.log(42);\n",
+            "@node \"%~dp0\\..\\pkg\\cli.js\" %*\r\n",
+            "exec node \"$basedir/../pkg/cli.js\" \"$@\"\n"),
+
+        // no-shebang-mjs
+        ("../pkg/cli.MJS", "console.log(42);\n",
+            "@node \"%~dp0\\..\\pkg\\cli.MJS\" %*\r\n",
+            "exec node \"$basedir/../pkg/cli.MJS\" \"$@\"\n"),
+
+        // empty-cjs
+        ("../pkg/cli.cjs", "",
+            "@node \"%~dp0\\..\\pkg\\cli.cjs\" %*\r\n",
+            "exec node \"$basedir/../pkg/cli.cjs\" \"$@\"\n"),
+
+        // no-shebang-cmd
+        ("../pkg/cli.cmd", "@echo hi\r\n",
+            "@cmd /C \"%~dp0\\..\\pkg\\cli.cmd\" %*\r\n",
+            "exec cmd /C \"$basedir/../pkg/cli.cmd\" \"$@\"\n"),
+
+        // no-shebang-bat
+        ("../pkg/cli.bat", "@echo hi\r\n",
+            "@cmd /C \"%~dp0\\..\\pkg\\cli.bat\" %*\r\n",
+            "exec cmd /C \"$basedir/../pkg/cli.bat\" \"$@\"\n"),
+
+        // no-shebang-ps1
+        ("../pkg/cli.ps1", "Write-Output hi\n",
+            "@pwsh \"%~dp0\\..\\pkg\\cli.ps1\" %*\r\n",
+            "exec pwsh \"$basedir/../pkg/cli.ps1\" \"$@\"\n"),
+
+        // no-shebang-sh
+        ("../pkg/cli.sh", "echo hi\n",
+            "@sh \"%~dp0\\..\\pkg\\cli.sh\" %*\r\n",
+            "exec sh \"$basedir/../pkg/cli.sh\" \"$@\"\n"),
+
+        // no-shebang-noext
+        ("../pkg/cli", "console.log(42);\n",
+            "@\"%~dp0\\..\\pkg\\cli\" %*\r\n",
+            "exec \"$basedir/../pkg/cli\" \"$@\"\n"),
+
+        // no-shebang-exe
+        ("../pkg/cli.exe", "MZ",
+            "@\"%~dp0\\..\\pkg\\cli.exe\" %*\r\n",
+            "exec \"$basedir/../pkg/cli.exe\" \"$@\"\n"),
+
+        // scoped
+        ("../@scope/pkg/bin/cli.js", "#!/usr/bin/env node\n",
+            "@node \"%~dp0\\..\\@scope\\pkg\\bin\\cli.js\" %*\r\n",
+            "exec node \"$basedir/../@scope/pkg/bin/cli.js\" \"$@\"\n"),
+
+        // workspace
+        ("../../my-bin.js", "#!/usr/bin/env node\n",
+            "@node \"%~dp0\\..\\..\\my-bin.js\" %*\r\n",
+            "exec node \"$basedir/../../my-bin.js\" \"$@\"\n"),
+
+        // Not derived from cmd-shim, which pastes the arguments verbatim
+        ("../pkg/cli.js", "#!/usr/bin/env -S node --title=50% --require ./it's.js\n",
+            "@node ^\"--title=50%%^\" --require ^\"./it's.js^\" \"%~dp0\\..\\pkg\\cli.js\" %*\r\n",
+            "exec node '--title=50%' --require './it'\"'\"'s.js' \"$basedir/../pkg/cli.js\" \"$@\"\n"),
+    ];
+
     #[test]
     fn generates_relative_shims() {
-        let target
-            = Path::try_from("../pkg/bin/cli.js").unwrap();
+        for (target_path, content, expected_cmd, expected_sh) in RELATIVE_SHIM_CASES {
+            let target_path
+                = Path::try_from(*target_path).unwrap();
 
-        assert_eq!(
-            make_relative_cmd_shim(&target, &RelativeShimTarget::Node),
-            "@goto #_undefined_# 2>NUL || @title %COMSPEC% & @setlocal & @node \"%~dp0\\..\\pkg\\bin\\cli.js\" %*\r\n",
-        );
+            let target
+                = RelativeShimTarget::new(&target_path, parse_shebang(content.as_bytes()));
 
-        assert_eq!(
-            make_relative_sh_shim(&target, &RelativeShimTarget::Node),
-            "#!/bin/sh\nbasedir=$(dirname \"$(echo \"$0\" | sed -e 's,\\\\,/,g')\")\nexec node \"$basedir/../pkg/bin/cli.js\" \"$@\"\n",
-        );
+            assert_eq!(make_relative_cmd_shim(&target_path, &target), format!("{}{}", RELATIVE_CMD_SHIM_PREFIX, expected_cmd), "{:?}", content);
+            assert_eq!(make_relative_sh_shim(&target_path, &target), format!("{}{}", RELATIVE_SH_SHIM_PREFIX, expected_sh), "{:?}", content);
+        }
     }
 }
