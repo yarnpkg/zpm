@@ -39,7 +39,7 @@ This page reflects the state of each tool as of early 2026. Package managers evo
 
 - **Resolution approach.** pnpm uses symlinks and a content-addressable store to build a nested `node_modules` tree. Yarn's [PnP](/concepts/pnp) avoids `node_modules` entirely and resolves dependencies via a Node.js loader, which is faster and enables features like [zero-installs](/concepts/zero-installs).
 
-- **Ghost dependency coverage.** pnpm's symlink-based isolation prevents many ghost dependencies, but its `node_modules` layout cannot correctly represent all dependency trees — particularly those involving [peer dependencies](/appendix/nm-peer-deps). PnP handles these cases because it doesn't rely on a filesystem tree to model the dependency graph.
+- **Ghost dependency coverage.** pnpm's symlink-based isolation prevents many ghost dependencies, but its `node_modules` layout cannot correctly represent all dependency trees — particularly those involving [peer dependencies](/appendix/workspaces-and-peer-deps). PnP handles these cases because it doesn't rely on a filesystem tree to model the dependency graph.
 
 - **Monorepo tooling.** Both have strong workspace support, but Yarn adds [constraints](/concepts/constraints) for dependency tree linting, [workspace profiles](/concepts/profiles), the [`catalog:` protocol](/concepts/protocols), and a built-in [task runner](/concepts/tasks) with cross-workspace dependencies.
 

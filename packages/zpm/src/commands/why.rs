@@ -3,7 +3,7 @@ use std::collections::BTreeSet;
 use clipanion::cli;
 use indexmap::IndexMap;
 use itertools::Itertools;
-use zpm_primitives::{DescriptorResolution, Ident, IdentGlob, Locator};
+use zpm_primitives::{DescriptorResolution, Locator, VersionFilter};
 use zpm_utils::{AbstractValue, ToFileString, tree};
 
 use crate::{
@@ -15,6 +15,15 @@ use crate::{
 /// Display the reason why a package is needed
 ///
 /// This command prints the exact reasons why a package appears in the dependency tree.
+///
+/// The package can be followed by a semver range (`<package>@<range>`), in which case only the instances of the package whose resolved version
+/// satisfies the range are reported. This is particularly useful when trying to find out why your project depends on older versions of a package.
+/// The range must be a valid semver range; protocols (`npm:^1.0.0`) and tags (`latest`) aren't accepted. The package name itself can be a glob
+/// pattern (`@babel/*`).
+///
+/// - `yarn why lodash` explains why lodash is used in your project.
+/// - `yarn why lodash@3.3.1` explains why version 3.3.1 of lodash is in your project.
+/// - `yarn why lodash@^3` explains why versions 3.x of lodash are in your project.
 ///
 /// By default, it will print all packages that directly depend on the specified package. If you want to see all transitive
 /// paths that lead to the package (going through all workspaces), use the `-R,--recursive` flag.
@@ -38,8 +47,8 @@ pub struct Why {
     #[cli::option("--peers", default = false)]
     peers: bool,
 
-    /// The package to search for
-    pattern: IdentGlob,
+    /// The package to search for, optionally followed by a semver range
+    pattern: VersionFilter,
 }
 
 impl Why {
@@ -69,6 +78,12 @@ impl Why {
         Ok(())
     }
 
+    fn is_target(&self, locator: &Locator, install_state: &InstallState) -> bool {
+        install_state.resolution_tree.locator_resolutions
+            .get(locator)
+            .is_some_and(|resolution| self.pattern.check(&locator.ident, &resolution.version))
+    }
+
     fn why_simple(&self, project: &Project, install_state: &InstallState) -> Result<tree::Node<'_>, Error> {
         let mut root_children
             = vec![];
@@ -96,12 +111,15 @@ impl Why {
                         .get(descriptor);
 
                 if let Some(dep_locator) = dep_locator {
-                    if self.pattern.check(&dep_locator.ident) {
+                    if self.is_target(dep_locator, install_state) {
+                        let display_dep_locator
+                            = project.displayable_locator(dep_locator);
+
                         let descriptor_resolution
-                            = DescriptorResolution::new(descriptor.clone(), dep_locator.clone());
+                            = DescriptorResolution::new(descriptor.clone(), display_dep_locator.clone());
 
                         children_map.insert(
-                            dep_locator.to_file_string(),
+                            display_dep_locator.to_file_string(),
                             tree::Node::new_value(descriptor_resolution),
                         );
                     }
@@ -132,15 +150,15 @@ impl Why {
         let mut dependents
             = BTreeSet::new();
 
-        let target_idents: BTreeSet<Ident> = install_state
+        let targets: BTreeSet<Locator> = install_state
             .resolution_tree
             .locator_resolutions
             .keys()
-            .filter(|locator| self.pattern.check(&locator.ident))
-            .map(|locator| locator.ident.clone())
+            .filter(|locator| self.is_target(locator, install_state))
+            .cloned()
             .collect();
 
-        if target_idents.is_empty() {
+        if targets.is_empty() {
             return Ok(tree::Node {
                 label: None,
                 value: None,
@@ -152,7 +170,7 @@ impl Why {
             self.mark_all_dependents(
                 &workspace.locator(),
                 install_state,
-                &target_idents,
+                &targets,
                 &mut seen,
                 &mut dependents,
             );
@@ -191,14 +209,14 @@ impl Why {
         })
     }
 
-    fn mark_all_dependents(&self, locator: &Locator, install_state: &InstallState, target_idents: &BTreeSet<Ident>, seen: &mut BTreeSet<Locator>, dependents: &mut BTreeSet<Locator>) -> bool {
+    fn mark_all_dependents(&self, locator: &Locator, install_state: &InstallState, targets: &BTreeSet<Locator>, seen: &mut BTreeSet<Locator>, dependents: &mut BTreeSet<Locator>) -> bool {
         if seen.contains(locator) {
             return dependents.contains(locator);
         }
 
         seen.insert(locator.clone());
 
-        if target_idents.contains(&locator.ident) {
+        if targets.contains(locator) {
             dependents.insert(locator.clone());
             return true;
         }
@@ -220,7 +238,7 @@ impl Why {
                 install_state.resolution_tree.descriptor_to_locator.get(descriptor);
 
             if let Some(dep_locator) = dep_locator {
-                if self.mark_all_dependents(dep_locator, install_state, target_idents, seen, dependents) {
+                if self.mark_all_dependents(dep_locator, install_state, targets, seen, dependents) {
                     depends = true;
                 }
             }

@@ -1,8 +1,17 @@
 const {
   exec: {execFile},
-  fs: {writeJson},
+  fs: {writeFile, writeJson},
   misc: {parseJsonStream},
+  tests: {testIf},
 } = require(`pkg-tests-core`);
+
+// Git quotes and escapes these names in its default output (`core.quotepath`)
+const SPECIAL_WORKSPACE_FOLDERS = [
+  {description: `a non-ASCII character`, folder: `caf\u00e9`, supportedOnWindows: true},
+  {description: `a space`, folder: `with space`, supportedOnWindows: true},
+  // Windows doesn't allow double quotes in file names
+  {description: `a double quote`, folder: `with"quote`, supportedOnWindows: false},
+];
 
 describe(`Commands`, () => {
   describe(`workspace list -v,--verbose --json`, () => {
@@ -280,6 +289,74 @@ describe(`Commands`, () => {
     );
 
     test(
+      `--since keeps workspaces whose changed files have special characters in the name`,
+      makeWorkspacesListSinceEnv(async ({path, run}) => {
+        const specialName = process.platform === `win32`
+          ? `caf\u00e9.json`
+          : `weird"quote.json`;
+        await writeFile(`${path}/packages/workspace-a/${specialName}`, `{}`);
+
+        await expect(parseJsonStream(
+          (await run(`workspaces`, `list`, `--since`, `-v`, `--json`)).stdout,
+          `location`,
+        )).toEqual({
+          [`packages/workspace-a`]: {
+            location: `packages/workspace-a`,
+            name: `workspace-a`,
+            workspaceDependencies: [],
+            mismatchedWorkspaceDependencies: [],
+          },
+        });
+      }),
+    );
+
+    for (const {description, folder, supportedOnWindows} of SPECIAL_WORKSPACE_FOLDERS) {
+      testIf(
+        () => supportedOnWindows || process.platform !== `win32`,
+        `--since returns the changed workspaces whose folder name contains ${description}`,
+        makeWorkspacesListSinceEnv(async ({git, path, run}) => {
+          await writeJson(`${path}/packages/${folder}/package.json`, {
+            name: `workspace-special`,
+            version: `1.0.0`,
+          });
+
+          await run(`install`);
+
+          await git(`add`, `.`);
+          await git(`commit`, `-m`, `Add workspace-special`);
+
+          const base = (await git(`rev-parse`, `HEAD`)).stdout.trim();
+
+          const expected = {
+            [`packages/${folder}`]: {
+              location: `packages/${folder}`,
+              name: `workspace-special`,
+              workspaceDependencies: [],
+              mismatchedWorkspaceDependencies: [],
+            },
+          };
+
+          const listChangedWorkspaces = async (...args) => parseJsonStream(
+            (await run(`workspaces`, `list`, `--since=${base}`, ...args, `-v`, `--json`)).stdout,
+            `location`,
+          );
+
+          // Untracked files (listed by `git ls-files`)
+          await writeJson(`${path}/packages/${folder}/delta.json`, {});
+          await expect(listChangedWorkspaces()).resolves.toEqual(expected);
+
+          // Tracked files (listed by `git diff`)
+          await git(`add`, `.`);
+          await expect(listChangedWorkspaces()).resolves.toEqual(expected);
+
+          // Changes between two refs
+          await git(`commit`, `-m`, `wip`);
+          await expect(listChangedWorkspaces(`--head`, `HEAD`)).resolves.toEqual(expected);
+        }),
+      );
+    }
+
+    test(
       `--since returns no workspaces if there are no staged or unstaged changes on the default branch`,
       makeWorkspacesListSinceEnv(async ({git, path, run}) => {
         await writeJson(`${path}/packages/workspace-a/delta.json`, {});
@@ -503,6 +580,9 @@ function makeWorkspacesListSinceEnv(cb) {
     await git(`config`, `user.name`, `John Doe`);
     await git(`config`, `user.email`, `john.doe@example.org`);
     await git(`config`, `commit.gpgSign`, `false`);
+
+    // Make sure git quotes the paths, whatever the user configuration
+    await git(`config`, `core.quotepath`, `true`);
 
     await git(`add`, `.`);
     await git(`commit`, `-m`, `First commit`);

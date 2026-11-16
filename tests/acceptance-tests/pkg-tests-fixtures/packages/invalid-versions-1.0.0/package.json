@@ -1,0 +1,8 @@
+{
+    "name": "invalid-versions",
+    "version": "1.0.0",
+    "dist-tags": {
+      "latest": "2.0.0",
+      "legacy": "3.0"
+    }
+}

@@ -172,7 +172,7 @@ export function getAllLocators(): PackageLocator[];
 ```
 
 :::danger
-This function is not part of the Plug'n'Play specification and only available as a Yarn extension. In order to use it, you first must check that the [`VERSIONS`](/advanced/pnpapi#versions) dictionary contains a valid `getAllLocators` property.
+This function is not part of the Plug'n'Play specification and only available as a Yarn extension. In order to use it, you first must check that the [`VERSIONS`](/advanced/pnpapi#field-versions) dictionary contains a valid `getAllLocators` property.
 :::
 
 The `getAllLocators` function will return all locators from the dependency tree, in no particular order (although it'll always be a consistent order between calls for the same API). It can be used when you wish to know more about the packages themselves, but not about the exact tree layout.
@@ -292,7 +292,7 @@ export function resolveVirtual(path: string): string | null;
 ```
 
 :::danger
-This function is not part of the Plug'n'Play specification and only available as a Yarn extension. In order to use it, you first must check that the [`VERSIONS`](/advanced/pnpapi#versions) dictionary contains a valid `resolveVirtual` property.
+This function is not part of the Plug'n'Play specification and only available as a Yarn extension. In order to use it, you first must check that the [`VERSIONS`](/advanced/pnpapi#field-versions) dictionary contains a valid `resolveVirtual` property.
 :::
 
 The `resolveVirtual` function will accept any path as parameter and return the same path minus any [virtual component](/advanced/lexicon#virtual-package). This makes it easier to store the location to the files in a portable way as long as you don't care about losing the dependency tree information in the process (requiring files through those paths will prevent them from accessing their peer dependencies).

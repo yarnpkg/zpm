@@ -3,7 +3,7 @@ use std::{collections::BTreeMap, str::FromStr, sync::LazyLock};
 use chrono::{DateTime, Utc};
 use regex::Regex;
 use serde::Deserialize;
-use serde_with::{serde_as, MapSkipError};
+use serde_with::{serde_as, DefaultOnError, MapSkipError};
 use zpm_parsers::{JsonDocument, RawJsonValue};
 use zpm_primitives::{AnonymousSemverRange, Descriptor, Ident, Locator, Reference, RegistryReference, RegistrySemverRange, RegistryTagRange};
 use zpm_utils::UrlEncoded;
@@ -20,13 +20,20 @@ use crate::{
 static NODE_GYP_IDENT: LazyLock<Ident> = LazyLock::new(|| Ident::from_str("node-gyp").unwrap());
 static NODE_GYP_MATCH: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\b(node-gyp|prebuild-install)\b").unwrap());
 
+static INSTALL_SCRIPTS: &[&str] = &["preinstall", "install", "postinstall"];
+
 /**
  * We need to read the scripts to figure out whether the package has an implicit node-gyp dependency.
  */
+#[serde_as]
 #[derive(Clone, Deserialize, Debug)]
 struct RemoteManifestWithScripts {
     #[serde(flatten)]
     remote: RemoteManifest,
+
+    #[serde(default)]
+    #[serde_as(deserialize_as = "DefaultOnError")]
+    gypfile: Option<bool>,
 
     #[serde(default)]
     #[serde(skip_serializing_if = "BTreeMap::is_empty")]
@@ -39,8 +46,19 @@ fn fix_manifest(manifest: &mut RemoteManifestWithScripts) {
     // in the metadata if there is not already an install script and a binding.gyp file exists.
     // Also, node-gyp is not always set as a dependency in packages, so it will also be added if used in scripts.
     //
+    // Packages setting `gypfile` to `false` explicitly opt out of being built with node-gyp (they
+    // typically ship prebuilt binaries); for them only the install scripts we'd actually run can
+    // need node-gyp, not the development scripts (`build-release`, ...) that happen to mention it.
+    //
     if !manifest.remote.dependencies.contains_key(&NODE_GYP_IDENT) && !manifest.remote.peer_dependencies.contains_key(&NODE_GYP_IDENT) {
-        for script in manifest.scripts.values() {
+        let opts_out_of_gyp
+            = manifest.gypfile == Some(false);
+
+        for (name, script) in &manifest.scripts {
+            if opts_out_of_gyp && !INSTALL_SCRIPTS.contains(&name.as_str()) {
+                continue;
+            }
+
             if NODE_GYP_MATCH.is_match(script.as_str()) {
                 manifest.remote.dependencies.insert(NODE_GYP_IDENT.clone(), Descriptor::new_semver(NODE_GYP_IDENT.clone(), "*").unwrap());
                 break;
@@ -111,10 +129,9 @@ async fn load_manifest_from_full_metadata(
             background_writes: context.background_writes.as_deref(),
         }).await?;
 
-    #[serde_as]
     #[derive(Deserialize)]
     struct RegistryMetadata<'a> {
-        #[serde(borrow)]
+        #[serde(borrow, deserialize_with = "npm::deserialize_packument_versions")]
         versions: BTreeMap<zpm_semver::Version, RawJsonValue<'a>>,
     }
 
@@ -235,9 +252,9 @@ pub async fn resolve_semver_descriptor(context: &InstallContext<'_>, descriptor:
     #[serde_as]
     #[derive(Deserialize)]
     struct RegistryMetadata<'a> {
-        #[serde_as(as = "Option<MapSkipError<_, _>>")]
+        #[serde_as(as = "Option<MapSkipError<npm::PackumentVersion, _>>")]
         time: Option<BTreeMap<zpm_semver::Version, DateTime<Utc>>>,
-        #[serde(borrow)]
+        #[serde(borrow, deserialize_with = "npm::deserialize_packument_versions")]
         versions: BTreeMap<zpm_semver::Version, RawJsonValue<'a>>,
     }
 
@@ -281,6 +298,10 @@ pub async fn resolve_semver_descriptor(context: &InstallContext<'_>, descriptor:
         return build_resolution_result(context, descriptor, package_ident, version.clone(), manifest);
     }
 
+    if let Some(error) = npm::find_ignored_version_error(package_ident, &bytes[..], params.range.source.as_str()) {
+        return Err(error);
+    }
+
     Err(Error::NoCandidatesFound(descriptor.range.clone()))
 }
 
@@ -321,10 +342,10 @@ pub async fn resolve_tag_descriptor(context: &InstallContext<'_>, descriptor: &D
     #[derive(Deserialize)]
     struct RegistryMetadata<'a> {
         #[serde(rename(deserialize = "dist-tags"))]
-        dist_tags: BTreeMap<String, zpm_semver::Version>,
-        #[serde_as(as = "Option<MapSkipError<_, _>>")]
+        dist_tags: BTreeMap<String, String>,
+        #[serde_as(as = "Option<MapSkipError<npm::PackumentVersion, _>>")]
         time: Option<BTreeMap<zpm_semver::Version, DateTime<Utc>>>,
-        #[serde(borrow)]
+        #[serde(borrow, deserialize_with = "npm::deserialize_packument_versions")]
         versions: BTreeMap<zpm_semver::Version, RawJsonValue<'a>>,
     }
 
@@ -332,10 +353,13 @@ pub async fn resolve_tag_descriptor(context: &InstallContext<'_>, descriptor: &D
     let registry_data: RegistryMetadata<'_>
         = JsonDocument::hydrate_from_slice(&bytes[..])?;
 
-    let latest_version
-        = registry_data.dist_tags
-        .get(params.tag.as_str())
-        .ok_or_else(|| Error::TagNotFound(params.tag.to_string()))?;
+    let latest_version = match npm::get_dist_tag_version(package_ident, &registry_data.dist_tags, params.tag.as_str()) {
+        Err(Error::TagNotFound(tag)) => {
+            return Err(npm::find_ignored_version_error(package_ident, &bytes[..], &tag).unwrap_or(Error::TagNotFound(tag)));
+        },
+
+        result => result?,
+    };
 
     let time
         = registry_data.time;
@@ -346,7 +370,7 @@ pub async fn resolve_tag_descriptor(context: &InstallContext<'_>, descriptor: &D
         = !project.http_client.config.is_network_enabled(&metadata_url);
 
     for (version, manifest) in registry_data.versions.into_iter().rev() {
-        if &version > latest_version {
+        if version > latest_version {
             continue;
         }
 
@@ -440,4 +464,69 @@ pub async fn resolve_locator(context: &InstallContext<'_>, locator: &Locator, pa
         = Resolution::from_remote_manifest(locator, manifest.remote.clone());
 
     resolution.into_resolution_result(context)
+}
+
+#[cfg(test)]
+mod tests {
+    use zpm_parsers::JsonDocument;
+    use zpm_utils::ToFileString;
+
+    use super::{
+        NODE_GYP_IDENT,
+        RemoteManifestWithScripts,
+        fix_manifest,
+    };
+
+    fn injects_node_gyp(json: &str) -> bool {
+        let mut manifest: RemoteManifestWithScripts
+            = JsonDocument::hydrate_from_slice(json.as_bytes()).unwrap();
+
+        fix_manifest(&mut manifest);
+
+        manifest.remote.dependencies.contains_key(&NODE_GYP_IDENT)
+    }
+
+    #[test]
+    fn it_injects_node_gyp_when_a_script_uses_it() {
+        assert!(injects_node_gyp(r#"{"scripts": {"install": "node-gyp rebuild"}}"#));
+        assert!(injects_node_gyp(r#"{"scripts": {"install": "prebuild-install || node-gyp rebuild"}}"#));
+        assert!(injects_node_gyp(r#"{"scripts": {"build": "node-gyp rebuild"}}"#));
+        assert!(injects_node_gyp(r#"{"gypfile": true, "scripts": {"build": "node-gyp rebuild"}}"#));
+    }
+
+    #[test]
+    fn it_doesnt_inject_node_gyp_when_no_script_uses_it() {
+        assert!(!injects_node_gyp(r#"{}"#));
+        assert!(!injects_node_gyp(r#"{"scripts": {"install": "node install.js"}}"#));
+        assert!(!injects_node_gyp(r#"{"gypfile": false, "scripts": {"install": "node install.js"}}"#));
+    }
+
+    #[test]
+    fn it_doesnt_inject_node_gyp_for_development_scripts_when_gypfile_is_false() {
+        assert!(!injects_node_gyp(r#"{"gypfile": false, "scripts": {"build-release": "node-gyp rebuild --release"}}"#));
+    }
+
+    #[test]
+    fn it_injects_node_gyp_for_install_scripts_when_gypfile_is_false() {
+        assert!(injects_node_gyp(r#"{"gypfile": false, "scripts": {"preinstall": "node-gyp configure"}}"#));
+        assert!(injects_node_gyp(r#"{"gypfile": false, "scripts": {"install": "prebuild-install || node-gyp rebuild"}}"#));
+        assert!(injects_node_gyp(r#"{"gypfile": false, "scripts": {"postinstall": "node-gyp rebuild"}}"#));
+    }
+
+    #[test]
+    fn it_only_lets_the_false_boolean_restrict_the_node_gyp_injection() {
+        assert!(injects_node_gyp(r#"{"gypfile": "false", "scripts": {"build": "node-gyp rebuild"}}"#));
+        assert!(injects_node_gyp(r#"{"gypfile": 0, "scripts": {"build": "node-gyp rebuild"}}"#));
+        assert!(injects_node_gyp(r#"{"gypfile": null, "scripts": {"build": "node-gyp rebuild"}}"#));
+    }
+
+    #[test]
+    fn it_doesnt_inject_node_gyp_when_already_declared() {
+        let mut manifest: RemoteManifestWithScripts
+            = JsonDocument::hydrate_from_slice(br#"{"dependencies": {"node-gyp": "^10.0.0"}, "scripts": {"install": "node-gyp rebuild"}}"#).unwrap();
+
+        fix_manifest(&mut manifest);
+
+        assert_eq!(manifest.remote.dependencies.get(&NODE_GYP_IDENT).unwrap().range.to_file_string(), "^10.0.0");
+    }
 }

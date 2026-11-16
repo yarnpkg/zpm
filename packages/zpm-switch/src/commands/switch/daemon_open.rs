@@ -52,6 +52,8 @@ impl DaemonOpenCommand {
         let find_result
             = find_closest_package_manager(&project_cwd)?;
 
+        find_result.check_dev_engines()?;
+
         let detected_root
             = find_result
                 .detected_root_path

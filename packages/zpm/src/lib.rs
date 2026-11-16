@@ -27,6 +27,7 @@ pub mod island_types;
 pub mod linker;
 pub mod lockfile;
 pub mod lockfile_classic;
+pub mod lockfile_migration;
 pub mod lockfile_tree;
 pub mod manifest;
 pub mod misc;
