@@ -1714,7 +1714,7 @@ impl<'a> InstallManager<'a> {
             let mut merged_tree = TreeResolver::default()
                 .with_resolutions(&self.result.install_state.descriptor_to_locator, &self.result.install_state.normalized_resolutions)?
                 .with_roots(self.result.roots.clone())
-                .run();
+                .run()?;
 
             // Per-island trees (isolated peer dep context per island)
             for (island_id, island_d2l) in &self.result.install_state.island_descriptor_to_locator {
@@ -1735,7 +1735,7 @@ impl<'a> InstallManager<'a> {
                 let island_tree = TreeResolver::default()
                     .with_resolutions(island_d2l, &island_resolutions)?
                     .with_roots(island_roots)
-                    .run();
+                    .run()?;
 
                 // Merge island tree into the combined tree
                 merged_tree.descriptor_to_locator.extend(island_tree.descriptor_to_locator);
@@ -1749,7 +1749,7 @@ impl<'a> InstallManager<'a> {
             self.result.install_state.resolution_tree = TreeResolver::default()
                 .with_resolutions(&self.result.install_state.descriptor_to_locator, &self.result.install_state.normalized_resolutions)?
                 .with_roots(self.result.roots.clone())
-                .run();
+                .run()?;
         }
 
         self.result.lockfile.resolutions = self.result.install_state.descriptor_to_locator.clone();

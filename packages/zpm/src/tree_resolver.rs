@@ -35,6 +35,15 @@ impl ResolutionTree {
     }
 }
 
+/// How deep peer dependency resolution may recurse before we give up (same as
+/// Berry). Each level of the dependency chain being traversed costs one level
+/// (packages that have already been traversed return immediately, so cycles
+/// stay well below it unless they keep generating new virtual instances).
+pub const MAX_RESOLUTION_DEPTH: usize = 1000;
+
+/// How many of the last traversed packages we print when reaching the limit.
+const RESOLUTION_STACK_EXCERPT_SIZE: usize = 5;
+
 #[derive(Default)]
 pub struct TreeResolver {
     resolution_tree: ResolutionTree,
@@ -135,7 +144,7 @@ impl TreeResolver {
         self
     }
 
-    pub fn run(mut self) -> ResolutionTree {
+    pub fn run(mut self) -> Result<ResolutionTree, Error> {
         let roots = self.resolution_tree.roots.iter()
             .sorted()
             .cloned()
@@ -161,7 +170,7 @@ impl TreeResolver {
                 &BTreeMap::new(),
                 &resolution,
                 false,
-            );
+            )?;
         }
 
         for locator in self.original_workspace_definitions {
@@ -179,16 +188,16 @@ impl TreeResolver {
             self.resolution_tree.optional_builds.remove(volatile_locator);
         }
 
-        self.resolution_tree
+        Ok(self.resolution_tree)
     }
 
-    fn resolve_peer_dependencies_impl(&mut self, parent_descriptor: &Descriptor, parent_locator: &Locator, peer_slots: &BTreeMap<Ident, Locator>, top_locator: &Locator, is_optional: bool) {
+    fn resolve_peer_dependencies_impl(&mut self, parent_descriptor: &Descriptor, parent_locator: &Locator, peer_slots: &BTreeMap<Ident, Locator>, top_locator: &Locator, is_optional: bool) -> Result<(), Error> {
         if !is_optional {
             self.resolution_tree.optional_builds.remove(parent_locator);
         }
 
         if !self.volatile_locator.remove(parent_locator) {
-            return;
+            return Ok(());
         }
 
         struct VirtualOperation {
@@ -249,7 +258,7 @@ impl TreeResolver {
                     peer_slots,
                     top_locator,
                     is_optional,
-                );
+                )?;
 
                 continue;
             }
@@ -456,7 +465,7 @@ impl TreeResolver {
                 &operation.next_peer_slots,
                 top_locator,
                 operation.is_optional,
-            );
+            )?;
 
             self.virtual_stack.insert(operation.physical_locator.clone(), stack_depth);
         }
@@ -510,15 +519,201 @@ impl TreeResolver {
             // No need to keep track of the original package after it's been virtualized
             self.resolution_tree.optional_builds.remove(&operation.physical_locator);
         }
+
+        Ok(())
     }
 
-    fn resolve_peer_dependencies(&mut self, parent_descriptor: &Descriptor, parent_locator: &Locator, peer_slots: &BTreeMap<Ident, Locator>, top_locator: &Locator, is_optional: bool) {
-        if self.resolution_stack.len() > 1000 {
-            return;
+    fn resolve_peer_dependencies(&mut self, parent_descriptor: &Descriptor, parent_locator: &Locator, peer_slots: &BTreeMap<Ident, Locator>, top_locator: &Locator, is_optional: bool) -> Result<(), Error> {
+        // Silently stopping here would leave the rest of the chain without
+        // its peer dependencies; the install must fail instead
+        if self.resolution_stack.len() > MAX_RESOLUTION_DEPTH {
+            let excerpt_start
+                = self.resolution_stack.len().saturating_sub(RESOLUTION_STACK_EXCERPT_SIZE - 1);
+
+            let mut stack_excerpt
+                = self.resolution_stack[excerpt_start..].to_vec();
+
+            stack_excerpt.push(parent_locator.clone());
+
+            return Err(Error::StackOverflowResolution {
+                max_depth: MAX_RESOLUTION_DEPTH,
+                stack_excerpt,
+            });
         }
 
         self.resolution_stack.push(parent_locator.clone());
-        self.resolve_peer_dependencies_impl(parent_descriptor, parent_locator, peer_slots, top_locator, is_optional);
+        let result
+            = self.resolve_peer_dependencies_impl(parent_descriptor, parent_locator, peer_slots, top_locator, is_optional);
         self.resolution_stack.pop();
+
+        result
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::{BTreeMap, BTreeSet};
+
+    use zpm_primitives::{Descriptor, Ident, Locator, PeerRange};
+    use zpm_utils::FromFileString;
+
+    use crate::{
+        error::Error,
+        resolvers::Resolution,
+    };
+
+    use super::{ResolutionTree, TreeResolver, MAX_RESOLUTION_DEPTH};
+
+    /// Each package is `<name>@npm:1.0.0`, requested through the
+    /// `<name>@npm:1.0.0` descriptor; `root` is the only root.
+    fn resolve(packages: &[(String, Vec<String>, Vec<String>)]) -> Result<ResolutionTree, Error> {
+        let mut descriptor_to_locator
+            = BTreeMap::new();
+        let mut resolutions
+            = BTreeMap::new();
+
+        for (name, dependencies, peer_dependencies) in packages {
+            let locator
+                = Locator::from_file_string(&format!("{}@npm:1.0.0", name)).unwrap();
+
+            let mut resolution
+                = Resolution::new_empty(locator.clone(), Default::default());
+
+            for dependency in dependencies {
+                resolution.dependencies.insert(
+                    Ident::from_file_string(dependency).unwrap(),
+                    Descriptor::from_file_string(&format!("{}@npm:1.0.0", dependency)).unwrap(),
+                );
+            }
+
+            for peer_dependency in peer_dependencies {
+                resolution.peer_dependencies.insert(
+                    Ident::from_file_string(peer_dependency).unwrap(),
+                    PeerRange::from_file_string("*").unwrap(),
+                );
+            }
+
+            descriptor_to_locator.insert(Descriptor::from_file_string(&format!("{}@npm:1.0.0", name)).unwrap(), locator.clone());
+            resolutions.insert(locator, resolution);
+        }
+
+        let roots
+            = BTreeSet::from([Descriptor::from_file_string("root@npm:1.0.0").unwrap()]);
+
+        // The resolver recurses once per level, which needs more than the
+        // default stack of the test threads in debug builds
+        std::thread::Builder::new()
+            .stack_size(64 * 1024 * 1024)
+            .spawn(move || {
+                TreeResolver::default()
+                    .with_resolutions(&descriptor_to_locator, &resolutions)?
+                    .with_roots(roots)
+                    .run()
+            })
+            .unwrap()
+            .join()
+            .unwrap()
+    }
+
+    fn package(name: &str, dependencies: &[&str], peer_dependencies: &[&str]) -> (String, Vec<String>, Vec<String>) {
+        (
+            name.to_string(),
+            dependencies.iter().map(|s| s.to_string()).collect(),
+            peer_dependencies.iter().map(|s| s.to_string()).collect(),
+        )
+    }
+
+    /// root -> pkg-0 -> pkg-1 -> ... -> pkg-<length - 1>, each of them
+    /// having a peer dependency on `peer` (provided by root)
+    fn chain(length: usize) -> Vec<(String, Vec<String>, Vec<String>)> {
+        let mut packages
+            = vec![package("root", &["pkg-0", "peer"], &[]), package("peer", &[], &[])];
+
+        for t in 0..length {
+            let next
+                = format!("pkg-{}", t + 1);
+
+            let dependencies: &[&str]
+                = if t + 1 < length {&[&next]} else {&[]};
+
+            packages.push(package(&format!("pkg-{}", t), dependencies, &["peer"]));
+        }
+
+        packages
+    }
+
+    fn virtual_instances_of<'a>(tree: &'a ResolutionTree, name: &str) -> Vec<&'a Resolution> {
+        tree.locator_resolutions.iter()
+            .filter(|(locator, _)| locator.reference.is_virtual_reference() && locator.physical_locator().ident.as_str() == name)
+            .map(|(_, resolution)| resolution)
+            .collect()
+    }
+
+    #[test]
+    fn it_should_resolve_peer_dependencies_at_the_bottom_of_a_chain_below_the_limit() {
+        let length
+            = MAX_RESOLUTION_DEPTH;
+
+        let tree
+            = resolve(&chain(length)).unwrap();
+
+        let bottom
+            = virtual_instances_of(&tree, &format!("pkg-{}", length - 1));
+
+        assert_eq!(bottom.len(), 1);
+        assert_eq!(
+            tree.descriptor_to_locator[&bottom[0].dependencies[&Ident::from_file_string("peer").unwrap()]],
+            Locator::from_file_string("peer@npm:1.0.0").unwrap(),
+        );
+    }
+
+    #[test]
+    fn it_should_report_an_error_when_the_chain_exceeds_the_limit() {
+        let result
+            = resolve(&chain(MAX_RESOLUTION_DEPTH + 100));
+
+        match result {
+            Err(Error::StackOverflowResolution {max_depth, stack_excerpt}) => {
+                assert_eq!(max_depth, MAX_RESOLUTION_DEPTH);
+                assert_eq!(stack_excerpt.last().unwrap().physical_locator(), Locator::from_file_string(&format!("pkg-{}@npm:1.0.0", MAX_RESOLUTION_DEPTH)).unwrap());
+            },
+
+            Err(error)
+                => panic!("Unexpected error: {}", error),
+
+            Ok(_)
+                => panic!("Expected the resolution to fail"),
+        }
+    }
+
+    #[test]
+    fn it_should_resolve_dependency_cycles_without_peer_dependencies() {
+        resolve(&[
+            package("root", &["a"], &[]),
+            package("a", &["b"], &[]),
+            package("b", &["a"], &[]),
+        ]).unwrap();
+    }
+
+    #[test]
+    fn it_should_resolve_dependency_cycles_through_peer_dependencies() {
+        let tree
+            = resolve(&[
+                package("root", &["a", "peer"], &[]),
+                package("peer", &[], &[]),
+                package("a", &["b"], &["peer"]),
+                package("b", &["a"], &["peer"]),
+            ]).unwrap();
+
+        let a
+            = virtual_instances_of(&tree, "a");
+
+        assert!(!a.is_empty());
+        for resolution in a {
+            assert_eq!(
+                tree.descriptor_to_locator[&resolution.dependencies[&Ident::from_file_string("peer").unwrap()]],
+                Locator::from_file_string("peer@npm:1.0.0").unwrap(),
+            );
+        }
     }
 }
