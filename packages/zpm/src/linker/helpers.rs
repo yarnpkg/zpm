@@ -450,7 +450,9 @@ fn upgrade_fallback_copy(target: &Path, source: &Path, link: FsOp<'_>, rename: F
 /// the mtime) catches both edits to the copy and package updates that
 /// change a file without changing its size.
 fn is_fallback_copy_of(target: &Path, source: &Path, data: &[u8]) -> bool {
-    let (Ok(target_meta), Ok(source_meta)) = (target.fs_symlink_metadata(), source.fs_metadata()) else {
+    // The target is usually missing (first install), which mustn't cost a
+    // `PathError` (and its backtrace)
+    let (Ok(Some(target_meta)), Ok(Some(source_meta))) = (target.fs_symlink_metadata_if_exists(), source.fs_metadata_if_exists()) else {
         return false;
     };
 
