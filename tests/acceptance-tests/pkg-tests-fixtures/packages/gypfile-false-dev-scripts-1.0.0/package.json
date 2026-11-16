@@ -1,0 +1,8 @@
+{
+    "name": "gypfile-false-dev-scripts",
+    "version": "1.0.0",
+    "gypfile": false,
+    "scripts": {
+        "build-release": "node-gyp rebuild --release"
+    }
+}

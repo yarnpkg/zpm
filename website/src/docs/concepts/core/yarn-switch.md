@@ -14,8 +14,13 @@ Distributed as a separate binary with each Yarn release, Yarn Switch is a light 
 Here's what happens under the hood when you run a Yarn command:
 
 1. Yarn Switch (`~/.yarn/switch/bin/yarn`) gets called.
-2. It finds the nearest `package.json` file containing a `packageManager` field.
-3. It checks whether that field references Yarn, and returns an error if not.
+2. It finds the nearest `package.json` file containing a `packageManager` field or a named `devEngines.packageManager` entry, stopping at a Yarn lockfile if it finds one first.
+3. It checks whether the project is configured for Yarn, and returns an error otherwise:
+   - The Yarn version must be declared in the `packageManager` field (for example `"packageManager": "yarn@6.0.0"`, as written by `yarn set version`).
+   - `devEngines.packageManager` is only recognized as a way for other package managers to claim a project: if it lists another package manager, Yarn Switch refuses to run.
+   - Listing Yarn in `devEngines.packageManager` (as a single entry or as part of an array, with or without a `packageManager` field) isn't supported and is reported as an error; remove that entry and use the `packageManager` field instead.
+
+   These checks apply even when a local or migration link is active, regardless of `onFail`. Only an explicit `yarn switch <selector> ...` invocation bypasses them.
 4. It then checks whether the requested version is available locally. If not, it downloads it.
 5. It executes the cached binary, passing along any CLI arguments you provided.
 
