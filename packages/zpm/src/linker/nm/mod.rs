@@ -947,6 +947,9 @@ fn run_cas_extractions(
 
     use rayon::prelude::*;
 
+    let fallbacks
+        = linker::helpers::CopyFallbacks::new();
+
     match project.config.settings.nm_mode.value {
         zpm_config::NmMode::HardlinksLocal => {
             let local_index = linker::helpers::LocalDedupIndex::new();
@@ -961,8 +964,11 @@ fn run_cas_extractions(
                     package_data,
                     &local_index,
                     *skip_node_modules,
+                    &fallbacks,
                 ).map(|_| ())
             })?;
+
+            fallbacks.warn_if_any(None, &project.project_cwd);
         },
         zpm_config::NmMode::HardlinksGlobal => {
             let index_root = project.config.settings.global_folder.value
@@ -973,9 +979,11 @@ fn run_cas_extractions(
                     .get(&locator.physical_locator())
                     .unwrap_or_else(|| panic!("Expected package_data for {}", locator.to_print_string()));
 
-                linker::helpers::fs_extract_archive_with_cas(dest_abs_path, package_data, &index_root, *skip_node_modules)
+                linker::helpers::fs_extract_archive_with_cas(dest_abs_path, package_data, &index_root, *skip_node_modules, &fallbacks)
                     .map(|_| ())
             })?;
+
+            fallbacks.warn_if_any(Some(&index_root), &project.project_cwd);
         },
         zpm_config::NmMode::Classic => {},
     }
