@@ -61,6 +61,21 @@ describe(`Features`, () => {
     }
 
     it(
+      `should prune the archives of deduplicated packages`,
+      makeTemporaryEnv({}, {enableAutoDedupe: true}, async ({path, run}) => {
+        await setPackageWhitelist(new Map([[`no-deps`, new Set([`1.0.0`])]]), async () => {
+          await run(`add`, `one-range-dep`, {enableAutoDedupe: false});
+        });
+        await run(`add`, `no-deps@1.1.0`, {enableAutoDedupe: false});
+
+        await run(`install`);
+
+        const archives = await xfs.readdirPromise(ppath.join(path, `.yarn/cache`));
+        expect(archives.filter(name => name.startsWith(`no-deps-npm-`))).toEqual([expect.stringContaining(`no-deps-npm-1.1.0-`)]);
+      }),
+    );
+
+    it(
       `should reuse a full explicit dedupe on the next install`,
       makeTemporaryEnv({}, {enableAutoDedupe: true}, async ({run}) => {
         await setPackageWhitelist(new Map([[`no-deps`, new Set([`1.0.0`])]]), async () => {

@@ -1816,7 +1816,7 @@ impl Project {
         with_report_result(report, async {
             self.prepare_install_settings(false)?;
 
-            let package_cache
+            let mut package_cache
                 = self.package_cache()?;
             let mut install
                 = self.prepare_install(&options, &package_cache).await?;
@@ -1833,6 +1833,9 @@ impl Project {
                     options.enforced_resolutions.extend(dedupe_resolutions.into_iter()
                         .map(|(descriptor, locator)| (descriptor, Some(locator))));
 
+                    // Track cache accesses from scratch, so that the cleanup
+                    // prunes the archives only the previous graph was using.
+                    package_cache = self.package_cache()?;
                     install = self.prepare_install_from_lockfile(&options, &package_cache, install.lockfile).await?;
                     install.install_state.full_dedupe_complete = crate::dedupe::prepare_highest_dedupe(&install.install_state, &[]).is_empty();
                 }

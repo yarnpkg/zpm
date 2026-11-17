@@ -152,7 +152,7 @@ impl Dedupe {
 
             // Check freshness before creating cache directories: recreating a
             // missing directory would hide the need to restore its archives.
-            let package_cache
+            let mut package_cache
                 = project.package_cache()?;
             let mut install
                 = project.prepare_install(&options, &package_cache).await?;
@@ -175,6 +175,9 @@ impl Dedupe {
                         .map(|(descriptor, locator)| (descriptor, Some(locator)))
                         .collect();
 
+                    // Track cache accesses from scratch, so that the cleanup
+                    // prunes the archives only the previous graph was using.
+                    package_cache = project.package_cache()?;
                     install = project.prepare_install_from_lockfile(&options, &package_cache, install.lockfile).await?;
                 }
             }

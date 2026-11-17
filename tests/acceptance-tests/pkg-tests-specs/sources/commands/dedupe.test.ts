@@ -94,6 +94,28 @@ describe(`Commands`, () => {
         );
       }
 
+      for (const state of [`current`, `stale`]) {
+        it(
+          `should prune the archives of deduplicated packages with ${state} installation state`,
+          makeTemporaryEnv({}, async ({path, run}) => {
+            await setPackageWhitelist(new Map([[`no-deps`, new Set([`1.0.0`])]]), async () => {
+              await run(`add`, `one-range-dep`);
+            });
+            await run(`add`, `no-deps@1.1.0`);
+
+            if (state === `stale`) {
+              const manifestPath = ppath.join(path, Filename.manifest);
+              await xfs.writeJsonPromise(manifestPath, {...await xfs.readJsonPromise(manifestPath), description: `stale`});
+            }
+
+            await run(`dedupe`);
+
+            const archives = await xfs.readdirPromise(ppath.join(path, `.yarn/cache`));
+            expect(archives.filter(name => name.startsWith(`no-deps-npm-`))).toEqual([expect.stringContaining(`no-deps-npm-1.1.0-`)]);
+          }),
+        );
+      }
+
       it(
         `should leave a conflicted lockfile untouched when checking`,
         makeTemporaryEnv({}, async ({path, run}) => {
