@@ -1,10 +1,35 @@
 import {Filename, PortablePath, xfs, ppath, npath} from '@yarnpkg/fslib';
-import {tests, misc}                               from 'pkg-tests-core';
+import {exec, tests, misc}                         from 'pkg-tests-core';
 
 const {getPackageArchivePath} = tests;
 
 describe(`Commands`, () => {
   describe(`install`, () => {
+    test(
+      `it should preserve the linked tree's archives during a lockfile-only update`,
+      makeTemporaryEnv({dependencies: {[`no-deps`]: `1.0.0`}}, async ({path, run}) => {
+        await run(`install`);
+        const pnpPath = ppath.join(path, Filename.pnpCjs);
+        const previousPnp = await xfs.readFilePromise(pnpPath);
+        const cachePath = ppath.join(path, `.yarn/cache`);
+        const previousCache = await xfs.readdirPromise(cachePath);
+
+        await xfs.writeJsonPromise(ppath.join(path, Filename.manifest), {
+          dependencies: {[`no-deps`]: `1.1.0`},
+        });
+        await run(`install`, `--mode=update-lockfile`);
+
+        expect(await xfs.readFilePromise(pnpPath)).toEqual(previousPnp);
+        expect(await xfs.readdirPromise(cachePath)).toEqual(expect.arrayContaining(previousCache));
+        await expect(exec.execFile(process.execPath, [
+          `--require`, npath.fromPortablePath(pnpPath), `-p`, `require('no-deps').version`,
+        ], {cwd: path, env: {...process.env, NODE_OPTIONS: ``}})).resolves.toMatchObject({stdout: `1.0.0\n`});
+
+        await run(`install`);
+        expect(await xfs.readdirPromise(cachePath)).not.toEqual(expect.arrayContaining(previousCache));
+      }),
+    );
+
     test(
       `it should print regular messages as JSON items when using --json`,
       makeTemporaryEnv({}, async ({path, run, source}) => {
