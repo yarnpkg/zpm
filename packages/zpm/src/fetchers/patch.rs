@@ -33,6 +33,14 @@ pub fn compute_patch_checksum(patch_content: &str) -> Hash64 {
     Hash64::from_data(zpm_utils::normalize_line_endings(patch_content.as_bytes()))
 }
 
+pub(crate) fn patch_file_path(path: &str) -> &str {
+    // Yarn patch references may include metadata suffixes like:
+    // "<path>::version=1.2.3&hash=abcdef". Only the filesystem path
+    // before "::" points to the actual patch file on disk.
+    path.split_once("::")
+        .map(|(file_path, _)| file_path)
+        .unwrap_or(path)
+}
 pub async fn fetch_locator<'a>(context: &InstallContext<'a>, locator: &Locator, params: &PatchReference, is_mock_request: bool, dependencies: Vec<InstallOpResult>) -> Result<FetchResult, Error> {
     let package_cache = context.package_cache
         .expect("The package cache is required to fetch a patch package");
@@ -58,7 +66,9 @@ pub async fn fetch_locator<'a>(context: &InstallContext<'a>, locator: &Locator, 
 
     let mut is_builtin = false;
 
-    let patch_content = match params.path.as_str() {
+    let file_path = patch_file_path(&params.path);
+
+    let patch_content = match file_path {
         "<builtin>" => {
             let compressed_patch = BUILTIN_PATCHES.iter()
                 .find(|(name, _)| name == &locator.ident.as_str())

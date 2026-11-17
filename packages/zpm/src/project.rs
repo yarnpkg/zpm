@@ -1369,7 +1369,7 @@ impl Project {
                     // Path handling mirrors the patch fetcher: `~/` is
                     // project-relative, anything else resolves against
                     // the parent.
-                    let patch_path = match reference_params.path.as_str() {
+                    let patch_path = match crate::fetchers::patch::patch_file_path(&reference_params.path) {
                         path if path.starts_with("~/") => self.project_cwd.with_join_str(&path[2..]),
                         path => resolve_local_path(&context_directory, path)?,
                     };
