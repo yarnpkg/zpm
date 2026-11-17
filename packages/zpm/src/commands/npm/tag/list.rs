@@ -20,9 +20,15 @@ use super::get_dist_tags;
 /// apply to the package), and credentials are sent according to the usual rules (always for scoped packages, otherwise only when `npmAlwaysAuth`
 /// is enabled).
 ///
-/// For example, to list all tags of package `my-pkg`:
+/// ## Examples
 ///
-///   - `yarn npm tag list my-pkg`
+/// List all tags of package `my-pkg`
+///
+/// `yarn npm tag list my-pkg`
+///
+/// List all tags of the current workspace
+///
+/// `yarn npm tag list`
 ///
 #[cli::command]
 #[cli::path("npm", "tag", "list")]
