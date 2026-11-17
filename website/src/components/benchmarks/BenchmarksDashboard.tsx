@@ -34,12 +34,24 @@ export interface Incident {
   label: string;
 }
 
+export interface Platform {
+  id: string;
+  name: string;
+}
+
+// Defined per theme in benchmarks.astro: light blue for Yarn 6, dark blue for
+// Yarn 4 and Yarn Classic (which is dashed), red for npm, orange for pnpm
 export const SERIES_COLORS: Record<string, string> = {
-  zpm: `oklch(0.78 0.16 var(--accent-h))`,
-  yarn: `oklch(0.65 0.10 var(--accent-h))`,
-  npm: `oklch(0.70 0.15 25)`,
-  pnpm: `oklch(0.75 0.13 220)`,
-  classic: `oklch(0.55 0.08 var(--accent-h))`,
+  zpm: `var(--series-zpm)`,
+  yarn: `var(--series-yarn)`,
+  npm: `var(--series-npm)`,
+  pnpm: `var(--series-pnpm)`,
+  classic: `var(--series-classic)`,
+};
+
+// Series that are hidden until their legend entry is clicked
+const DEFAULT_MUTED_SERIES: Record<string, boolean> = {
+  classic: true,
 };
 
 export function median(arr: Array<number | null>): number {
@@ -55,28 +67,28 @@ export function getSeriesValues(projectData: Record<string, Array<BenchPoint>>, 
 }
 
 interface Props {
-  data: Record<string, Record<string, Record<string, Array<BenchPoint>>>>;
+  // platform -> scenario -> project -> series -> points
+  data: Record<string, Record<string, Record<string, Record<string, Array<BenchPoint>>>>>;
   seriesOrder: ReadonlyArray<string>;
   seriesMeta: Record<string, SeriesMeta>;
   projects: Array<Project>;
+  platforms: Array<Platform>;
+  defaultPlatform: string;
   scenarios: Array<Scenario>;
   incidents: Array<Incident>;
   benchMinTs: number;
   benchMaxTs: number;
 }
 
-const SWATCH_STYLES: Record<string, {dashed: boolean}> = {
-  zpm: {dashed: false},
-  yarn: {dashed: false},
-  npm: {dashed: false},
-  pnpm: {dashed: false},
-  classic: {dashed: true},
-};
+const EMPTY_PLATFORM_DATA: Props[`data`][string] = {};
+const EMPTY_PROJECT_DATA: Record<string, Array<BenchPoint>> = {};
 
-export function BenchmarksDashboard({data, seriesOrder, seriesMeta, projects, scenarios, incidents, benchMinTs, benchMaxTs}: Props): JSX.Element {
-  const [mutedSeries, setMutedSeries] = useState<Record<string, boolean>>({});
+export function BenchmarksDashboard({data, seriesOrder, seriesMeta, projects, platforms, defaultPlatform, scenarios, incidents, benchMinTs, benchMaxTs}: Props): JSX.Element {
+  const [mutedSeries, setMutedSeries] = useState<Record<string, boolean>>(DEFAULT_MUTED_SERIES);
   const [selectedProject, setSelectedProject] = useState(`all`);
+  const [selectedPlatform, setSelectedPlatform] = useState(defaultPlatform);
   const [showVersions, setShowVersions] = useState(false);
+  const [excludeOutliers, setExcludeOutliers] = useState(false);
   const [hoverInfo, setHoverInfo] = useState<HoverInfo | null>(null);
   const [controlsOpen, setControlsOpen] = useState(false);
 
@@ -85,6 +97,14 @@ export function BenchmarksDashboard({data, seriesOrder, seriesMeta, projects, sc
   const visibleProjects = selectedProject === `all`
     ? projects
     : projects.filter(p => p.id === selectedProject);
+
+  const platformData = data[selectedPlatform] ?? EMPTY_PLATFORM_DATA;
+
+  const selectPlatform = useCallback((platform: string) => {
+    // The hovered index refers to the time axis of the previous platform
+    setHoverInfo(null);
+    setSelectedPlatform(platform);
+  }, []);
 
   const toggleMute = useCallback((pm: string) => {
     setMutedSeries(prev => {
@@ -121,22 +141,41 @@ export function BenchmarksDashboard({data, seriesOrder, seriesMeta, projects, sc
             <span className={`controls-summary`}>
               Filters
               <span className={`controls-badge`}>{projects.find(p => p.id === selectedProject)?.name ?? `All`}</span>
+              <span className={`controls-badge`}>{platforms.find(p => p.id === selectedPlatform)?.name}</span>
             </span>
             <span className={`controls-chevron`} />
           </button>
           <div className={`controls-body`}>
-            {/* Project filter */}
-            <div className={`filter-bar`}>
-              <span className={`label`}>Project</span>
-              {[{id: `all`, name: `All`}, ...projects].map(p => (
-                <button
-                  key={p.id}
-                  className={`filter-pill${selectedProject === p.id ? ` active` : ``}`}
-                  onClick={() => setSelectedProject(p.id)}
-                >
-                  {p.name}
-                </button>
-              ))}
+            <div className={`filter-row`}>
+              {/* Project filter */}
+              <div className={`filter-bar`}>
+                <span className={`label`}>Project</span>
+                {[{id: `all`, name: `All`}, ...projects].map(p => (
+                  <button
+                    key={p.id}
+                    className={`filter-pill${selectedProject === p.id ? ` active` : ``}`}
+                    aria-pressed={selectedProject === p.id}
+                    onClick={() => setSelectedProject(p.id)}
+                  >
+                    {p.name}
+                  </button>
+                ))}
+              </div>
+
+              {/* Platform toggle */}
+              <div className={`filter-bar`}>
+                <span className={`label`}>Platform</span>
+                {platforms.map(p => (
+                  <button
+                    key={p.id}
+                    className={`filter-pill${selectedPlatform === p.id ? ` active` : ``}`}
+                    aria-pressed={selectedPlatform === p.id}
+                    onClick={() => selectPlatform(p.id)}
+                  >
+                    {p.name}
+                  </button>
+                ))}
+              </div>
             </div>
 
             {/* Series legend */}
@@ -150,7 +189,7 @@ export function BenchmarksDashboard({data, seriesOrder, seriesMeta, projects, sc
                     style={{[`--c` as any]: SERIES_COLORS[sid]}}
                     onClick={() => toggleMute(sid)}
                   >
-                    <span className={`swatch${SWATCH_STYLES[sid]?.dashed ? ` dashed` : ``}`} />
+                    <span className={`swatch${seriesMeta[sid].dashed ? ` dashed` : ``}`} />
                     <span className={`name`}>{seriesMeta[sid].name}</span>
                   </button>
                 </span>
@@ -167,6 +206,14 @@ export function BenchmarksDashboard({data, seriesOrder, seriesMeta, projects, sc
                 />
                 <span>Show versions</span>
                 <i className={`version-spinner`} />
+              </label>
+              <label className={`toggle-label`}>
+                <input
+                  type={`checkbox`}
+                  checked={excludeOutliers}
+                  onChange={e => setExcludeOutliers(e.target.checked)}
+                />
+                <span>Exclude outliers</span>
               </label>
             </div>
           </div>
@@ -194,7 +241,8 @@ export function BenchmarksDashboard({data, seriesOrder, seriesMeta, projects, sc
                 key={`${sc.id}-${p.id}`}
                 scenario={sc}
                 project={p}
-                data={data[sc.id]?.[p.id] ?? {}}
+                data={platformData[sc.id]?.[p.id] ?? EMPTY_PROJECT_DATA}
+                excludeOutliers={excludeOutliers}
                 seriesOrder={seriesOrder}
                 seriesMeta={seriesMeta}
                 mutedSeries={mutedSeries}
@@ -211,7 +259,7 @@ export function BenchmarksDashboard({data, seriesOrder, seriesMeta, projects, sc
 
       {/* Aggregate summary */}
       <BenchmarkSummary
-        data={data}
+        data={platformData}
         seriesOrder={seriesOrder}
         seriesMeta={seriesMeta}
         projects={projects}

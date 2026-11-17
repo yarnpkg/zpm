@@ -11,6 +11,24 @@ const testName = process.argv[3];
 const benchDir = process.argv[4];
 const entries = fs.readdirSync(benchDir);
 
+const PLATFORMS = [`linux`, `macos`];
+const DEFAULT_PLATFORM = `linux`;
+
+const platform = process.argv[5] ?? DEFAULT_PLATFORM;
+if (!PLATFORMS.includes(platform)) {
+  console.error(`Invalid platform ${platform} (expected one of ${PLATFORMS.join(`, `)})`);
+  process.exit(1);
+}
+
+// https://repo.yarnpkg.com/benchmarks (which feeds the website) aggregates
+// the metric by `subtest`, `test` and `pm` only: results sharing those three
+// tags get averaged together, whatever their other tags. The results of the
+// platforms other than Linux are thus reported under their own test name
+// (`next-macos`), which the website turns back into a project + platform.
+const testTag = platform === DEFAULT_PLATFORM
+  ? testName
+  : `${testName}-${platform}`;
+
 const BENCHMARK = /^bench-(.*)\.json$/;
 const benchmarkEntries = entries.filter(entry => {
   return entry.match(BENCHMARK);
@@ -32,7 +50,7 @@ for (const entry of benchmarkEntries) {
   series.push({
     metric: `perftest.duration`,
     type: `gauge`,
-    tags: [`pm:${packageManager}`, `test:${testName}`, `subtest:${subtestName}`, `iteration:${ITERATION}`],
+    tags: [`pm:${packageManager}`, `test:${testTag}`, `subtest:${subtestName}`, `os:${platform}`, `iteration:${ITERATION}`],
     points: points.map(([timestamp, value]) => [timestamp, value]),
   });
 }
