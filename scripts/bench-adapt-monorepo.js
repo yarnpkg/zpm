@@ -133,9 +133,11 @@ const mapWorkspaceRange = (range, name, rootName) => {
 // npm doesn't support `link:` either. It symlinks `file:` folders, but
 // requires them to exist and to contain a manifest (Yarn and pnpm are fine
 // with the fixture's dangling links). `resolutions` become `overrides`, which
-// accept the same `name@range` keys; npm rejects overrides that disagree with
-// a dependency of the root workspace, so those are applied to the root
-// dependencies themselves (which is what Yarn's resolutions do).
+// accept the same `name@range` keys. npm rejects overrides that disagree with
+// a dependency of the root workspace, so the ones that cover such a
+// dependency are applied to the root manifest itself (which is what Yarn's
+// resolutions do), and the ones targeting another range of a package the
+// root depends on are dropped.
 const adaptForNpm = () => {
   const rootName = readManifest(`package.json`).name;
 
