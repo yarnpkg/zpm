@@ -54,11 +54,11 @@ const mapRanges = fn => {
         if (mapped === range)
           continue;
 
-        if (mapped === null) {
+        if (mapped === null)
           delete manifest[field][name];
-        } else {
+        else
           manifest[field][name] = mapped;
-        }
+
 
         changed = true;
       }

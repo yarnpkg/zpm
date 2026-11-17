@@ -55,6 +55,8 @@ for (const entry of benchmarkEntries) {
   });
 }
 
+// bench-run.sh exits successfully without results for the combinations
+// it skips (it prints the reason as a warning)
 if (series.length === 0) {
   console.log(`No benchmark results found in ${benchDir}; nothing to submit`);
   process.exit(0);

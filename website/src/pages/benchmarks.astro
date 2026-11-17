@@ -768,7 +768,7 @@ const INCIDENTS = [
     <p>Every four hours &mdash; and on every push to <code>main</code> &mdash; a GitHub Actions workflow runs the full benchmark matrix. Each combination of scenario, project, and package manager is timed with <a href="https://github.com/sharkdp/hyperfine">Hyperfine</a>, measuring wall-clock duration. The results are published here automatically.</p>
 
     <h3 id="how-benchmarks-run">How benchmarks run</h3>
-    <p>Hyperfine executes each install command a minimum of 10 times after 1 warmup run. Before every timed run, a <em>prepare</em> step resets the environment to match the scenario &mdash; for example, deleting <code>node_modules</code>, the lockfile, or the global cache &mdash; so each measurement starts from the same state. The final result is the mean of all timed runs.</p>
+    <p>Hyperfine executes each install command a minimum of 10 times after 1 warmup run (down to 3 times for the few combinations where a single install takes several minutes, such as npm on the monorepo). Before every timed run, a <em>prepare</em> step resets the environment to match the scenario &mdash; for example, deleting <code>node_modules</code>, the lockfile, or the global cache &mdash; so each measurement starts from the same state. The final result is the mean of all timed runs.</p>
     <p>The benchmarks run on GitHub Actions, on both the <code>ubuntu-latest</code> (x64) and <code>macos-latest</code> (arm64) runners; the <em>Platform</em> setting picks which results are displayed, Linux being the default. The two aren't the same hardware, so durations shouldn't be compared across platforms. zpm is compiled from source with the <code>release-lto</code> profile; all other managers use their latest stable release at the time of each run.</p>
     <p>Shared runners are noisy, and a run occasionally takes several times longer than its neighbours. The <em>Exclude outliers</em> setting caps the vertical axis of each chart right above the 75th percentile of its slowest visible series, so that more than 75% of the data points of every series stay in view and the rare spikes run off the top of the chart instead of flattening everything else.</p>
 
@@ -805,7 +805,7 @@ const INCIDENTS = [
           </tr>
           <tr>
             <td>monorepo</td>
-            <td>Synthetic monorepo of around ~1.5k workspaces, each with their own arbitrary set of dependencies.</td>
+            <td>Synthetic monorepo of around 6k workspaces, each with their own arbitrary set of dependencies. It's a Yarn project: the manifests are translated for the other package managers (<code>workspace:</code> ranges, resolutions), and npm is only measured on Linux since it needs more memory to install it than the macOS runners have.</td>
           </tr>
         </tbody>
       </table>
