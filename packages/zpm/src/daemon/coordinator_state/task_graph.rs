@@ -57,6 +57,9 @@ pub struct TaskInfo {
     pub is_target: bool,
     /// For long-lived tasks: has the warm-up period completed?
     pub warm_up_complete: bool,
+    /// Exit code of the first subtask that failed while this task's script
+    /// was still running; the task fails with it once its script exits.
+    pub subtask_failure_exit_code: Option<i32>,
 }
 
 impl Default for TaskInfo {
@@ -65,6 +68,7 @@ impl Default for TaskInfo {
             state: TaskState::Pending,
             is_target: false,
             warm_up_complete: false,
+            subtask_failure_exit_code: None,
         }
     }
 }
@@ -476,6 +480,18 @@ impl TaskGraph {
         } else {
             false
         }
+    }
+
+    pub fn get_subtask_failure_exit_code(&self, task_id: &ContextualTaskId) -> Option<i32> {
+        self.tasks
+            .get(task_id)
+            .and_then(|info| info.subtask_failure_exit_code)
+    }
+
+    /// Only the first failure is kept, as when the task is already waiting
+    /// for its subtasks (the first failure fails it).
+    pub fn record_subtask_failure(&mut self, task_id: &ContextualTaskId, exit_code: i32) {
+        self.ensure_task_info(task_id).subtask_failure_exit_code.get_or_insert(exit_code);
     }
 
     pub fn find_parents(&self, task_id: &ContextualTaskId) -> Vec<ContextualTaskId> {

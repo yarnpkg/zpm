@@ -1,7 +1,7 @@
 use std::{collections::HashMap, process::Stdio, sync::{atomic::{AtomicBool, AtomicU64, Ordering}, Arc}, time::Duration};
 
 use futures::{SinkExt, stream::StreamExt};
-use tokio::{sync::{mpsc, oneshot, Mutex}, task::AbortHandle};
+use tokio::{io::AsyncReadExt, sync::{mpsc, oneshot, Mutex}, task::AbortHandle};
 use tokio_tungstenite::{MaybeTlsStream, WebSocketStream, tungstenite::Message};
 use zpm_switch::YARNSW_PATH_ENV;
 use zpm_utils::{Path, ToFileString};
@@ -532,11 +532,24 @@ async fn start_daemon(project_root: &Path) -> Result<String, Error> {
         }
     }
 
-    let output
-        = tokio::time::timeout(Duration::from_secs(10), cmd.output())
-            .await
-            .map_err(|_| Error::IpcError("Timeout waiting for daemon to start".to_string()))?
+    let mut child
+        = cmd.spawn()
             .map_err(|e| Error::IpcError(format!("Failed to start daemon: {}", e)))?;
+
+    let output
+        = match tokio::time::timeout(Duration::from_secs(10), wait_for_launcher(&mut child)).await {
+            Ok(output) => {
+                output.map_err(|e| Error::IpcError(format!("Failed to start daemon: {}", e)))?
+            },
+
+            Err(_) => {
+                // Kill the launcher and wait until it's gone; merely dropping
+                // the handle would send the signal without waiting for it
+                let _ = child.kill().await;
+
+                return Err(Error::IpcError("Timeout waiting for daemon to start".to_string()));
+            },
+        };
 
     let stdout
         = String::from_utf8_lossy(&output.stdout);
@@ -569,4 +582,37 @@ async fn start_daemon(project_root: &Path) -> Result<String, Error> {
             .ok_or_else(|| Error::IpcError("Daemon closed without printing URL".to_string()))?;
 
     Ok(url.trim().to_string())
+}
+
+/// Same as `Child::wait_with_output`, but borrows the child so that it can
+/// still be killed if the caller gives up waiting.
+async fn wait_for_launcher(child: &mut tokio::process::Child) -> std::io::Result<std::process::Output> {
+    let mut stdout_pipe
+        = child.stdout.take();
+    let mut stderr_pipe
+        = child.stderr.take();
+
+    let mut stdout
+        = Vec::new();
+    let mut stderr
+        = Vec::new();
+
+    let read_stdout = async {
+        if let Some(pipe) = &mut stdout_pipe {
+            pipe.read_to_end(&mut stdout).await?;
+        }
+        Ok::<_, std::io::Error>(())
+    };
+
+    let read_stderr = async {
+        if let Some(pipe) = &mut stderr_pipe {
+            pipe.read_to_end(&mut stderr).await?;
+        }
+        Ok::<_, std::io::Error>(())
+    };
+
+    let (status, _, _)
+        = tokio::try_join!(child.wait(), read_stdout, read_stderr)?;
+
+    Ok(std::process::Output {status, stdout, stderr})
 }
