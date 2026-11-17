@@ -190,23 +190,46 @@ impl<'a> NodeModulesPackageMapBuilder<'a> {
                 = current_path.with_join_str("node_modules");
 
             if let Some(package_locations) = self.package_locations_by_node_modules_path.get(&node_modules_path) {
-                for (dependency_name, dependency_location) in package_locations {
-                    if let Some(dependency_names) = dependency_names {
-                        if !dependency_names.contains(dependency_name) {
-                            continue;
+                match dependency_names {
+                    // Standard maps only list declared names, so look
+                    // those up pointwise: scanning the ancestor's table
+                    // instead would cost every package installed at that
+                    // level, most of which this package will never
+                    // reference.
+                    Some(dependency_names) => {
+                        for dependency_name in dependency_names {
+                            if dependencies.contains_key(dependency_name) {
+                                continue;
+                            }
+
+                            let Some(dependency_location) = package_locations.get(dependency_name) else {
+                                continue;
+                            };
+
+                            let dependency
+                                = self.package_map_nodes
+                                    .get(dependency_location)
+                                    .ok_or_else(|| package_map_error(format!("expected {dependency_location:?} to have been registered")))?;
+
+                            dependencies.insert(dependency_name.clone(), dependency.id.clone());
                         }
-                    }
+                    },
 
-                    if dependencies.contains_key(dependency_name) {
-                        continue;
-                    }
+                    // Loose maps list everything the ancestor exposes.
+                    None => {
+                        for (dependency_name, dependency_location) in package_locations {
+                            if dependencies.contains_key(dependency_name) {
+                                continue;
+                            }
 
-                    let dependency
-                        = self.package_map_nodes
-                            .get(dependency_location)
-                            .ok_or_else(|| package_map_error(format!("expected {dependency_location:?} to have been registered")))?;
+                            let dependency
+                                = self.package_map_nodes
+                                    .get(dependency_location)
+                                    .ok_or_else(|| package_map_error(format!("expected {dependency_location:?} to have been registered")))?;
 
-                    dependencies.insert(dependency_name.clone(), dependency.id.clone());
+                            dependencies.insert(dependency_name.clone(), dependency.id.clone());
+                        }
+                    },
                 }
             }
 
