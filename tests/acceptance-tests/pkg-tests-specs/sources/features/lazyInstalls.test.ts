@@ -73,6 +73,84 @@ async function setupMonorepoWithTransparentWorkspace(path: PortablePath, range: 
 
 describe(`Features`, () => {
   describe(`Lazy installs`, () => {
+    for (const configuration of [`project`, `environment`]) {
+      const env = configuration === `environment`
+        ? {YARN_ENABLE_LAZY_INSTALLS: `0`}
+        : {};
+
+      test(
+        `it should preserve the existing installation when lazy installs are disabled via ${configuration}`,
+        makeTemporaryEnv({
+          dependencies: {
+            [`no-deps`]: `1.0.0`,
+          },
+        }, async ({path, run, source}) => {
+          await run(`install`);
+
+          await yarn.writeConfiguration(path, {
+            enableLazyInstalls: configuration !== `project`,
+          });
+
+          const manifestPath = ppath.join(path, Filename.manifest);
+          const manifest = await xfs.readJsonPromise(manifestPath);
+          manifest.dependencies[`no-deps`] = `2.0.0`;
+          await xfs.writeJsonPromise(manifestPath, manifest);
+
+          const installStatePath = ppath.join(path, `.yarn/ignore/install` as PortablePath);
+          const lockfilePath = ppath.join(path, Filename.lockfile);
+          const stateBefore = await xfs.readFilePromise(installStatePath);
+          const lockfileBefore = await xfs.readFilePromise(lockfilePath);
+
+          await expect(source(`require('no-deps/package.json').version`, {env})).resolves.toEqual(`1.0.0`);
+          expect(await xfs.readFilePromise(installStatePath)).toEqual(stateBefore);
+          expect(await xfs.readFilePromise(lockfilePath)).toEqual(lockfileBefore);
+
+          await run(`install`, {env});
+          await expect(source(`require('no-deps/package.json').version`, {env})).resolves.toEqual(`2.0.0`);
+        }),
+      );
+
+      test(
+        `it should fail to run scripts before installation when lazy installs are disabled via ${configuration}`,
+        makeTemporaryEnv({
+          scripts: {
+            hello: `echo hello`,
+          },
+        }, async ({path, run}) => {
+          await yarn.writeConfiguration(path, {
+            enableLazyInstalls: configuration !== `project`,
+          });
+
+          await expect(run(`run`, `hello`, {env})).rejects.toThrow(`Install state file not found`);
+          expect(await xfs.existsPromise(ppath.join(path, `.yarn/ignore/install` as PortablePath))).toBe(false);
+          expect(await xfs.existsPromise(ppath.join(path, Filename.lockfile))).toBe(false);
+
+          await run(`install`, {env});
+          await expect(run(`run`, `hello`, {env})).resolves.toMatchObject({
+            stdout: `hello\n`,
+          });
+        }),
+      );
+
+      test(
+        `it should not create an installation when lazy installs are disabled via ${configuration}`,
+        makeTemporaryEnv({}, async ({path, run}) => {
+          await yarn.writeConfiguration(path, {
+            enableLazyInstalls: configuration !== `project`,
+          });
+
+          await expect(run(`node`, `-e`, `console.log('hello')`, {env})).rejects.toThrow(`Install state file not found`);
+          expect(await xfs.existsPromise(ppath.join(path, `.yarn/ignore/install` as PortablePath))).toBe(false);
+          expect(await xfs.existsPromise(ppath.join(path, Filename.lockfile))).toBe(false);
+
+          await run(`install`, {env});
+          await expect(run(`node`, `-e`, `console.log('hello')`, {env})).resolves.toMatchObject({
+            stdout: `hello\n`,
+          });
+        }),
+      );
+    }
+
     test(
       `it should not run install when running a command twice in a row`,
       makeTemporaryEnv({

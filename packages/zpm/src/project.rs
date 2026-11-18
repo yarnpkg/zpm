@@ -1688,6 +1688,10 @@ impl Project {
             },
         };
 
+        if !self.config.settings.enable_lazy_installs.value {
+            return Ok(());
+        }
+
         let cache_exists = if self.config.settings.enable_global_cache.value {
             self.global_cache_path().fs_exists()
         } else {
