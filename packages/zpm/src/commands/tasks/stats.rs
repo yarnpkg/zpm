@@ -10,6 +10,17 @@ use crate::project::Project;
 ///
 /// This command returns statistics about the daemon's internal state,
 /// useful for debugging and testing memory management.
+///
+/// ## Examples
+///
+/// Print the daemon statistics
+///
+/// `yarn tasks stats`
+///
+/// Print the daemon statistics as JSON
+///
+/// `yarn tasks stats --json`
+///
 #[cli::command]
 #[cli::path("tasks", "stats")]
 #[cli::category("Task management commands")]

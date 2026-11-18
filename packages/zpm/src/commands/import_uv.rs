@@ -36,6 +36,25 @@ use crate::{
 ///   resolves a workspace as a whole).
 ///
 /// Run with `--dry-run` to print the generated files without writing them.
+///
+/// ## Examples
+///
+/// Import a uv project as a workspace
+///
+/// `yarn import uv services/api`
+///
+/// Import a uv project along with the projects it references through path sources
+///
+/// `yarn import uv services/api --recursive`
+///
+/// Also import the `lint` dependency group as devDependencies
+///
+/// `yarn import uv services/api --group lint`
+///
+/// Print the files that would be written without writing them
+///
+/// `yarn import uv services/api --dry-run`
+///
 #[cli::command]
 #[cli::path("import", "uv")]
 #[cli::category("Project management")]

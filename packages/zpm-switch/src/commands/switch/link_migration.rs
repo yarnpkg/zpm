@@ -7,6 +7,12 @@ use crate::{cwd::get_final_cwd, errors::Error, links::{Link, LinkTarget, set_lin
 ///
 /// This command makes Yarn Switch run the version declared by `packageManagerMigration` for the current project.
 ///
+/// ## Examples
+///
+/// Run the `packageManagerMigration` version in the current project
+///
+/// `yarn switch link --migration`
+///
 #[cli::command]
 #[cli::path("switch", "link")]
 #[cli::category("Local Yarn development")]

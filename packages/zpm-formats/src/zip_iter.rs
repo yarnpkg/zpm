@@ -1,11 +1,10 @@
 use std::{borrow::Cow, io::Read};
 
 use zerocopy::FromBytes;
-use zpm_utils::Path;
 
 use crate::{zip_structs::{CentralDirectoryRecord, EndOfCentralDirectoryRecord, GeneralRecord}, Compression, CompressionAlgorithm, Entry, Error};
 
-fn unpack_deflate(data: &[u8], expected_size: Option<usize>) -> Result<Vec<u8>, Error> {
+pub(crate) fn unpack_deflate(data: &[u8], expected_size: Option<usize>) -> Result<Vec<u8>, Error> {
     let mut decoder
         = flate2::bufread::DeflateDecoder::new(data);
 
@@ -66,16 +65,8 @@ impl<'a> ZipIterator<'a> {
             = self.buffer.get(name_offset..name_offset + general_record.header.file_name_length.get() as usize)
                 .ok_or_else(|| Error::InvalidZipFile("File name out of bounds".to_string()))?;
 
-        let name_str
-            = std::str::from_utf8(name_bytes)?;
         let name
-            = Path::try_from(name_str)?;
-
-        // Absolute paths and `..` segments would let the archive write
-        // outside of the folder it's extracted into
-        if !name.is_forward() {
-            return Err(Error::InvalidZipFile(format!("Entry path escapes the archive: {}", name_str)));
-        }
+            = crate::zip::parse_entry_name(name_bytes)?;
 
         let data_size
             = central_directory_record.header.compressed_size.get() as usize;

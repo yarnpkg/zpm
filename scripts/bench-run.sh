@@ -11,11 +11,15 @@
 #   HYPERFINE_OPTIONS  extra hyperfine flags, word-split (e.g. `--runs 3`);
 #                      `--runs`/`--min-runs` replace the default `--min-runs`
 #   BENCH_MIN_RUNS     default minimum number of timed runs (10)
+#   BENCH_TIME_BUDGET  seconds of timed runs to aim for when an install is too
+#                      slow for BENCH_MIN_RUNS of them (3600); the slowest
+#                      combinations get fewer runs, down to 3
+#   BENCH_NPM_HEAP_MB  heap size given to npm on the monorepo fixture (8192)
 #   ZPM_PATH           Yarn 6 binary to benchmark
 #
 # The script exits with a non-zero status whenever an install fails, so that
-# a broken package manager never produces data. Combinations that cannot be
-# measured meaningfully (see `skip`) exit with status 0 without producing any
+# a broken package manager never produces data. Combinations that the machine
+# cannot run (see `skip`) exit with status 0 without producing any
 # `bench-*.json` file.
 
 set -euo pipefail
@@ -52,20 +56,13 @@ skip() {
   exit 0
 }
 
-# The monorepo fixture is a Yarn project: it depends on its workspaces through
-# the `workspace:` protocol (including a path-based `workspace:<path>` range),
-# none of its workspaces have a version, and it uses `name@range` keys in
-# `resolutions`. npm and Yarn 1 support none of these (Yarn 1 reads the
-# `resolutions` keys as package names, npm ignores the field and runs out of
-# heap before reporting anything), so rewriting the fixture for them would
-# benchmark a different dependency tree. pnpm supports all of it once the
-# settings are moved to `pnpm-workspace.yaml` (see `setup-pnpm`).
-if [[ "$TEST_NAME" == "monorepo" ]]; then
-  case "$PACKAGE_MANAGER" in
-    npm) skip "npm supports neither the workspace: protocol nor the fixture's resolutions";;
-    classic) skip "Yarn Classic supports neither the workspace: protocol nor the fixture's resolutions";;
-  esac
-fi
+total-memory-mb() {
+  if [[ "$(uname)" == "Darwin" ]]; then
+    echo $(( $(sysctl -n hw.memsize) / 1024 / 1024 ))
+  else
+    awk '/^MemTotal:/ {print int($2 / 1024)}' /proc/meminfo
+  fi
+}
 
 BENCH_DIR=$(cd "$BENCH_DIR" && pwd)
 echo "BENCH_DIR: $BENCH_DIR"
@@ -121,9 +118,37 @@ trap 'exit 129' HUP
 HYPERFINE_ARGS=()
 read -r -a HYPERFINE_ARGS <<< "${HYPERFINE_OPTIONS:-}"
 RUN_COUNT_FLAGS='[[:space:]](-r|--runs|-m|--min-runs)[[:space:]=]'
-if [[ ! " ${HYPERFINE_ARGS[*]-} " =~ $RUN_COUNT_FLAGS ]]; then
-  HYPERFINE_ARGS+=("--min-runs=${BENCH_MIN_RUNS:-10}")
+if [[ " ${HYPERFINE_ARGS[*]-} " =~ $RUN_COUNT_FLAGS ]]; then
+  EXPLICIT_RUN_COUNT=1
+else
+  EXPLICIT_RUN_COUNT=0
 fi
+
+# Slowest baseline install so far, in seconds (the first one is a full cold
+# install, which no scenario takes longer than)
+BASELINE_DURATION=0
+
+# npm and Yarn Classic take from several minutes to half an hour to install
+# the monorepo fixture: ten runs would take longer than a CI job is allowed
+# to last, so the run count follows the duration of the baseline install.
+# Every other combination is fast enough to get BENCH_MIN_RUNS runs.
+min-runs() {
+  local max_runs=${BENCH_MIN_RUNS:-10}
+  local runs=$(( ${BENCH_TIME_BUDGET:-3600} / (BASELINE_DURATION + 1) ))
+
+  if [[ $runs -gt $max_runs ]]; then
+    runs=$max_runs
+  elif [[ $runs -lt 3 ]]; then
+    runs=3
+  fi
+
+  # An explicit BENCH_MIN_RUNS below the floor still wins
+  if [[ $runs -gt $max_runs ]]; then
+    runs=$max_runs
+  fi
+
+  echo "$runs"
+}
 
 sync-dir() {
   rsync -a --delete --exclude '/bench-*' --exclude '/flamegraphs/' "$1"/ "$2"/
@@ -162,10 +187,16 @@ bench() {
   # Every scenario starts from a successful install; benchmarking anything
   # else would only measure how fast the package manager fails
   local baseline_log="$PREPARE_DIR/baseline-$SUBTEST_NAME.log"
+  local baseline_start=$SECONDS
   if ! bash -c "$BASELINE_COMMAND" > "$baseline_log" 2>&1; then
     echo "::error::The baseline install ($BASELINE_COMMAND) failed:"
     tail -n 50 "$baseline_log"
     exit 1
+  fi
+
+  local baseline_duration=$((SECONDS - baseline_start))
+  if [[ $baseline_duration -gt $BASELINE_DURATION ]]; then
+    BASELINE_DURATION=$baseline_duration
   fi
 
   sync-dir "$BENCH_DIR" "$BASELINE_DIR"
@@ -182,7 +213,12 @@ bench() {
   fi
 
   if [[ "$TEST_MODE" == "hyperfine" ]]; then
-    hyperfine "${HYPERFINE_ARGS[@]}" --export-json="bench-$SUBTEST_NAME.json" --warmup=1 --prepare="$PREPARE_SCRIPT" "$BENCH_COMMAND"
+    local run_count_args=()
+    if [[ $EXPLICIT_RUN_COUNT -eq 0 ]]; then
+      run_count_args+=("--min-runs=$(min-runs)")
+    fi
+
+    hyperfine ${HYPERFINE_ARGS[@]+"${HYPERFINE_ARGS[@]}"} ${run_count_args[@]+"${run_count_args[@]}"} --export-json="bench-$SUBTEST_NAME.json" --warmup=1 --prepare="$PREPARE_SCRIPT" "$BENCH_COMMAND"
   fi
 }
 
@@ -196,7 +232,12 @@ mkdir dummy-pkg
 echo '{"name": "dummy-pkg", "version": "0.0.0"}' > dummy-pkg/package.json
 
 touch a
-if cp --reflink a b >& /dev/null; then
+if [[ "$(uname)" == "Darwin" ]]; then
+  REFLINK_FLAG=-c
+else
+  REFLINK_FLAG=--reflink
+fi
+if cp "$REFLINK_FLAG" a b >& /dev/null; then
   echo "Reflinks are supported"
 else
   echo "Reflink aren't supported! Installs may be quite slower than necessary"
@@ -212,6 +253,15 @@ rm -f a b
 # The `install-ready` scenario adds a local folder dependency, which every
 # package manager symlinks: `link:` for the Yarns and pnpm, `file:` for npm
 # (which doesn't support `link:` but symlinks `file:` folders).
+#
+# The monorepo fixture is a Yarn project: it depends on its workspaces through
+# the `workspace:` protocol, none of its workspaces have a version, and it
+# uses `name@range` keys in `resolutions`. Yarn 4 and Yarn 6 install it as-is;
+# bench-adapt-monorepo.js translates it for the other package managers.
+
+adapt-monorepo() {
+  node "$HERE_DIR/bench-adapt-monorepo.js" "$@"
+}
 
 setup-zpm() {
   export YARN_GLOBAL_FOLDER="${BENCH_HOME}/.yarn/berry"
@@ -262,11 +312,37 @@ setup-yarn2-pnpm() {
 setup-classic() {
   >> "$BENCH_DIR/.yarnrc" echo \
     "ignore-scripts true"
+
+  if [[ "$TEST_NAME" == "monorepo" ]]; then
+    adapt-monorepo classic
+    # Yarn Classic refuses to add dependencies to the root of a workspace
+    # project unless explicitly told to
+    CLASSIC_ADD_FLAGS="--ignore-workspace-root-check"
+  fi
 }
 
 setup-npm() {
   >> "$BENCH_DIR/.npmrc" echo \
     "ignore-scripts=true"
+
+  if [[ "$TEST_NAME" == "monorepo" ]]; then
+    # npm uses about 7GB of memory to resolve the fixture, far more than
+    # Node's default heap size and than the smaller CI runners have
+    local heap_mb=${BENCH_NPM_HEAP_MB:-8192}
+    if [[ $(total-memory-mb) -lt $((heap_mb + 2048)) ]]; then
+      skip "npm needs about ${heap_mb}MB of memory to install this fixture"
+    fi
+
+    export NODE_OPTIONS="--max-old-space-size=${heap_mb} ${NODE_OPTIONS:-}"
+
+    adapt-monorepo npm
+
+    # The root workspace depends on packages whose peer dependencies conflict
+    # with each other, which npm refuses to install. Like the Yarns, it's told
+    # to neither enforce the peer dependencies nor install them.
+    >> "$BENCH_DIR/.npmrc" echo \
+      "legacy-peer-deps=true"
+  fi
 }
 
 setup-pnpm() {
@@ -289,55 +365,7 @@ setup-pnpm() {
   fi
 
   if [[ "$TEST_NAME" == "monorepo" ]]; then
-    # pnpm refuses to install a project whose `packageManager` field names
-    # another package manager, doesn't read the `workspaces` field, doesn't
-    # support path-based `workspace:` ranges, and reads overrides from
-    # pnpm-workspace.yaml rather than from `resolutions`
-    node - "$pnpm_major" <<'EOF'
-const fs = require(`fs`);
-
-const pnpmMajor = Number(process.argv[2]);
-const manifest = JSON.parse(fs.readFileSync(`package.json`, `utf8`));
-
-delete manifest.packageManager;
-fs.writeFileSync(`package.json`, `${JSON.stringify(manifest, null, 2)}\n`);
-
-const workspaceYaml = [
-  `packages:`,
-  ...manifest.workspaces.map(pattern => `  - ${JSON.stringify(pattern)}`),
-];
-
-if (manifest.resolutions) {
-  if (pnpmMajor >= 11) {
-    workspaceYaml.push(`overrides: ${JSON.stringify(manifest.resolutions)}`);
-  } else {
-    manifest.pnpm = {...manifest.pnpm, overrides: manifest.resolutions};
-    fs.writeFileSync(`package.json`, `${JSON.stringify(manifest, null, 2)}\n`);
-  }
-}
-
-fs.appendFileSync(`pnpm-workspace.yaml`, `${workspaceYaml.join(`\n`)}\n`);
-
-const patchWorkspaceRanges = dir => {
-  for (const entry of fs.readdirSync(dir, {withFileTypes: true})) {
-    if (entry.name === `node_modules` || entry.name.startsWith(`.`))
-      continue;
-
-    const entryPath = `${dir}/${entry.name}`;
-    if (entry.isDirectory()) {
-      patchWorkspaceRanges(entryPath);
-    } else if (entry.name === `package.json`) {
-      const content = fs.readFileSync(entryPath, `utf8`);
-      const patched = content.replace(/"workspace:[^"]*\/[^"]*"/g, `"workspace:*"`);
-      if (patched !== content) {
-        fs.writeFileSync(entryPath, patched);
-      }
-    }
-  }
-};
-
-patchWorkspaceRanges(`.`);
-EOF
+    adapt-monorepo pnpm "$pnpm_major"
     PNPM_ADD_FLAGS="--workspace-root"
   fi
 }
@@ -352,6 +380,7 @@ record-version() {
 }
 
 PNPM_ADD_FLAGS=""
+CLASSIC_ADD_FLAGS=""
 
 case $PACKAGE_MANAGER in
   zpm|zpm-nm|zpm-pnpm)
@@ -394,8 +423,8 @@ case $PACKAGE_MANAGER in
       'rm -rf node_modules' \
       'yarn install'
     bench install-ready \
-      'yarn remove dummy-pkg || true' \
-      'yarn add dummy-pkg@link:./dummy-pkg'
+      "yarn remove $CLASSIC_ADD_FLAGS dummy-pkg || true" \
+      "yarn add $CLASSIC_ADD_FLAGS dummy-pkg@link:./dummy-pkg"
     ;;
   yarn|yarn-nm|yarn-pnpm)
     setup-yarn2

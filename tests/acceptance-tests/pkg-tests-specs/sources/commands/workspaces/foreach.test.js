@@ -258,10 +258,14 @@ describe(`Commands`, () => {
 
           const order = extractWorkspaces(stdout);
 
-          // A and G have the same precedence
-          expect([order[0], order[1]]).toEqual(expect.arrayContaining([`A`, `G`]));
+          expect([...order].sort()).toEqual([`A`, `B`, `C`, `D`, `E`, `F`, `G`]);
 
-          expect(order.slice(2)).toEqual([
+          // G doesn't depend on anything and nothing depends on it: it starts
+          // along with A, but C may start (and finish) before G is done. The
+          // other workspaces form a chain (C depends on A, B on A and C, D on
+          // B, E on D, F on E).
+          expect(order.filter(name => name !== `G`)).toEqual([
+            `A`,
             `C`,
             `B`,
             `D`,

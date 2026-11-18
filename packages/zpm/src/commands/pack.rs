@@ -15,6 +15,20 @@ use crate::{
 ///
 /// If `--out` is set, the archive is written to the specified path. The `%s` and `%v` placeholders are replaced by the package name and version.
 ///
+/// ## Examples
+///
+/// Create an archive from the active workspace
+///
+/// `yarn pack`
+///
+/// List the files that would be made part of the workspace's archive
+///
+/// `yarn pack --dry-run`
+///
+/// Name and output the archive in a dedicated folder
+///
+/// `yarn pack --out /artifacts/%s-%v.tgz`
+///
 #[cli::command]
 #[cli::path("pack")]
 #[cli::category("Release commands")]

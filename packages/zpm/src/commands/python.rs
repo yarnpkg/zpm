@@ -44,6 +44,16 @@ fn active_workspace_venv(project: &project::Project) -> Option<zpm_utils::Path> 
 /// This command mirrors `yarn node`, but for Python. When called from a workspace that belongs to an island using the `venv` linker, it runs the
 /// workspace's `.venv/bin/python` (installing the project first if needed), with `VIRTUAL_ENV` set and `.venv/bin` prepended to the `PATH`.
 ///
+/// ## Examples
+///
+/// Run a Python script
+///
+/// `yarn python ./main.py`
+///
+/// Run a module installed in the workspace venv
+///
+/// `yarn python -m pytest`
+///
 #[cli::command(proxy)]
 #[cli::path("python")]
 #[cli::category("Scripting commands")]

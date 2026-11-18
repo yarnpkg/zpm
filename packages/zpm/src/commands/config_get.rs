@@ -9,6 +9,24 @@ use crate::{error::Error, project::Project};
 ///
 /// Secrets such as tokens are redacted from the output by default. Use `--no-redacted` only when you need the untransformed value.
 ///
+/// ## Examples
+///
+/// Print a simple configuration setting
+///
+/// `yarn config get cacheFolder`
+///
+/// Print a complex configuration setting as JSON
+///
+/// `yarn config get packageExtensions --json`
+///
+/// Print a nested field from the configuration
+///
+/// `yarn config get 'npmScopes["my-company"].npmRegistryServer'`
+///
+/// Print a token from the configuration
+///
+/// `yarn config get npmAuthToken --no-redacted`
+///
 #[cli::command]
 #[cli::path("config", "get")]
 #[cli::category("Configuration commands")]

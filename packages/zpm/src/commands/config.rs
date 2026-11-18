@@ -8,6 +8,17 @@ use crate::{error::Error, project::Project};
 ///
 /// This command prints the configuration visible from the current project, including each setting's resolved value and source. Secrets are redacted
 /// by default; use `--no-redacted` only when you need to inspect the stored value.
+///
+/// ## Examples
+///
+/// Print the active configuration settings
+///
+/// `yarn config`
+///
+/// Print the active configuration settings as NDJSON
+///
+/// `yarn config --json`
+///
 #[cli::command]
 #[cli::path("config")]
 #[cli::path("config", "get")]

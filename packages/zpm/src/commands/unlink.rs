@@ -36,6 +36,25 @@ pub enum UnlinkTarget {
 ///
 /// Otherwise, you can specify package names (with glob support) or paths to
 /// individual packages to unlink specific resolutions.
+///
+/// ## Examples
+///
+/// Unregister a remote workspace in the current project
+///
+/// `yarn unlink ~/ts-loader`
+///
+/// Unregister all workspaces from a remote project in the current project
+///
+/// `yarn unlink ~/jest --all`
+///
+/// Unregister all previously linked workspaces
+///
+/// `yarn unlink --all`
+///
+/// Unregister all workspaces matching a glob
+///
+/// `yarn unlink '@babel/*' 'pkg-{a,b}'`
+///
 #[cli::command]
 #[cli::path("unlink")]
 #[cli::category("Dependency management")]

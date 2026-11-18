@@ -7,6 +7,12 @@ use crate::{links::list_links, errors::Error};
 ///
 /// This command shows projects that are currently linked to a local Yarn binary or migration version.
 ///
+/// ## Examples
+///
+/// List the projects linked to a local Yarn binary
+///
+/// `yarn switch links`
+///
 #[cli::command]
 #[cli::path("switch", "links")]
 #[cli::category("Local Yarn development")]

@@ -25,6 +25,24 @@ use crate::{
 ///
 /// When a template is provided, Yarn initializes the project, installs the template in a temporary context, and runs its binary from the new project.
 ///
+/// ## Examples
+///
+/// Create a new package in the local directory
+///
+/// `yarn init`
+///
+/// Create a new private package in the local directory
+///
+/// `yarn init -p`
+///
+/// Create a new package that accepts workspaces in the `packages/` directory
+///
+/// `yarn init -w`
+///
+/// Create a new package with a specific name
+///
+/// `yarn init -n my-package`
+///
 #[cli::command(proxy)]
 #[cli::path("init")]
 #[cli::category("Project management")]

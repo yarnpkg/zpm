@@ -11,6 +11,16 @@ use crate::project::Project;
 /// This command starts an idle daemon that runs indefinitely until terminated.
 /// It listens on a WebSocket server for IPC messages.
 ///
+/// ## Examples
+///
+/// Start a daemon on an automatically selected port
+///
+/// `yarn debug daemon`
+///
+/// Start a daemon on a specific port, requiring an authentication token
+///
+/// `yarn debug daemon --port 4567 --auth-token my-token`
+///
 #[cli::command]
 #[cli::path("debug", "daemon")]
 #[cli::category("Debug commands")]

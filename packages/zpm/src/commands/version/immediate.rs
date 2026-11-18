@@ -58,6 +58,24 @@ use crate::{
 /// than the recorded deferred bump will throw an error unless `--force` is set. After the immediate bump, deferred records for the bumped
 /// workspace(s) will be consumed.
 ///
+/// ## Examples
+///
+/// Immediately bump the version to the next major
+///
+/// `yarn version major`
+///
+/// Prepare the version to be bumped to the next major
+///
+/// `yarn version major --deferred`
+///
+/// Bump the version to the first release candidate of the next minor
+///
+/// `yarn version minor --prerelease`
+///
+/// Print the versions all the workspaces would be bumped to, without changing anything
+///
+/// `yarn version patch --all --dry-run`
+///
 #[cli::command]
 #[cli::path("version")]
 #[cli::category("Project management")]

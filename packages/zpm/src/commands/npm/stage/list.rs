@@ -19,6 +19,16 @@ use super::registry_auth;
 /// scoped registry settings, and matching package rules, just like `yarn npm publish --staged`.
 /// When a package name is provided, only staged versions of that package are listed.
 ///
+/// ## Examples
+///
+/// List all staged packages
+///
+/// `yarn npm stage list`
+///
+/// List staged versions of a specific package
+///
+/// `yarn npm stage list my-pkg`
+///
 #[cli::command]
 #[cli::path("npm", "stage", "list")]
 #[cli::category("Npm-related commands")]

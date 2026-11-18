@@ -24,6 +24,16 @@ use crate::{
 /// `yarn dlx` is intended for one-off commands. It doesn't record the installed packages in your project, so it shouldn't replace `yarn add` for
 /// dependencies you rely on.
 ///
+/// ## Examples
+///
+/// Use create-vite to scaffold a new Vite project
+///
+/// `yarn dlx create-vite`
+///
+/// Install multiple packages for a single command
+///
+/// `yarn dlx -p @babel/core -p @babel/cli babel --version`
+///
 #[cli::command(proxy)]
 #[cli::path("dlx")]
 #[cli::category("Scripting commands")]

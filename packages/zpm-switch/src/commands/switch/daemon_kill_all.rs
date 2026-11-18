@@ -4,6 +4,13 @@ use zpm_utils::{DataType, ToHumanString};
 use crate::{daemons, errors::Error};
 
 /// Stop all registered Yarn daemons
+///
+/// ## Examples
+///
+/// Stop all running daemons
+///
+/// `yarn switch daemon --kill-all`
+///
 #[cli::command]
 #[cli::path("switch", "daemon")]
 #[cli::category("Daemon management")]

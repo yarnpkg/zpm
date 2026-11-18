@@ -7,6 +7,12 @@ use crate::{cache, errors::Error, links::list_configs};
 ///
 /// This command prints cached Yarn releases and related Switch metadata known on the current machine.
 ///
+/// ## Examples
+///
+/// List the cached Yarn binaries
+///
+/// `yarn switch cache`
+///
 #[cli::command]
 #[cli::path("switch", "cache")]
 #[cli::category("Cache management")]

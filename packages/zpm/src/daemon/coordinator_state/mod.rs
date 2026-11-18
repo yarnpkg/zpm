@@ -153,8 +153,13 @@ impl CoordinatorState {
         if self.graph.try_complete_task(task_id) {
             self.on_task_completed(task_id, exit_code)
         } else if self.graph.has_failed_subtask(task_id) {
-            // Subtask already failed - fail the parent (no signal for propagated failure)
-            self.fail_task(task_id, 1, None)
+            // Subtask already failed - fail the parent with the subtask's exit
+            // code, as if it had failed while the parent was waiting (no signal
+            // for propagated failure). Cancelled subtasks have no exit code.
+            let exit_code
+                = self.graph.get_subtask_failure_exit_code(task_id).unwrap_or(1);
+
+            self.fail_task(task_id, exit_code, None)
         } else {
             // Task stays in WaitingForSubtasks until all subtasks complete
             TransitionEffects::default()
@@ -216,13 +221,17 @@ impl CoordinatorState {
         }
 
         // Propagate failure to parents that are waiting for subtasks
-        // (propagated failures have no signal — only the original task does)
+        // (propagated failures have no signal — only the original task does).
+        // Parents whose script is still running remember the exit code, so
+        // that they fail with it once their script exits.
         let parents = self.graph.find_parents(task_id);
         for parent in parents {
             if self.graph.get_waiting_exit_code(&parent).is_some() {
                 let parent_effects = self.fail_task(&parent, exit_code, None);
                 effects.notifications.extend(parent_effects.notifications);
                 effects.pids_to_kill.extend(parent_effects.pids_to_kill);
+            } else if !self.graph.is_script_finished(&parent) {
+                self.graph.record_subtask_failure(&parent, exit_code);
             }
         }
 
@@ -433,4 +442,97 @@ fn topological_sort(
     debug_assert_eq!(result.len(), tasks.len(), "topological_sort: cycle detected — {} tasks not processed", tasks.len() - result.len());
 
     result
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    use zpm_primitives::Ident;
+    use zpm_tasks::TaskName;
+
+    fn task(name: &str) -> ContextualTaskId {
+        ContextualTaskId::new(TaskId {
+            workspace: Ident::new("test-package"),
+            task_name: TaskName::new(name).unwrap(),
+        }, "context".to_string())
+    }
+
+    /// A state where `parent` is running and has pushed `subtask`.
+    fn state_with_subtask() -> (CoordinatorState, ContextualTaskId, ContextualTaskId) {
+        let (file_tx, _)
+            = mpsc::unbounded_channel();
+        let (taskfile_tx, _)
+            = mpsc::unbounded_channel();
+
+        let mut state
+            = CoordinatorState::new(100, 100, file_tx, taskfile_tx, std::env::temp_dir());
+
+        let parent
+            = task("parent");
+        let subtask
+            = task("subtask");
+
+        for task_id in [&parent, &subtask] {
+            state.graph.set_as_target(task_id);
+            state.contexts.increment(&task_id.context_id);
+        }
+
+        state.graph.subtasks.entry(parent.clone()).or_default().insert(subtask.clone());
+        state.graph.parents.entry(subtask.clone()).or_default().insert(parent.clone());
+
+        (state, parent, subtask)
+    }
+
+    fn completed_exit_code(effects: &TransitionEffects, task_id: &ContextualTaskId) -> Option<i32> {
+        effects.notifications.iter().find_map(|notification| match notification {
+            DaemonNotification::TaskCompleted { task_id: id, exit_code, .. } if id == task_id
+                => Some(*exit_code),
+
+            _
+                => None,
+        })
+    }
+
+    #[test]
+    fn parent_fails_with_subtask_exit_code_when_subtask_fails_after_parent_script() {
+        let (mut state, parent, subtask)
+            = state_with_subtask();
+
+        let effects
+            = state.task_script_finished(&parent, 0, None);
+        assert_eq!(completed_exit_code(&effects, &parent), None);
+
+        let effects
+            = state.task_script_finished(&subtask, 55, None);
+        assert_eq!(completed_exit_code(&effects, &subtask), Some(55));
+        assert_eq!(completed_exit_code(&effects, &parent), Some(55));
+    }
+
+    #[test]
+    fn parent_fails_with_subtask_exit_code_when_subtask_fails_before_parent_script() {
+        let (mut state, parent, subtask)
+            = state_with_subtask();
+
+        let effects
+            = state.task_script_finished(&subtask, 55, None);
+        assert_eq!(completed_exit_code(&effects, &subtask), Some(55));
+        assert_eq!(completed_exit_code(&effects, &parent), None);
+
+        let effects
+            = state.task_script_finished(&parent, 0, None);
+        assert_eq!(completed_exit_code(&effects, &parent), Some(55));
+    }
+
+    #[test]
+    fn parent_keeps_its_own_exit_code_when_its_script_fails_after_a_subtask_failure() {
+        let (mut state, parent, subtask)
+            = state_with_subtask();
+
+        state.task_script_finished(&subtask, 55, None);
+
+        let effects
+            = state.task_script_finished(&parent, 66, None);
+        assert_eq!(completed_exit_code(&effects, &parent), Some(66));
+    }
 }

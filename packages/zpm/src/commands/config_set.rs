@@ -25,6 +25,24 @@ use crate::{
 /// largest one that represents them exactly (`3h`, `90m`, `1d`, `0s`). The entries of settings accepting arbitrary keys (such as `npmScopes` or
 /// `npmRegistries`) are created when they don't exist yet.
 ///
+/// ## Examples
+///
+/// Set a simple configuration setting (a string, a number, or a boolean)
+///
+/// `yarn config set initScope myScope`
+///
+/// Set a complex configuration setting (an Array) using the `--json` flag
+///
+/// `yarn config set unsafeHttpWhitelist --json '["*.example.com", "example.com"]'`
+///
+/// Set a complex configuration setting (an Object) using the `--json` flag
+///
+/// `yarn config set npmScopes --json '{"my-company": {"npmRegistryServer": "https://npm.example.com"}}'`
+///
+/// Set a configuration setting in the home configuration file
+///
+/// `yarn config set -H initScope myScope`
+///
 #[cli::command]
 #[cli::path("config", "set")]
 #[cli::category("Configuration commands")]

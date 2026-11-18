@@ -28,6 +28,24 @@ use crate::{
 ///
 /// This command accepts glob patterns as arguments. Make sure to escape the patterns, to prevent your own shell from trying to expand them.
 ///
+/// ## Examples
+///
+/// Remove a dependency from the current project
+///
+/// `yarn remove lodash`
+///
+/// Remove a dependency from all workspaces at once
+///
+/// `yarn remove lodash --all`
+///
+/// Remove all dependencies starting with `eslint-`
+///
+/// `yarn remove 'eslint-*'`
+///
+/// Remove all dependencies with the `@babel` scope
+///
+/// `yarn remove '@babel/*'`
+///
 #[cli::command]
 #[cli::path("remove")]
 #[cli::category("Dependency management")]

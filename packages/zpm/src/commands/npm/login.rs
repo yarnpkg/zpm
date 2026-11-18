@@ -29,6 +29,20 @@ const WEB_LOGIN_REGISTRIES: &[&str] = &[
 ///
 /// Use `--publish` to authenticate against the registry used for publishing.
 ///
+/// ## Examples
+///
+/// Login to the default registry
+///
+/// `yarn npm login`
+///
+/// Login to the registry linked to the @my-scope registry
+///
+/// `yarn npm login --scope my-scope`
+///
+/// Login to the publish registry for the current package
+///
+/// `yarn npm login --publish`
+///
 #[cli::command]
 #[cli::path("npm", "login")]
 #[cli::category("Npm-related commands")]

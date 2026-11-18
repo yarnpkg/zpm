@@ -14,6 +14,18 @@ function cleanupDaemon(cb: RunFunction): RunFunction {
   };
 }
 
+/**
+ * Poll until the predicate holds or the deadline expires. It doesn't throw on
+ * timeout: the assertions that follow report what went wrong.
+ */
+async function waitUntil(predicate: () => Promise<boolean>, timeout = 10000) {
+  const deadline = Date.now() + timeout;
+
+  while (!await predicate() && Date.now() < deadline) {
+    await new Promise(resolve => setTimeout(resolve, 100));
+  }
+}
+
 const getYarnBinBinaryPath = () =>
   process.env.TEST_BINARY
     ?? require.resolve(`${__dirname}/../../../../../../target/release/yarn-bin${process.platform === `win32` ? `.exe` : ``}`);
@@ -1043,12 +1055,20 @@ describe(`Commands`, () => {
           const {stdout: stopOutput} = await runSwitch(`tasks`, `stop`, `server`);
           expect(stopOutput).toContain(`stopped successfully`);
 
-          // Wait for process to actually die and TaskCompleted to be processed
-          await new Promise(resolve => setTimeout(resolve, 1000));
+          // `tasks stop` only signals the process; wait for it to actually die
+          // and for its TaskCompleted to be processed
+          const getHistoryEvents = async () => {
+            const {stdout: historyStdout} = await runSwitch(`tasks`, `history`, `--json`);
+            return historyStdout.trim().split(`\n`).filter(Boolean).map((line: string) => JSON.parse(line));
+          };
+
+          let historyEvents: Array<any> = [];
+          await waitUntil(async () => {
+            historyEvents = await getHistoryEvents();
+            return historyEvents.some((event: any) => event.state.type === `failed`);
+          });
 
           // Verify via task history that the server went through the full lifecycle
-          const {stdout: historyStdout} = await runSwitch(`tasks`, `history`, `--json`);
-          const historyEvents = historyStdout.trim().split(`\n`).filter(Boolean).map((line: string) => JSON.parse(line));
           expect(historyEvents).toMatchObject([
             expect.objectContaining({contextualTaskId: expect.stringContaining(`server`), state: {type: `scheduled`}}),
             expect.objectContaining({contextualTaskId: expect.stringContaining(`server`), state: expect.objectContaining({type: `warm-up`})}),
@@ -1061,13 +1081,17 @@ describe(`Commands`, () => {
           // stale graph entries under LONG_LIVED_CONTEXT_ID), this second
           // run will either fail silently or not actually start a new process.
           const run2 = runSwitch(`tasks`, `run`, `server`).catch(() => {});
-          await new Promise(resolve => setTimeout(resolve, 1000));
 
           // Verify server was started a second time (count == 2).
           // If stop_long_lived left the task in a terminal state in the graph
           // under LONG_LIVED_CONTEXT_ID, add_task cannot re-add it and the
           // second invocation silently fails — counter stays at 1.
-          const startCount = await xfs.readFilePromise(counterFile, `utf8`);
+          let startCount = ``;
+          await waitUntil(async () => {
+            startCount = await xfs.readFilePromise(counterFile, `utf8`);
+            return startCount.trim() === `2`;
+          });
+
           expect(startCount.trim()).toEqual(`2`);
 
           // Clean up

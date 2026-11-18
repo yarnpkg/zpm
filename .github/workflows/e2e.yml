@@ -173,7 +173,12 @@ jobs:
     name: Report e2e failures
     runs-on: ubuntu-latest
     needs: [run-e2e]
-    if: always() && github.ref == 'refs/heads/main'
+
+    # Issues are only filed for main but other refs still run the job, in a mode
+    # that only prints what would be reported, so that a change breaking it
+    # is caught by its pull request rather than after it landed.
+    if: always()
+
     permissions:
       contents: read
       issues: write
@@ -182,10 +187,11 @@ jobs:
       - name: Checkout the repo
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
 
-      - name: Setup Node.js
-        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
-        with:
-          node-version: 22
+      # The repository pins Yarn 6 through `packageManager`; the Yarn 1 that
+      # comes with the runner refuses to run in it. Yarn 6 also provides the
+      # Node.js version the script runs on, and installs its dependencies.
+      - name: Setup Yarn
+        uses: yarnpkg/setup-action@main
 
       - name: Download e2e result artifacts
         continue-on-error: true
@@ -198,6 +204,7 @@ jobs:
       - name: Create or update GitHub issues for failing tests
         env:
           E2E_ARTIFACTS_DIR: e2e-artifacts
+          E2E_REPORT_DRY_RUN: ${{ github.ref != 'refs/heads/main' }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         shell: bash
         run: |

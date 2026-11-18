@@ -23,12 +23,12 @@ pub struct Platform {
 impl Platform {
     pub fn current() -> Option<Platform> {
         let system
-            = System::from_current();
+            = System::current();
 
         let platform = Platform {
-            os: system.os?,
-            cpu: system.arch?,
-            libc: system.libc,
+            os: system.os.clone()?,
+            cpu: system.arch.clone()?,
+            libc: system.libc.clone(),
         };
 
         Some(platform.normalized())
