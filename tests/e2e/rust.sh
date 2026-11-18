@@ -17,6 +17,11 @@ unstableIslands:
     linker: "cargo"
 YAML
 
+cat > rust-toolchain.toml <<'TOML'
+[toolchain]
+channel = "1.93.0"
+TOML
+
 cat > Cargo.toml <<'TOML'
 [workspace]
 resolver = "2"
@@ -109,16 +114,9 @@ function locked_versions() {
 
 diff <(locked_versions "${TEMP_DIR}/Cargo.lock.before") <(locked_versions Cargo.lock)
 
-# Building doesn't need anything from the machine either: Yarn provides
+# Building doesn't need anything from the machine either: Yarn provided
 # the toolchain the project asks for. Cargo must accept what Yarn generated
 # as-is (--locked), and never reach for the network (--offline).
-cat > rust-toolchain.toml <<'TOML'
-[toolchain]
-channel = "1.93.0"
-TOML
-
-yarn install
-
 CARGO_HOME="${TEMP_DIR}/cargo-home" yarn cargo run --offline --locked --quiet -p hello > "${TEMP_DIR}/output.txt"
 grep -F '{"message":"Hello world from crates installed by Yarn!"}' "${TEMP_DIR}/output.txt"
 

@@ -1,9 +1,81 @@
-import {Filename, PortablePath, ppath, xfs} from '@yarnpkg/fslib';
-import {yarn}                               from 'pkg-tests-core';
+import {Filename, PortablePath, npath, ppath, xfs} from '@yarnpkg/fslib';
+import {execFileSync}                              from 'child_process';
+import {exec, tests, yarn}                         from 'pkg-tests-core';
 
-// These tests stick to crates living in the project, which don't need a
-// registry; resolving and fetching published crates is covered by the
-// `rust` e2e test.
+const {CARGO_AUTH_TOKEN} = tests;
+
+// Crates come from the registries the fixture server mocks (see
+// CARGO_FIXTURES); building them with an actual toolchain is covered by
+// the `rust` e2e test.
+
+// When the machine has Cargo, it's asked to confirm that what Yarn
+// generated is complete and exactly what it would have resolved itself:
+// `--locked` fails if the lockfile needs any change, `--offline` if
+// anything is missing from the vendored crates.
+const HAS_CARGO = (() => {
+  try {
+    execFileSync(`cargo`, [`--version`], {stdio: `ignore`});
+    return true;
+  } catch {
+    return false;
+  }
+})();
+
+async function expectCargoToAgree(path: PortablePath) {
+  if (!HAS_CARGO)
+    return;
+
+  await exec.execFile(`cargo`, [`metadata`, `--offline`, `--locked`, `--format-version`, `1`], {
+    cwd: path,
+    env: {...process.env, CARGO_HOME: npath.fromPortablePath(ppath.join(path, `.cargo-home`))},
+  });
+}
+
+async function readCargoLock(path: PortablePath) {
+  const content = await xfs.readFilePromise(ppath.join(path, `Cargo.lock`), `utf8`);
+
+  const packages = content.split(`\n\n`).slice(1).map(block => {
+    const field = (name: string) => block.match(new RegExp(`^${name} = "(.*)"$`, `m`))?.[1];
+
+    return {
+      kind: block.split(`\n`)[0],
+      name: field(`name`),
+      version: field(`version`),
+      source: field(`source`),
+      checksum: field(`checksum`),
+    };
+  });
+
+  return {
+    content,
+    packages,
+    versions: packages.filter(pkg => pkg.kind === `[[package]]`).map(pkg => `${pkg.name}@${pkg.version}`),
+  };
+}
+
+function crate(name: string, body: string = ``) {
+  return `[package]\nname = "${name}"\nversion = "0.1.0"\nedition = "2021"\n${body}`;
+}
+
+async function setupRegistryProject(path: PortablePath, manifest: string, config: Record<string, any> = {}) {
+  const registryUrl = await tests.startPackageServer();
+
+  await yarn.writeConfiguration(path, {
+    cargoRegistryServer: `${registryUrl}/repositories/cargo/public/`,
+    rustDownloads: false,
+    unstableIslands: {
+      rust: {workspaces: [`root`], linker: `cargo`},
+    },
+    ...config,
+  });
+
+  await writeFiles(path, {
+    [`Cargo.toml`]: manifest,
+    [`src/lib.rs`]: ``,
+  });
+
+  return registryUrl;
+}
 
 async function writeFiles(path: PortablePath, files: Record<string, string>) {
   for (const [rel, content] of Object.entries(files)) {
@@ -16,6 +88,7 @@ async function writeFiles(path: PortablePath, files: Record<string, string>) {
 
 async function setupCargoProject(path: PortablePath, files: Record<string, string> = {}) {
   await yarn.writeConfiguration(path, {
+    rustDownloads: false,
     unstableIslands: {
       rust: {workspaces: [`root`], linker: `cargo`},
     },
@@ -175,14 +248,476 @@ describe(`Features`, () => {
       await expect(run(`install`)).rejects.toThrow(/doesn't have a Cargo\.toml/);
     }));
 
-    test(`it should refuse the manifests it can't honor rather than install something else`, makeTemporaryEnv({
-      name: `root`,
-    }, async ({path, run}) => {
-      await setupCargoProject(path);
-      await xfs.appendFilePromise(ppath.join(path, `Cargo.toml`), `\n[patch.crates-io]\nlib = { path = "crates/lib" }\n`);
+    describe(`Registry`, () => {
+      test(`it should resolve, fetch, and vendor the crates of a registry`, makeTemporaryEnv({
+        name: `root`,
+      }, async ({path, run}) => {
+        await setupRegistryProject(path, crate(`app`, `\n[dependencies]\ncrate-one-dep = "1"\n`));
+        await run(`install`);
 
-      await expect(run(`install`)).rejects.toThrow(/\[patch\] table, which the cargo linker doesn't support yet/);
-    }));
+        const lock = await readCargoLock(path);
+
+        // The dependency of the dependency gets the highest version its
+        // requirement accepts
+        expect(lock.versions).toEqual([`app@0.1.0`, `crate-no-deps@1.1.0`, `crate-one-dep@1.0.0`]);
+
+        for (const pkg of lock.packages.slice(1)) {
+          expect(pkg.source).toEqual(`registry+https://github.com/rust-lang/crates.io-index`);
+          expect(pkg.checksum).toMatch(/^[0-9a-f]{64}$/);
+        }
+
+        const vendored = ppath.join(path, `.cargo/vendor/crate-no-deps-1.1.0`);
+
+        await expect(xfs.readFilePromise(ppath.join(vendored, `src/lib.rs`), `utf8`)).resolves.toContain(`"1.1.0"`);
+        await expect(xfs.readJsonPromise(ppath.join(vendored, `.cargo-checksum.json`))).resolves.toEqual({files: {}, package: lock.packages[1]!.checksum});
+
+        await expectCargoToAgree(path);
+      }));
+
+      test(`it should let incompatible versions of a crate coexist, and unify the others`, makeTemporaryEnv({
+        name: `root`,
+      }, async ({path, run}) => {
+        await setupRegistryProject(path, crate(`app`, `\n[dependencies]\ncrate-no-deps = "1.0"\ncrate-one-dep = "1"\ncrate-next-major = "1"\n`));
+        await run(`install`);
+
+        const lock = await readCargoLock(path);
+
+        expect(lock.versions).toEqual([`app@0.1.0`, `crate-next-major@1.0.0`, `crate-no-deps@1.1.0`, `crate-no-deps@2.0.0`, `crate-one-dep@1.0.0`]);
+
+        // Dependencies are only qualified when their name is ambiguous
+        expect(lock.content).toContain(`name = "app"\nversion = "0.1.0"\ndependencies = [\n "crate-next-major",\n "crate-no-deps 1.1.0",\n "crate-one-dep",\n]`);
+
+        await expectCargoToAgree(path);
+      }));
+
+      test(`it should only install optional dependencies when a feature enables them`, makeTemporaryEnv({
+        name: `root`,
+      }, async ({path, run}) => {
+        await setupRegistryProject(path, crate(`app`, `\n[dependencies]\ncrate-features = "1"\n`));
+        await run(`install`);
+
+        await expect(readCargoLock(path)).resolves.toMatchObject({versions: [`app@0.1.0`, `crate-features@1.0.0`]});
+
+        await xfs.writeFilePromise(ppath.join(path, `Cargo.toml`), crate(`app`, `\n[dependencies]\ncrate-features = { version = "1", features = ["extra"] }\n`));
+        await run(`install`);
+
+        await expect(readCargoLock(path)).resolves.toMatchObject({versions: [`app@0.1.0`, `crate-features@1.0.0`, `crate-no-deps@1.1.0`]});
+
+        await expectCargoToAgree(path);
+      }));
+
+      test(`it should never select yanked versions`, makeTemporaryEnv({
+        name: `root`,
+      }, async ({path, run}) => {
+        await setupRegistryProject(path, crate(`app`, `\n[dependencies]\ncrate-yanked = "1"\n`));
+        await run(`install`);
+
+        await expect(readCargoLock(path)).resolves.toMatchObject({versions: [`app@0.1.0`, `crate-yanked@1.0.0`]});
+      }));
+
+      test(`it should prefer the versions supporting the project's Rust version when the resolver asks for it`, makeTemporaryEnv({
+        name: `root`,
+      }, async ({path, run}) => {
+        const dependencies = `\n[dependencies]\ncrate-rust-version = "1"\n`;
+
+        await setupRegistryProject(path, crate(`app`, dependencies));
+        await run(`install`);
+
+        await expect(readCargoLock(path)).resolves.toMatchObject({versions: [`app@0.1.0`, `crate-rust-version@1.1.0`]});
+
+        await xfs.removePromise(ppath.join(path, `Cargo.lock`));
+        await xfs.removePromise(ppath.join(path, Filename.lockfile));
+
+        await xfs.writeFilePromise(ppath.join(path, `Cargo.toml`), crate(`app`, `resolver = "3"\nrust-version = "1.70"\n${dependencies}`));
+        await run(`install`);
+
+        const lock = await readCargoLock(path);
+        expect(lock.versions).toEqual([`app@0.1.0`, `crate-rust-version@1.0.0`]);
+
+        // Like Cargo, in the newest format that Rust version can read
+        expect(lock.content).toContain(`\nversion = 3\n`);
+      }));
+
+      test(`it should prefer the versions of an existing Cargo.lock`, makeTemporaryEnv({
+        name: `root`,
+      }, async ({path, run}) => {
+        await setupRegistryProject(path, crate(`app`, `\n[dependencies]\ncrate-no-deps = "1"\n`));
+        await run(`install`);
+
+        const upToDate = await readCargoLock(path);
+        expect(upToDate.versions).toEqual([`app@0.1.0`, `crate-no-deps@1.1.0`]);
+
+        // What a project adopting Yarn would start from
+        await xfs.removePromise(ppath.join(path, Filename.lockfile));
+        await xfs.removePromise(ppath.join(path, `.cargo`));
+
+        await xfs.writeFilePromise(ppath.join(path, `Cargo.lock`), upToDate.content.replace(`1.1.0`, `1.0.0`));
+        await run(`install`);
+
+        await expect(readCargoLock(path)).resolves.toMatchObject({versions: [`app@0.1.0`, `crate-no-deps@1.0.0`]});
+
+        // ... until asked to move
+        await run(`up`, `-R`, `crate-no-deps`);
+
+        await expect(readCargoLock(path)).resolves.toMatchObject({versions: [`app@0.1.0`, `crate-no-deps@1.1.0`]});
+      }));
+
+      test(`it should reject the crates whose checksum doesn't match the index`, makeTemporaryEnv({
+        name: `root`,
+      }, async ({path, run}) => {
+        await setupRegistryProject(path, crate(`app`, `\n[dependencies]\ncrate-bad-checksum = "1"\n`));
+
+        await expect(run(`install`)).rejects.toThrow(/Checksum mismatch/);
+      }));
+
+      test(`it should rebuild the vendored crates from the cache, without querying the registry`, makeTemporaryEnv({
+        name: `root`,
+      }, async ({path, run}) => {
+        await setupRegistryProject(path, crate(`app`, `\n[dependencies]\ncrate-one-dep = "1"\n`));
+        await run(`install`);
+
+        await xfs.removePromise(ppath.join(path, `.cargo/vendor`));
+
+        tests.cargoRequests.length = 0;
+        await run(`install`);
+
+        expect(tests.cargoRequests).toEqual([]);
+        expect(xfs.existsSync(ppath.join(path, `.cargo/vendor/crate-one-dep-1.0.0/Cargo.toml`))).toEqual(true);
+      }));
+    });
+
+    describe(`Other registries`, () => {
+      const manifest = crate(`app`, `\n[dependencies]\ncrate-private = { version = "1", registry = "private" }\ncrate-no-deps = "1"\n`);
+
+      test(`it should resolve the dependencies naming another registry from it`, makeTemporaryEnv({
+        name: `root`,
+      }, async ({path, run}) => {
+        const registryUrl = await tests.startPackageServer();
+        const privateIndex = `${registryUrl}/repositories/cargo/private/`;
+
+        await setupRegistryProject(path, manifest, {
+          cargoRegistries: {
+            private: {cargoRegistryServer: `sparse+${privateIndex}`, cargoAuthToken: `\${TEST_CARGO_TOKEN}`},
+          },
+        });
+
+        await run(`install`, {env: {TEST_CARGO_TOKEN: CARGO_AUTH_TOKEN}});
+
+        const lock = await readCargoLock(path);
+        expect(lock.versions).toEqual([`app@0.1.0`, `crate-internal@1.0.0`, `crate-no-deps@1.1.0`, `crate-private@1.0.0`]);
+
+        // The dependencies of a crate come from its own registry, unless
+        // they name another one
+        const sources = Object.fromEntries(lock.packages.map(pkg => [pkg.name, pkg.source]));
+
+        expect(sources).toEqual({
+          [`app`]: undefined,
+          [`crate-internal`]: `sparse+${privateIndex}`,
+          [`crate-no-deps`]: `registry+https://github.com/rust-lang/crates.io-index`,
+          [`crate-private`]: `sparse+${privateIndex}`,
+        });
+
+        // Cargo has to know the registry to read the manifest, and to be
+        // told its crates are vendored too
+        const config = await xfs.readFilePromise(ppath.join(path, `.cargo/config.toml`), `utf8`);
+
+        expect(config).toContain(`[registries.private]\nindex = "sparse+${privateIndex}"`);
+        expect(config).toContain(`[source."sparse+${privateIndex}"]\nregistry = "sparse+${privateIndex}"\nreplace-with = "yarn-vendor"`);
+
+        const lockfile = JSON.parse(await xfs.readFilePromise(ppath.join(path, Filename.lockfile), `utf8`));
+        expect(Object.keys(lockfile.islands.rust)).toContain(`crate-private@cargo:1#${privateIndex}`);
+
+        await expectCargoToAgree(path);
+      }));
+
+      test(`it should read the registries from the Cargo configuration`, makeTemporaryEnv({
+        name: `root`,
+      }, async ({path, run}) => {
+        const registryUrl = await tests.startPackageServer();
+        const privateIndex = `${registryUrl}/repositories/cargo/private/`;
+
+        // Only the token is Yarn's to hold
+        await setupRegistryProject(path, manifest, {
+          cargoRegistries: {
+            private: {cargoAuthToken: CARGO_AUTH_TOKEN},
+          },
+        });
+
+        const userConfig = `[registries.private]\nindex = "sparse+${privateIndex}"\n`;
+        await writeFiles(path, {[`.cargo/config.toml`]: userConfig});
+
+        await run(`install`);
+
+        await expect(readCargoLock(path)).resolves.toMatchObject({
+          versions: [`app@0.1.0`, `crate-internal@1.0.0`, `crate-no-deps@1.1.0`, `crate-private@1.0.0`],
+        });
+
+        // The registry isn't declared a second time
+        const config = await xfs.readFilePromise(ppath.join(path, `.cargo/config.toml`), `utf8`);
+        expect(config.match(/\[registries\.private\]/g)).toHaveLength(1);
+
+        await expectCargoToAgree(path);
+      }));
+
+      test(`it should report the registries refusing the request`, makeTemporaryEnv({
+        name: `root`,
+      }, async ({path, run}) => {
+        const registryUrl = await tests.startPackageServer();
+
+        await setupRegistryProject(path, manifest, {
+          cargoRegistries: {
+            private: {cargoRegistryServer: `${registryUrl}/repositories/cargo/private/`},
+          },
+        });
+
+        await expect(run(`install`)).rejects.toThrow(/refused the request \(401[^)]*\); check the token set for this registry/);
+      }));
+
+      test(`it should report the registries that aren't defined`, makeTemporaryEnv({
+        name: `root`,
+      }, async ({path, run}) => {
+        await setupRegistryProject(path, manifest);
+
+        await expect(run(`install`)).rejects.toThrow(/comes from the `private` registry, which isn't defined/);
+      }));
+    });
+
+    describe(`Patches`, () => {
+      test(`it should prefer the patches satisfying the requirements, and list the others as unused`, makeTemporaryEnv({
+        name: `root`,
+      }, async ({path, run}) => {
+        await setupRegistryProject(path, crate(`app`, [
+          ``,
+          `[dependencies]`,
+          `crate-one-dep = "1"`,
+          ``,
+          `[patch.crates-io]`,
+          `crate-no-deps = { path = "forks/no-deps" }`,
+          `crate-yanked = { path = "forks/yanked" }`,
+          ``,
+        ].join(`\n`)));
+
+        await writeFiles(path, {
+          [`forks/no-deps/Cargo.toml`]: `[package]\nname = "crate-no-deps"\nversion = "1.0.5"\nedition = "2021"\n`,
+          [`forks/no-deps/src/lib.rs`]: ``,
+          [`forks/yanked/Cargo.toml`]: `[package]\nname = "crate-yanked"\nversion = "1.0.0"\nedition = "2021"\n`,
+          [`forks/yanked/src/lib.rs`]: ``,
+        });
+
+        await run(`install`);
+
+        const lock = await readCargoLock(path);
+
+        // The fork is older than the latest release, but it's a patch
+        expect(lock.packages).toEqual([
+          {kind: `[[package]]`, name: `app`, version: `0.1.0`},
+          {kind: `[[package]]`, name: `crate-no-deps`, version: `1.0.5`},
+          {kind: `[[package]]`, name: `crate-one-dep`, version: `1.0.0`, source: expect.any(String), checksum: expect.any(String)},
+          {kind: `[[patch.unused]]`, name: `crate-yanked`, version: `1.0.0`},
+        ]);
+
+        expect(xfs.existsSync(ppath.join(path, `.cargo/vendor/crate-no-deps-1.0.5`))).toEqual(false);
+
+        await expectCargoToAgree(path);
+      }));
+
+      test(`it should build the crates of a [replace] table from their replacement`, makeTemporaryEnv({
+        name: `root`,
+      }, async ({path, run}) => {
+        await setupRegistryProject(path, crate(`app`, [
+          ``,
+          `[dependencies]`,
+          `crate-one-dep = "1"`,
+          ``,
+          `[replace]`,
+          `"crate-one-dep:1.0.0" = { path = "forks/one-dep" }`,
+          ``,
+        ].join(`\n`)));
+
+        // The replacement doesn't have the dependency the original has
+        await writeFiles(path, {
+          [`forks/one-dep/Cargo.toml`]: `[package]\nname = "crate-one-dep"\nversion = "1.0.0"\nedition = "2021"\n\n[dependencies]\ncrate-yanked = "1"\n`,
+          [`forks/one-dep/src/lib.rs`]: ``,
+        });
+
+        await run(`install`);
+
+        const lock = await readCargoLock(path);
+
+        expect(lock.versions).toEqual([`app@0.1.0`, `crate-one-dep@1.0.0`, `crate-one-dep@1.0.0`, `crate-yanked@1.0.0`]);
+        expect(lock.content).toContain(`replace = "crate-one-dep 1.0.0"`);
+
+        await expectCargoToAgree(path);
+      }));
+    });
+
+    describe(`Git dependencies`, () => {
+      const git = async (cwd: PortablePath, ...args: Array<string>) => {
+        await exec.execFile(`git`, [`-c`, `protocol.file.allow=always`, `-c`, `user.name=Test`, `-c`, `user.email=test@example.org`, `-c`, `commit.gpgsign=false`, ...args], {cwd});
+      };
+
+      const makeRepository = async (path: PortablePath, files: Record<string, string>) => {
+        await writeFiles(path, files);
+
+        await git(path, `init`, `--quiet`, `--initial-branch=main`);
+        await git(path, `add`, `.`);
+        await git(path, `commit`, `--quiet`, `-m`, `Initial commit`);
+      };
+
+      test(`it should vendor the crates of a repository, along with its submodules`, makeTemporaryEnv({
+        name: `root`,
+      }, async ({path, run}) => {
+        const repositories = await xfs.mktempPromise();
+
+        const data = ppath.join(repositories, `data`);
+        const upstream = ppath.join(repositories, `upstream`);
+
+        await makeRepository(data, {[`value.txt`]: `from the submodule\n`});
+
+        await makeRepository(upstream, {
+          [`Cargo.toml`]: `[workspace]\nmembers = ["crates/*"]\n\n[workspace.package]\nversion = "0.3.0"\n\n[workspace.dependencies]\ncrate-no-deps = "1"\n`,
+          [`crates/upstream/Cargo.toml`]: `[package]\nname = "upstream"\nversion.workspace = true\nedition = "2021"\n\n[dependencies]\ncrate-no-deps.workspace = true\nsibling = { path = "../sibling" }\n`,
+          [`crates/upstream/src/lib.rs`]: ``,
+          [`crates/sibling/Cargo.toml`]: `[package]\nname = "sibling"\nversion.workspace = true\nedition = "2021"\n`,
+          [`crates/sibling/src/lib.rs`]: ``,
+        });
+
+        await git(upstream, `submodule`, `--quiet`, `add`, npath.fromPortablePath(data), `crates/upstream/data`);
+        await git(upstream, `commit`, `--quiet`, `-m`, `Add the submodule`);
+
+        const upstreamUrl = `file://${npath.fromPortablePath(upstream)}`;
+
+        await setupRegistryProject(path, crate(`app`, `\n[dependencies]\nupstream = { git = "${upstreamUrl}" }\n`), {
+          approvedGitRepositories: [`**`],
+        });
+
+        await run(`install`, {
+          env: {GIT_CONFIG_COUNT: `1`, GIT_CONFIG_KEY_0: `protocol.file.allow`, GIT_CONFIG_VALUE_0: `always`},
+        });
+
+        const lock = await readCargoLock(path);
+
+        // Path dependencies of a git crate are crates of the same repository
+        expect(lock.versions).toEqual([`app@0.1.0`, `crate-no-deps@1.1.0`, `sibling@0.3.0`, `upstream@0.3.0`]);
+        expect(lock.packages[3]!.source).toMatch(new RegExp(`^git\\+${upstreamUrl.replace(/[/.]/g, `\\$&`)}#[0-9a-f]{40}$`));
+
+        const vendored = ppath.join(path, `.cargo/vendor/upstream-0.3.0`);
+
+        await expect(xfs.readFilePromise(ppath.join(vendored, `data/value.txt`), `utf8`)).resolves.toEqual(`from the submodule\n`);
+
+        // What was inherited from the workspace is written in the manifest
+        const manifest = await xfs.readFilePromise(ppath.join(vendored, `Cargo.toml`), `utf8`);
+
+        expect(manifest).toContain(`version = "0.3.0"`);
+        expect(manifest).not.toContain(`workspace`);
+
+        await expectCargoToAgree(path);
+      }));
+    });
+
+    describe(`Commands`, () => {
+      const setupWorkspace = async (path: PortablePath) => {
+        await setupRegistryProject(path, `[workspace]\nmembers = ["crates/*"]\n\n[workspace.dependencies]\ncrate-yanked = "1"\n`);
+
+        await writeFiles(path, {
+          [`crates/app/Cargo.toml`]: crate(`app`, `\n[dependencies]\ncrate-one-dep = "1"  # kept\ncrate-yanked = { workspace = true }\n`),
+          [`crates/app/src/lib.rs`]: ``,
+        });
+
+        return ppath.join(path, `crates/app`);
+      };
+
+      const readManifest = (path: PortablePath) => xfs.readFilePromise(ppath.join(path, `Cargo.toml`), `utf8`);
+
+      test(`it should add crates to the Cargo.toml of the current crate`, makeTemporaryEnv({
+        name: `root`,
+      }, async ({path, run}) => {
+        const cwd = await setupWorkspace(path);
+
+        // The latest release, written the way Cargo users write them
+        await run(`add`, `cargo:crate-no-deps`, {cwd});
+        await expect(readManifest(cwd)).resolves.toContain(`[dependencies]\ncrate-no-deps = "2.0.0"\ncrate-one-dep = "1"  # kept\n`);
+
+        await expect(readCargoLock(path)).resolves.toMatchObject({
+          versions: [`app@0.1.0`, `crate-no-deps@1.1.0`, `crate-no-deps@2.0.0`, `crate-one-dep@1.0.0`, `crate-yanked@1.0.0`],
+        });
+
+        await run(`add`, `-D`, `features@cargo:crate-features@1`, {cwd});
+        await expect(readManifest(cwd)).resolves.toContain(`[dev-dependencies]\nfeatures = { package = "crate-features", version = "1" }\n`);
+
+        await run(`add`, `-E`, `cargo:crate-next-major`, {cwd});
+        await expect(readManifest(cwd)).resolves.toContain(`crate-next-major = "=1.0.0"\n`);
+
+        // The package.json is for the dependencies of other ecosystems
+        await expect(xfs.readJsonPromise(ppath.join(path, Filename.manifest))).resolves.toEqual({name: `root`});
+
+        await expectCargoToAgree(path);
+      }));
+
+      test(`it should ask for a crate when run from the root of a Cargo workspace`, makeTemporaryEnv({
+        name: `root`,
+      }, async ({path, run}) => {
+        await setupWorkspace(path);
+
+        await expect(run(`add`, `cargo:crate-no-deps`)).rejects.toThrow(/is the root of a Cargo workspace rather than a crate/);
+      }));
+
+      test(`it should upgrade the crates wherever they're declared`, makeTemporaryEnv({
+        name: `root`,
+        dependencies: {[`no-deps`]: `1.0.0`},
+      }, async ({path, run}) => {
+        const cwd = await setupWorkspace(path);
+
+        await xfs.writeFilePromise(ppath.join(cwd, `Cargo.toml`), crate(`app`, `\n[dependencies]\ncrate-no-deps = { version = "1.0.0", default-features = false }\ncrate-yanked = { workspace = true }\n`));
+        await run(`install`);
+
+        await run(`up`, `crate-*`);
+
+        // Requirements are bumped in place, in the crate and in what
+        // the workspace has its members inherit
+        await expect(readManifest(cwd)).resolves.toContain(`crate-no-deps = { version = "2.0.0", default-features = false }\ncrate-yanked = { workspace = true }\n`);
+        await expect(readManifest(path)).resolves.toContain(`[workspace.dependencies]\ncrate-yanked = "1.0.0"\n`);
+
+        await expect(readCargoLock(path)).resolves.toMatchObject({
+          versions: [`app@0.1.0`, `crate-no-deps@2.0.0`, `crate-yanked@1.0.0`],
+        });
+
+        // Dependencies from the npm registry aren't mixed up with crates
+        await expect(xfs.readJsonPromise(ppath.join(path, Filename.manifest))).resolves.toMatchObject({
+          dependencies: {[`no-deps`]: `1.0.0`},
+        });
+
+        await run(`up`, `no-deps`);
+
+        await expect(xfs.readJsonPromise(ppath.join(path, Filename.manifest))).resolves.toMatchObject({
+          dependencies: {[`no-deps`]: `^2.0.0`},
+        });
+      }));
+
+      test(`it should remove crates from the Cargo.toml of the current crate`, makeTemporaryEnv({
+        name: `root`,
+      }, async ({path, run}) => {
+        const cwd = await setupWorkspace(path);
+        await run(`install`);
+
+        await run(`remove`, `crate-one-dep`, {cwd});
+
+        await expect(readManifest(cwd)).resolves.toEqual(crate(`app`, `\n[dependencies]\ncrate-yanked = { workspace = true }\n`));
+        await expect(readCargoLock(path)).resolves.toMatchObject({versions: [`app@0.1.0`, `crate-yanked@1.0.0`]});
+      }));
+
+      test(`it should explain why a crate is part of the project`, makeTemporaryEnv({
+        name: `root`,
+      }, async ({path, run}) => {
+        await setupWorkspace(path);
+        await run(`install`);
+
+        const {stdout} = await run(`why`, `crate-no-deps`);
+
+        expect(stdout).toContain(`crate-one-dep@cargo:1.0.0`);
+        expect(stdout).toContain(`crate-no-deps@cargo:1.1.0 (via cargo:^1.0)`);
+      }));
+    });
 
     test(`it should refuse cargo dependencies outside of cargo islands`, makeTemporaryEnv({
       name: `root`,

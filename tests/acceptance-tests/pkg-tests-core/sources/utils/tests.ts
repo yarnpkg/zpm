@@ -257,6 +257,230 @@ async function serveDynamicPypiArtifact(request: IncomingMessage, response: Serv
 export const pypiWheelRequests: Array<string> = [];
 export const pypiMetadataRequests: Array<string> = [];
 
+// Crate registries, served under `/repositories/cargo/<registry>/` through
+// the sparse protocol: `config.json`, one index file per crate, and the
+// `.crate` archives, generated from CARGO_FIXTURES. The `private` registry
+// requires its token for everything.
+export const CARGO_AUTH_TOKEN = `cargo-secret-token`;
+export const CRATES_IO_INDEX = `https://github.com/rust-lang/crates.io-index`;
+
+type CargoFixtureDependency = {
+  name: string;
+  req: string;
+  features?: Array<string>;
+  optional?: boolean;
+  default_features?: boolean;
+  kind?: `normal` | `build` | `dev`;
+  target?: string;
+  package?: string;
+  registry?: string;
+};
+
+type CargoFixtureVersion = {
+  deps?: Array<CargoFixtureDependency>;
+  features?: Record<string, Array<string>>;
+  yanked?: boolean;
+  rustVersion?: string;
+  // Makes the index advertise a checksum the archive doesn't have
+  badChecksum?: boolean;
+};
+
+const CARGO_FIXTURES: Record<string, Record<string, Record<string, CargoFixtureVersion>>> = {
+  public: {
+    [`crate-no-deps`]: {
+      [`1.0.0`]: {},
+      [`1.1.0`]: {},
+      [`2.0.0`]: {},
+    },
+    [`crate-one-dep`]: {
+      [`1.0.0`]: {deps: [{name: `crate-no-deps`, req: `^1.0`}]},
+    },
+    [`crate-next-major`]: {
+      [`1.0.0`]: {deps: [{name: `crate-no-deps`, req: `^2`}]},
+    },
+    [`crate-features`]: {
+      [`1.0.0`]: {
+        deps: [{name: `crate-no-deps`, req: `^1`, optional: true}],
+        features: {default: [], extra: [`dep:crate-no-deps`]},
+      },
+    },
+    [`crate-yanked`]: {
+      [`1.0.0`]: {},
+      [`1.1.0`]: {yanked: true},
+    },
+    [`crate-rust-version`]: {
+      [`1.0.0`]: {rustVersion: `1.60`},
+      [`1.1.0`]: {rustVersion: `1.99`},
+    },
+    [`crate-bad-checksum`]: {
+      [`1.0.0`]: {badChecksum: true},
+    },
+  },
+  private: {
+    [`crate-private`]: {
+      [`1.0.0`]: {deps: [{name: `crate-no-deps`, req: `^1`, registry: CRATES_IO_INDEX}, {name: `crate-internal`, req: `^1`}]},
+    },
+    [`crate-internal`]: {
+      [`1.0.0`]: {},
+    },
+  },
+};
+
+export const cargoRequests: Array<string> = [];
+
+const cargoArchives = new Map<string, Promise<Buffer>>();
+
+// `ownIndex` is set for the registries that aren't the default one: the
+// manifests published there name the registry of each of their dependencies,
+// their own included (without it, Cargo looks for them on crates.io).
+async function buildCrateArchive(name: string, version: string, fixture: CargoFixtureVersion, ownIndex: string | null): Promise<Buffer> {
+  const dependencies = (fixture.deps ?? []).map(dep => {
+    const fields = [`version = ${JSON.stringify(dep.req)}`];
+
+    const registryIndex = dep.registry ?? ownIndex;
+
+    if (dep.package)
+      fields.push(`package = ${JSON.stringify(dep.package)}`);
+    if (dep.optional)
+      fields.push(`optional = true`);
+    if (registryIndex)
+      fields.push(`registry-index = ${JSON.stringify(registryIndex)}`);
+
+    return `${dep.name} = { ${fields.join(`, `)} }\n`;
+  });
+
+  const features = Object.entries(fixture.features ?? {}).map(([feature, values]) => {
+    return `${feature} = ${JSON.stringify(values)}\n`;
+  });
+
+  const manifest = [
+    `[package]\nname = ${JSON.stringify(name)}\nversion = ${JSON.stringify(version)}\nedition = "2021"\n`,
+    dependencies.length > 0 ? `\n[dependencies]\n${dependencies.join(``)}` : ``,
+    features.length > 0 ? `\n[features]\n${features.join(``)}` : ``,
+  ].join(``);
+
+  const root = `${name}-${version}`;
+
+  const tar = tarStream.pack();
+  tar.entry({name: `${root}/Cargo.toml`, mode: 0o644, mtime: ZIP_FIXED_DATE}, manifest);
+  tar.entry({name: `${root}/src/lib.rs`, mode: 0o644, mtime: ZIP_FIXED_DATE}, `pub const VERSION: &str = ${JSON.stringify(version)};\n`);
+  tar.finalize();
+
+  const chunks: Array<Buffer> = [];
+  await new Promise<void>((resolve, reject) => {
+    tar.on(`data`, (chunk: Buffer) => chunks.push(chunk));
+    tar.on(`end`, resolve);
+    tar.on(`error`, reject);
+  });
+
+  return zlib.gzipSync(Buffer.concat(chunks));
+}
+
+function getCrateArchive(host: string, registry: string, name: string, version: string) {
+  const fixture = CARGO_FIXTURES[registry]?.[name]?.[version];
+  if (typeof fixture === `undefined`)
+    return null;
+
+  const ownIndex = registry !== `public`
+    ? `sparse+http://${host}/repositories/cargo/${registry}/`
+    : null;
+
+  return miscUtils.getFactoryWithDefault(cargoArchives, `${host}/${registry}/${name}/${version}`, () => {
+    return buildCrateArchive(name, version, fixture, ownIndex);
+  });
+}
+
+async function serveCargoRegistry(request: IncomingMessage, response: ServerResponse) {
+  const pathname = new URL(request.url ?? `/`, `http://localhost`).pathname;
+  const match = pathname.match(/^\/repositories\/cargo\/([^/]+)\/(.+)$/);
+
+  if (match === null)
+    return false;
+
+  const [, registry, rest] = match;
+
+  const crates = CARGO_FIXTURES[registry!];
+  if (typeof crates === `undefined`)
+    return false;
+
+  cargoRequests.push(`${registry}/${rest}`);
+
+  const isPrivate = registry === `private`;
+
+  // Cargo sends its tokens as-is, without a scheme
+  if (isPrivate && request.headers.authorization !== CARGO_AUTH_TOKEN) {
+    response.writeHead(401, {[`Content-Type`]: `text/plain`});
+    response.end(`Unauthorized`);
+    return true;
+  }
+
+  const sendJson = (data: string) => {
+    response.writeHead(200, {[`Content-Type`]: `application/json`});
+    response.end(data);
+    return true;
+  };
+
+  if (rest === `config.json`) {
+    return sendJson(JSON.stringify({
+      dl: `http://${request.headers.host}/repositories/cargo/${registry}/dl`,
+      [`auth-required`]: isPrivate,
+    }));
+  }
+
+  const download = rest!.match(/^dl\/([^/]+)\/([^/]+)\/download$/);
+  if (download !== null) {
+    const archive = await getCrateArchive(request.headers.host!, registry!, download[1]!, download[2]!);
+    if (archive === null)
+      return false;
+
+    response.writeHead(200, {
+      [`Content-Type`]: `application/octet-stream`,
+      [`Content-Length`]: archive.length.toString(),
+    });
+
+    response.end(archive);
+
+    return true;
+  }
+
+  // Index files are filed under a prefix made of the first letters
+  const name = rest!.split(`/`).pop()!;
+
+  const versions = crates[name];
+  if (typeof versions === `undefined`)
+    return false;
+
+  const lines = await Promise.all(Object.entries(versions).map(async ([version, fixture]) => {
+    const archive = await getCrateArchive(request.headers.host!, registry!, name, version);
+
+    const cksum = fixture.badChecksum
+      ? `0`.repeat(64)
+      : crypto.createHash(`sha256`).update(archive!).digest(`hex`);
+
+    return JSON.stringify({
+      name,
+      vers: version,
+      deps: (fixture.deps ?? []).map(dep => ({
+        name: dep.name,
+        req: dep.req,
+        features: dep.features ?? [],
+        optional: dep.optional ?? false,
+        default_features: dep.default_features ?? true,
+        target: dep.target ?? null,
+        kind: dep.kind ?? `normal`,
+        registry: dep.registry ?? null,
+        package: dep.package ?? null,
+      })),
+      cksum,
+      features: fixture.features ?? {},
+      yanked: fixture.yanked ?? false,
+      rust_version: fixture.rustVersion,
+    });
+  }));
+
+  return sendJson(`${lines.join(`\n`)}\n`);
+}
+
 const TEST_MAJOR = process.env.TEST_MAJOR
   ? parseInt(process.env.TEST_MAJOR, 10)
   : 5;
@@ -1398,6 +1622,9 @@ export const startPackageServer = ({type}: {type: keyof typeof packageServerUrls
       if (await serveDynamicPypiArtifact(request, response))
         return;
 
+      if (await serveCargoRegistry(request, response))
+        return;
+
       staticServer(request as any, response as any, finalhandler(request, response));
     },
 
@@ -2022,7 +2249,10 @@ exit 0
           const isPypiRequest = parsedRequest.type === RequestType.PypiSimpleProject
             || (parsedRequest.type === RequestType.Repository && req.url!.startsWith(`/auth/`));
 
-          if (authorization != null && !isPypiRequest) {
+          // Crate registries check their own tokens
+          const isCargoRequest = parsedRequest.type === RequestType.Repository && req.url!.startsWith(`/repositories/cargo/`);
+
+          if (authorization != null && !isPypiRequest && !isCargoRequest) {
             const user = validAuthorizations.get(authorization);
             if (!user) {
               sendError(res, 401, `Invalid token`);
