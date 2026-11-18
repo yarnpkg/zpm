@@ -13,6 +13,17 @@ use super::YarnCli;
 /// Run a command in a workspace
 ///
 /// This command changes into the selected workspace and runs another Yarn command from there.
+///
+/// ## Examples
+///
+/// Add a package to a single workspace
+///
+/// `yarn workspace components add -D react`
+///
+/// Run build script on a single workspace
+///
+/// `yarn workspace components run build`
+///
 #[cli::command(proxy)]
 #[cli::path("workspace")]
 #[cli::category("Workspace commands")]

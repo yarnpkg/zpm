@@ -25,6 +25,24 @@ use crate::{
 ///
 /// When a template is provided, Yarn initializes the project, installs the template in a temporary context, and runs its binary from the new project.
 ///
+/// ## Examples
+///
+/// Create a new package in the local directory
+///
+/// `yarn init`
+///
+/// Create a new private package in the local directory
+///
+/// `yarn init -p`
+///
+/// Create a new package that accepts workspaces in the `packages/` directory
+///
+/// `yarn init -w`
+///
+/// Create a new package with a specific name
+///
+/// `yarn init -n my-package`
+///
 #[cli::command(proxy)]
 #[cli::path("init")]
 #[cli::category("Project management")]
@@ -247,7 +265,10 @@ pub async fn init_project(init_cwd: &Path, params: InitParams) -> Result<Project
     let mut document
         = JsonDocument::new(manifest_content)?;
 
-    if !manifest_path.fs_exists() {
+    let manifest_existed
+        = manifest_path.fs_exists();
+
+    if !manifest_existed {
         let init_name
             = params.name.as_ref()
                 .map(|n| Ident::new(n))
@@ -271,7 +292,12 @@ pub async fn init_project(init_cwd: &Path, params: InitParams) -> Result<Project
 
     apply_init_fields(&mut document, init_cwd)?;
 
-    if let Some(private) = params.private {
+    // Workspace roots are private by default (except when turning an
+    // existing package into one), unless `-p,--private` says otherwise
+    let private = params.private
+        .or((params.workspace && !manifest_existed).then_some(true));
+
+    if let Some(private) = private {
         let private_field = match private {
             true => Value::Bool(true),
             false => Value::Undefined,
@@ -287,19 +313,25 @@ pub async fn init_project(init_cwd: &Path, params: InitParams) -> Result<Project
     // define a workspace root (we should have a different flag
     // for that).
     if params.workspace {
-        let packages_dir
-            = init_cwd
-                .with_join_str("packages");
+        let current_manifest: Manifest
+            = JsonDocument::hydrate_from_str(&String::from_utf8_lossy(&document.input))?;
 
-        packages_dir
-            .fs_create_dir_all()?;
+        // We don't override the workspaces of an existing workspace root
+        if current_manifest.workspaces.packages.is_empty() {
+            let packages_dir
+                = init_cwd
+                    .with_join_str("packages");
 
-        document.set_path(
-            &zpm_parsers::Path::from_segments(vec!["workspaces".to_string()]),
-            Value::Array(vec![
-                Value::String("packages/*".to_string()),
-            ]),
-        )?;
+            packages_dir
+                .fs_create_dir_all()?;
+
+            document.set_path(
+                &zpm_parsers::Path::from_segments(vec!["workspaces".to_string()]),
+                Value::Array(vec![
+                    Value::String("packages/*".to_string()),
+                ]),
+            )?;
+        }
     }
 
     manifest_path

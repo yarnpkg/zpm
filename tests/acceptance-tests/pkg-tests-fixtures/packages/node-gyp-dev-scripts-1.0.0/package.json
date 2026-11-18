@@ -1,0 +1,7 @@
+{
+    "name": "node-gyp-dev-scripts",
+    "version": "1.0.0",
+    "scripts": {
+        "build-release": "node-gyp rebuild --release"
+    }
+}

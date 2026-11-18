@@ -4,7 +4,7 @@ use chrono::{DateTime, Utc};
 use colored::Colorize;
 use futures::future::{BoxFuture, FutureExt};
 use futures::stream::{FuturesUnordered, StreamExt};
-use rayon::iter::{IntoParallelIterator, ParallelIterator};
+use rayon::iter::{IntoParallelIterator, IntoParallelRefIterator, ParallelIterator};
 use zpm_config::PackageExtension;
 use zpm_primitives::{Descriptor, GitRange, Ident, Locator, PatchRange, PeerRange, Range, Reference, RegistrySemverRange, RegistryTagRange, SemverDescriptor, SemverPeerRange, WorkspaceIdentRange, WorkspaceIdentReference};
 use zpm_utils::{DataType, Hash64, IoResultExt, Path, SystemSet, ToHumanString, UrlEncoded};
@@ -13,7 +13,7 @@ use serde::{Deserialize, Serialize};
 use zpm_utils::{FromFileString, ToFileString};
 
 use crate::{
-    build, cache::CompositeCache, constraints::check_constraints, content_flags::ContentFlags, error::Error, fetchers::{PackageData, SyncFetchAttempt, fetch_locator, patch::has_builtin_patch, try_fetch_locator_sync}, graph::WaitMap, http_npm, linker, lockfile::{Lockfile, LockfileCatalogs, LockfileEntry, LockfileMetadata, LockfilePackageExtension, LockfileProject, catalogs_from_config}, manifest::resolutions::{ResolutionSelector, ResolutionsField}, primitives_exts::{InnerDependencyKind, RangeExt}, project::{InstallMode, Project}, report::{self, ReportContext, async_section, current_report, with_context_result}, resolvers::{Resolution, SyncResolutionAttempt, catalog::{catalog_name, lookup_catalog_entry_in}, resolve_descriptor, resolve_locator, try_resolve_descriptor_sync, workspace::resolve_locator_ident}, tree_resolver::{ResolutionTree, TreeResolver}
+    build, cache::CompositeCache, constraints::check_constraints, content_flags::ContentFlags, error::Error, fetchers::{PackageData, SyncFetchAttempt, fetch_locator, patch::has_builtin_patch, try_fetch_locator_sync}, graph::WaitMap, http_npm, linker, lockfile::{Lockfile, LockfileCatalogs, LockfileEntry, LockfileMetadata, LockfilePackageExtension, LockfileProject, catalogs_from_config}, manifest::resolutions::{ResolutionSelector, ResolutionsField}, primitives_exts::{InnerDependencyKind, RangeExt}, project::{InstallMode, Project}, report::{self, ReportContext, async_section, current_report, with_context_result}, resolvers::{Resolution, SyncResolutionAttempt, catalog::{catalog_name, lookup_catalog_entry_in, lookup_catalog_peer_range_in}, resolve_descriptor, resolve_locator, try_resolve_descriptor_sync, workspace::resolve_locator_ident}, tree_resolver::{ResolutionTree, TreeResolver}
 };
 
 #[derive(Clone)]
@@ -905,6 +905,10 @@ pub struct InstallState {
     pub production: bool,
 
     pub install_config_hash: Option<Hash64>,
+
+    /// The `ContentFlags::VERSION` the content flags were computed with;
+    /// flags from another version are recomputed rather than reused.
+    pub content_flags_version: u32,
     pub content_flags: BTreeMap<Locator, ContentFlags>,
     pub resolution_tree: ResolutionTree,
     pub descriptor_to_locator: BTreeMap<Descriptor, Locator>,
@@ -945,6 +949,7 @@ impl Default for InstallState {
             installed_workspaces: Some(BTreeSet::new()),
             production: false,
             install_config_hash: None,
+            content_flags_version: ContentFlags::VERSION,
             content_flags: BTreeMap::new(),
             resolution_tree: ResolutionTree::default(),
             descriptor_to_locator: BTreeMap::new(),
@@ -993,13 +998,6 @@ impl Install {
     /// `emitPeerDependencyWarnings`.
     fn report_peer_diagnostics(&self, project: &Project) {
         report::if_active(|report| {
-            let data
-                = crate::peer_requirements::compute(project, &self.install_state);
-
-            if data.warnings.is_empty() {
-                return;
-            }
-
             let data
                 = crate::peer_requirements::compute(project, &self.install_state);
 
@@ -1548,18 +1546,38 @@ impl<'a> InstallManager<'a> {
                 self.record_resolution(resolution, original_resolution, package_data)?;
             }
 
-            for (locator, result) in fetch_map.into_results() {
-                let Ok(FetchResult {package_data, ..}) = result else {
-                    unreachable!("Already handled above");
-                };
+            let fetches = fetch_map.into_results()
+                .into_iter()
+                .map(|(locator, result)| {
+                    let Ok(FetchResult {package_data, ..}) = result else {
+                        unreachable!("Already handled above");
+                    };
 
-                self.record_fetch(locator, package_data)?;
-            }
+                    (locator, package_data)
+                })
+                .collect();
+
+            self.record_fetches(fetches)?;
 
             Ok::<(), Error>(())
         }).await?;
 
         let check_checksums = self.context.check_checksums;
+
+        // Conditional locators (os/cpu/libc-specific packages) keep their
+        // checksum out of the lockfile so it stays the same on every
+        // architecture; the previous install shadowed it in its state
+        // instead. Cache archives are deterministic for a given install
+        // configuration, so when it didn't change we can trust that shadow
+        // like we trust the lockfile checksums, rather than re-hashing
+        // archives that often weigh 100MB+ on every install.
+        let current_install_config_hash = self.context.project
+            .map(|project| project.install_config_hash());
+
+        let reusable_cache_checksums = self.previous_state
+            .filter(|_| !check_checksums)
+            .filter(|state| state.install_config_hash.is_some() && state.install_config_hash == current_install_config_hash)
+            .map(|state| &state.cache_checksums);
 
         let missing_checksums = self.result.lockfile.entries.values()
             .filter(|entry| {
@@ -1569,13 +1587,25 @@ impl<'a> InstallManager<'a> {
                     return true;
                 }
 
-                let previous_entry
-                    = self.initial_lockfile.entries.get(&entry.resolution.locator);
+                let locator
+                    = &entry.resolution.locator;
 
-                let has_checksum
-                    = previous_entry.map_or(false, |s| s.checksum.is_some());
+                // Freshly fetched archives were hashed as they were written
+                // to the cache; that checksum takes precedence below anyway.
+                let has_fresh_checksum = self.result.package_data.get(locator)
+                    .is_some_and(|package_data| package_data.checksum().is_some());
 
-                !has_checksum
+                if has_fresh_checksum {
+                    return false;
+                }
+
+                let has_lockfile_checksum = self.initial_lockfile.entries.get(locator)
+                    .is_some_and(|previous_entry| previous_entry.checksum.is_some());
+
+                let has_cache_checksum = reusable_cache_checksums
+                    .is_some_and(|cache_checksums| cache_checksums.contains_key(locator));
+
+                !has_lockfile_checksum && !has_cache_checksum
             })
             .flat_map(|entry| {
                 let package_data = self.result.package_data.get(&entry.resolution.locator)
@@ -1628,7 +1658,8 @@ impl<'a> InstallManager<'a> {
                     None
                 })
                 .or_else(|| previous_checksum.cloned())
-                .or_else(|| late_checksums.get(&entry.resolution.locator).cloned());
+                .or_else(|| late_checksums.get(&entry.resolution.locator).cloned())
+                .or_else(|| reusable_cache_checksums.and_then(|cache_checksums| cache_checksums.get(&entry.resolution.locator)).cloned());
 
             let is_conditional_locator
                 = self.result.install_state.conditional_locators
@@ -1709,7 +1740,7 @@ impl<'a> InstallManager<'a> {
             let mut merged_tree = TreeResolver::default()
                 .with_resolutions(&self.result.install_state.descriptor_to_locator, &self.result.install_state.normalized_resolutions)?
                 .with_roots(self.result.roots.clone())
-                .run();
+                .run()?;
 
             // Per-island trees (isolated peer dep context per island)
             for (island_id, island_d2l) in &self.result.install_state.island_descriptor_to_locator {
@@ -1730,7 +1761,7 @@ impl<'a> InstallManager<'a> {
                 let island_tree = TreeResolver::default()
                     .with_resolutions(island_d2l, &island_resolutions)?
                     .with_roots(island_roots)
-                    .run();
+                    .run()?;
 
                 // Merge island tree into the combined tree
                 merged_tree.descriptor_to_locator.extend(island_tree.descriptor_to_locator);
@@ -1744,7 +1775,7 @@ impl<'a> InstallManager<'a> {
             self.result.install_state.resolution_tree = TreeResolver::default()
                 .with_resolutions(&self.result.install_state.descriptor_to_locator, &self.result.install_state.normalized_resolutions)?
                 .with_roots(self.result.roots.clone())
-                .run();
+                .run()?;
         }
 
         self.result.lockfile.resolutions = self.result.install_state.descriptor_to_locator.clone();
@@ -1841,15 +1872,31 @@ impl<'a> InstallManager<'a> {
     }
 
     fn record_fetch(&mut self, locator: Locator, package_data: PackageData) -> Result<(), Error> {
-        let content_flags
+        self.record_fetches(vec![(locator, package_data)])
+    }
+
+    /// Records fetched packages along with their content flags. Packages
+    /// the previous install didn't know about need their archives to be
+    /// inspected, which is IO we parallelize across all of them.
+    fn record_fetches(&mut self, fetches: Vec<(Locator, PackageData)>) -> Result<(), Error> {
+        let previous_content_flags
             = self.previous_state
-                .and_then(|previous_state| previous_state.content_flags.get(&locator))
-                .cloned()
-                .map_or_else(|| ContentFlags::extract(&locator, &package_data), Ok)?;
+                .filter(|previous_state| previous_state.content_flags_version == ContentFlags::VERSION)
+                .map(|previous_state| &previous_state.content_flags);
 
-        self.result.package_data.insert(locator.clone(), package_data);
+        let content_flags = fetches.par_iter()
+            .map(|(locator, package_data)| {
+                previous_content_flags
+                    .and_then(|content_flags| content_flags.get(locator))
+                    .cloned()
+                    .map_or_else(|| ContentFlags::extract(locator, package_data), Ok)
+            })
+            .collect::<Result<Vec<_>, Error>>()?;
 
-        self.result.install_state.content_flags.insert(locator, content_flags);
+        for ((locator, package_data), content_flags) in fetches.into_iter().zip(content_flags) {
+            self.result.package_data.insert(locator.clone(), package_data);
+            self.result.install_state.content_flags.insert(locator, content_flags);
+        }
 
         Ok(())
     }
@@ -2146,6 +2193,30 @@ pub fn normalize_resolutions_with(normalizer: &DependencyNormalizer<'_>, resolut
                 }
             }
         }
+    }
+
+    // Workspaces can reference catalogs in their peer dependencies; they
+    // never reach the published packages (`yarn pack` replaces them), so a
+    // stray one coming from elsewhere degrades the same way as the other
+    // peer ranges we can't use.
+    for (ident, peer_range) in peer_dependencies.iter_mut() {
+        let PeerRange::Catalog(params) = peer_range else {
+            continue;
+        };
+
+        if !resolution.locator.reference.is_workspace_reference() {
+            *peer_range = SemverPeerRange {range: zpm_semver::Range::any()}.into();
+            continue;
+        }
+
+        *peer_range = lookup_catalog_peer_range_in(normalizer.catalogs, params, &resolution.locator, ident, |catalog_name| {
+            if let Some(rule_usage) = normalizer.rule_usage {
+                rule_usage.lock().unwrap().catalog_entries
+                    .entry(catalog_name.to_string())
+                    .or_default()
+                    .insert(ident.clone());
+            }
+        })?;
     }
 
     dependencies.retain(|_, descriptor| !is_removed_dependency(normalizer, resolution, descriptor));

@@ -21,9 +21,9 @@ static WARNED_HOSTNAMES: LazyLock<tokio::sync::Mutex<HashSet<String>>> = LazyLoc
 pub struct HttpConfig {
     pub enforce_unsafe_http: bool,
     pub http_retry: usize,
-    pub http_timeout: u64,
+    pub http_timeout: Duration,
     pub unsafe_http_whitelist: Vec<Setting<Glob>>,
-    pub slow_network_timeout: u64,
+    pub slow_network_timeout: Duration,
 
     enable_network: bool,
 
@@ -114,11 +114,51 @@ fn new_resolver() -> TokioResolver {
         .expect("Failed to build a DNS resolver")
 }
 
+/// The settings `HttpClient::build_client` reads, captured upfront so the
+/// clients themselves can be built lazily.
+#[derive(Debug, Clone)]
+struct ClientOptions {
+    network_concurrency: usize,
+    http_timeout: Duration,
+    enable_strict_ssl: bool,
+    http_proxy: Option<String>,
+    https_proxy: Option<String>,
+    https_ca_file_path: Option<zpm_utils::Path>,
+    https_cert_file_path: Option<zpm_utils::Path>,
+    https_key_file_path: Option<zpm_utils::Path>,
+}
+
+/// A reqwest client built the first time a request needs it. Building one
+/// loads the TLS root store, which costs milliseconds that commands that
+/// never touch the network (`yarn run`, no-op installs, ...) shouldn't pay.
+#[derive(Debug)]
+struct LazyClient {
+    network_settings: Option<NetworkSettings>,
+    client: OnceLock<Result<Client, Error>>,
+}
+
+impl LazyClient {
+    fn new(network_settings: Option<NetworkSettings>) -> Self {
+        Self {
+            network_settings,
+            client: OnceLock::new(),
+        }
+    }
+
+    fn get(&self, options: &ClientOptions) -> Result<&Client, Error> {
+        self.client
+            .get_or_init(|| HttpClient::build_client(options, self.network_settings.as_ref()))
+            .as_ref()
+            .map_err(|err| err.clone())
+    }
+}
+
 pub struct HttpClient {
     pub config: HttpConfig,
 
-    client: Client,
-    network_clients: Vec<(Glob, Client)>,
+    client_options: ClientOptions,
+    client: LazyClient,
+    network_clients: Vec<(Glob, LazyClient)>,
     network_semaphore: Arc<Semaphore>,
 
     /// Cache for GET requests to avoid duplicate network calls for the same URL.
@@ -199,17 +239,17 @@ pub struct HttpRequest<'a> {
 }
 
 impl<'a> HttpRequest<'a> {
-    pub fn new(client: &'a HttpClient, url: Url, method: Method) -> Self {
+    pub fn new(client: &'a HttpClient, url: Url, method: Method) -> Result<Self, Error> {
         let builder
-            = client.client_for_url(&url).request(method.clone(), url.clone());
+            = client.client_for_url(&url)?.request(method.clone(), url.clone());
 
-        Self {
+        Ok(Self {
             builder,
             client,
             enable_retry: method == Method::GET,
             enable_status_check: true,
             url,
-        }
+        })
     }
 
     pub fn enable_retry(mut self, enable_retry: bool) -> Self {
@@ -229,7 +269,7 @@ impl<'a> HttpRequest<'a> {
     /// `httpTimeout` setting.
     pub fn timeout(mut self, timeout: Duration) -> Self {
         let bounded_timeout
-            = std::cmp::min(timeout, Duration::from_millis(self.client.config.http_timeout));
+            = std::cmp::min(timeout, self.client.config.http_timeout);
 
         self.builder = self.builder.timeout(bounded_timeout);
         self
@@ -262,7 +302,7 @@ impl<'a> HttpRequest<'a> {
             });
 
             let warning_future = async {
-                tokio::time::sleep(Duration::from_millis(self.client.config.slow_network_timeout)).await;
+                tokio::time::sleep(self.client.config.slow_network_timeout).await;
 
                 // Check if we should warn about this hostname
                 if let Some(hostname) = &hostname {
@@ -419,7 +459,7 @@ impl<'a> HttpRequest<'a> {
 }
 
 impl HttpClient {
-    fn build_client(config: &Configuration, network_settings: Option<&NetworkSettings>) -> Result<Client, Error> {
+    fn build_client(options: &ClientOptions, network_settings: Option<&NetworkSettings>) -> Result<Client, Error> {
         let client_builder = reqwest::Client::builder();
 
         #[cfg(not(all(target_arch = "wasm64", target_vendor = "browserpod")))]
@@ -427,13 +467,13 @@ impl HttpClient {
 
         let mut client_builder = client_builder
             // Connection pooling settings
-            .pool_max_idle_per_host(config.settings.network_concurrency.value)
+            .pool_max_idle_per_host(options.network_concurrency)
             .pool_idle_timeout(Duration::from_secs(30))
 
             // Timeout settings
             .connect_timeout(Duration::from_secs(30))
             .read_timeout(Duration::from_secs(30))
-            .timeout(Duration::from_millis(config.settings.http_timeout.value))
+            .timeout(options.http_timeout)
 
             // HTTP/2 settings (helps with connection reuse)
             .http2_keep_alive_interval(Duration::from_secs(30))
@@ -445,21 +485,21 @@ impl HttpClient {
 
             .dns_resolver(Arc::new(HickoryDnsResolver::default()));
 
-        if !config.settings.enable_strict_ssl.value {
+        if !options.enable_strict_ssl {
             client_builder = client_builder
                 .danger_accept_invalid_certs(true)
                 .danger_accept_invalid_hostnames(true);
         }
 
-        if let Some(http_proxy) = config.settings.http_proxy.value.as_ref() {
+        if let Some(http_proxy) = options.http_proxy.as_ref() {
             client_builder = client_builder.proxy(Proxy::http(http_proxy)?);
         }
 
-        if let Some(https_proxy) = config.settings.https_proxy.value.as_ref() {
+        if let Some(https_proxy) = options.https_proxy.as_ref() {
             client_builder = client_builder.proxy(Proxy::https(https_proxy)?);
         }
 
-        if let Some(ca_path) = config.settings.https_ca_file_path.value.as_ref() {
+        if let Some(ca_path) = options.https_ca_file_path.as_ref() {
             client_builder = Self::add_root_certificate(client_builder, ca_path)?;
         }
 
@@ -476,8 +516,8 @@ impl HttpClient {
             ),
 
             _ => (
-                config.settings.https_cert_file_path.value.as_ref(),
-                config.settings.https_key_file_path.value.as_ref(),
+                options.https_cert_file_path.as_ref(),
+                options.https_key_file_path.as_ref(),
             ),
         };
 
@@ -554,17 +594,24 @@ impl HttpClient {
             .sorted_by_cached_key(|(glob, _)| -(glob.raw().len() as isize))
             .collect();
 
+        let client_options = ClientOptions {
+            network_concurrency,
+            http_timeout: config.settings.http_timeout.value,
+            enable_strict_ssl: config.settings.enable_strict_ssl.value,
+            http_proxy: config.settings.http_proxy.value.clone(),
+            https_proxy: config.settings.https_proxy.value.clone(),
+            https_ca_file_path: config.settings.https_ca_file_path.value.clone(),
+            https_cert_file_path: config.settings.https_cert_file_path.value.clone(),
+            https_key_file_path: config.settings.https_key_file_path.value.clone(),
+        };
+
         let client
-            = Self::build_client(config, None)?;
+            = LazyClient::new(None);
 
-        let mut network_clients
-            = Vec::new();
-
-        for (glob, settings) in &network_settings {
-            if Self::has_tls_settings(settings) {
-                network_clients.push((glob.clone(), Self::build_client(config, Some(settings))?));
-            }
-        }
+        let network_clients = network_settings.iter()
+            .filter(|(_, settings)| Self::has_tls_settings(settings))
+            .map(|(glob, settings)| (glob.clone(), LazyClient::new(Some(settings.clone()))))
+            .collect();
 
         let config = HttpConfig {
             enforce_unsafe_http: config.settings.enforce_unsafe_http.value,
@@ -579,6 +626,7 @@ impl HttpClient {
         };
 
         Ok(Arc::new(Self {
+            client_options,
             client,
             network_clients,
             network_semaphore: Arc::new(Semaphore::new(network_concurrency)),
@@ -587,18 +635,12 @@ impl HttpClient {
         }))
     }
 
-    fn client_for_url(&self, url: &Url) -> &Client {
-        let Some(host_str) = url.host_str() else {
-            return &self.client;
-        };
+    fn client_for_url(&self, url: &Url) -> Result<&Client, Error> {
+        let lazy_client = url.host_str()
+            .and_then(|host_str| self.network_clients.iter().find(|(glob, _)| glob.matcher().is_match(host_str)))
+            .map_or(&self.client, |(_, client)| client);
 
-        for (glob, client) in &self.network_clients {
-            if glob.matcher().is_match(host_str) {
-                return client;
-            }
-        }
-
-        &self.client
+        lazy_client.get(&self.client_options)
     }
 
     pub fn request(&self, url: impl AsRef<str>, method: Method) -> Result<HttpRequest<'_>, Error> {
@@ -628,7 +670,7 @@ impl HttpClient {
             let _ = url.set_scheme("http");
         }
 
-        Ok(HttpRequest::new(self, url, method))
+        HttpRequest::new(self, url, method)
     }
 
     pub fn get(&self, url: impl AsRef<str>) -> Result<HttpRequest<'_>, Error> {
@@ -679,7 +721,7 @@ mod tests {
     use hyper_util::rt::TokioIo;
     use tokio::{net::TcpListener, task::JoinHandle};
     use zpm_config::ConfigurationContext;
-    use zpm_utils::LastModifiedAt;
+    use zpm_utils::{LastModifiedAt, Path, ToFileString};
 
     use super::*;
 
@@ -710,7 +752,7 @@ mod tests {
 
     fn test_client(network_concurrency: usize) -> Arc<HttpClient> {
         let context = ConfigurationContext {
-            env: BTreeMap::new(),
+            env: BTreeMap::from([("YARN_GLOBAL_FOLDER".to_string(), Path::temp_root_dir().unwrap().with_join_str("zpm-test").to_file_string())]),
             user_cwd: None,
             project_cwd: None,
             package_cwd: None,

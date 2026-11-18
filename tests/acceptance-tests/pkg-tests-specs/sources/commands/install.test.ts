@@ -97,6 +97,30 @@ describe(`Commands`, () => {
     );
 
     test(
+      `it should write a stable lockfile with a final newline`,
+      makeTemporaryEnv({}, async ({path, run}) => {
+        const lockfilePath = ppath.join(path, Filename.lockfile);
+
+        await run(`install`);
+        const lockfileContent = await xfs.readFilePromise(lockfilePath, `utf8`);
+        expect(lockfileContent).toMatch(/[^\n]\n$/);
+
+        await run(`install`, `--force`);
+        await run(`install`, `--immutable`);
+        expect(await xfs.readFilePromise(lockfilePath, `utf8`)).toEqual(lockfileContent);
+
+        const unterminatedContent = lockfileContent.slice(0, -1);
+        await xfs.writeFilePromise(lockfilePath, unterminatedContent);
+
+        await expect(run(`install`, `--immutable`)).rejects.toThrow(/The lockfile would have been modified by this install/);
+        expect(await xfs.readFilePromise(lockfilePath, `utf8`)).toEqual(unterminatedContent);
+
+        await run(`install`);
+        expect(await xfs.readFilePromise(lockfilePath, `utf8`)).toEqual(lockfileContent);
+      }),
+    );
+
+    test(
       `it should refuse to create a lockfile when using --immutable`,
       makeTemporaryEnv({
         dependencies: {
@@ -1331,5 +1355,162 @@ describe(`Commands`, () => {
         }),
       );
     });
+
+    for (const nodeLinker of [`pnp`, `node-modules`, `pnpm`]) {
+      tests.testIf(
+        () => process.platform !== `win32`,
+        `it should install deep dependency chains regardless of the main thread stack size (${nodeLinker})`,
+        makeTemporaryEnv({
+          private: true,
+          workspaces: [`packages/*`],
+          dependencies: {
+            [`pkg-0`]: `workspace:*`,
+          },
+        }, {
+          nodeLinker,
+        }, async ({path, run, source}) => {
+          // Peer dependency resolution walks the dependency tree recursively
+          // (up to 1000 levels deep, like Berry)
+          const depth = 900;
+
+          for (let t = 0; t < depth; ++t) {
+            await xfs.mkdirPromise(ppath.join(path, `packages/pkg-${t}` as PortablePath), {recursive: true});
+            await xfs.writeJsonPromise(ppath.join(path, `packages/pkg-${t}/package.json` as PortablePath), {
+              name: `pkg-${t}`,
+              version: `1.0.0`,
+              dependencies: t + 1 < depth ? {
+                [`pkg-${t + 1}`]: `workspace:*`,
+              } : {},
+            });
+          }
+
+          // Run Yarn with a main thread stack smaller than the 1 MiB Windows
+          // gives it; the install shouldn't depend on it
+          const originalTestBinary = process.env.TEST_BINARY;
+          const yarnBinary = originalTestBinary
+            ?? require.resolve(`${__dirname}/../../../../../target/release/yarn-bin`);
+
+          const wrapperPath = ppath.join(await xfs.mktempPromise(), `yarn-small-stack` as Filename);
+          await xfs.writeFilePromise(wrapperPath, `#!/bin/sh\nulimit -s 512 || exit 1\nexec ${JSON.stringify(yarnBinary)} "$@"\n`, {mode: 0o755});
+
+          process.env.TEST_BINARY = npath.fromPortablePath(wrapperPath);
+          try {
+            await run(`install`);
+          } finally {
+            if (typeof originalTestBinary === `undefined`) {
+              delete process.env.TEST_BINARY;
+            } else {
+              process.env.TEST_BINARY = originalTestBinary;
+            }
+          }
+
+          // The bottom of the chain must have been linked too
+          await expect(run(`node`, `-p`, `require.resolve('pkg-${depth - 1}/package.json')`, {
+            cwd: ppath.join(path, `packages/pkg-${depth - 2}` as PortablePath),
+          })).resolves.toMatchObject({
+            stdout: expect.stringContaining(`pkg-${depth - 1}`),
+          });
+        }),
+      );
+    }
+
+    // Peer dependency resolution goes up to 1000 levels deep (like Berry)
+    const peerResolutionDepthLimit = 1000;
+
+    const writeWorkspaceChain = async (path: PortablePath, depth: number) => {
+      for (let t = 0; t < depth; ++t) {
+        await xfs.mkdirPromise(ppath.join(path, `packages/pkg-${t}` as PortablePath), {recursive: true});
+        await xfs.writeJsonPromise(ppath.join(path, `packages/pkg-${t}/package.json` as PortablePath), {
+          name: `pkg-${t}`,
+          version: `1.0.0`,
+          dependencies: t + 1 < depth ? {
+            [`pkg-${t + 1}`]: `workspace:*`,
+          } : {},
+        });
+      }
+    };
+
+    test(
+      `it should install dependency chains just under the peer dependency resolution limit`,
+      makeTemporaryEnv({
+        private: true,
+        workspaces: [`packages/*`],
+        dependencies: {
+          [`pkg-0`]: `workspace:*`,
+        },
+      }, async ({path, run, source}) => {
+        await writeWorkspaceChain(path, peerResolutionDepthLimit);
+
+        await run(`install`);
+
+        await expect(run(`node`, `-p`, `require.resolve('pkg-${peerResolutionDepthLimit - 1}/package.json')`, {
+          cwd: ppath.join(path, `packages/pkg-${peerResolutionDepthLimit - 2}` as PortablePath),
+        })).resolves.toMatchObject({
+          stdout: expect.stringContaining(`pkg-${peerResolutionDepthLimit - 1}`),
+        });
+      }),
+    );
+
+    for (const nodeLinker of [`pnp`, `node-modules`, `pnpm`]) {
+      test(
+        `it should report an error when the dependency chain is deeper than the peer dependency resolution limit (${nodeLinker})`,
+        makeTemporaryEnv({
+          private: true,
+          workspaces: [`packages/*`],
+          dependencies: {
+            [`pkg-0`]: `workspace:*`,
+          },
+        }, {
+          nodeLinker,
+        }, async ({path, run, source}) => {
+          await writeWorkspaceChain(path, peerResolutionDepthLimit + 100);
+
+          await expect(run(`install`)).rejects.toThrow(/Encountered a stack overflow when resolving peer dependencies: the dependency tree is more than 1000 levels deep \(… → (pkg-\d+@workspace:pkg-\d+ → ){4}pkg-\d+@workspace:pkg-\d+\)\. This is usually caused by a dependency cycle through peer dependencies, or by an extremely deep dependency chain\./);
+        }),
+      );
+    }
+
+    test(
+      `it should install dependency cycles going through peer dependencies`,
+      makeTemporaryEnv({
+        private: true,
+        workspaces: [`packages/*`],
+        dependencies: {
+          [`pkg-a`]: `workspace:*`,
+          [`pkg-c`]: `workspace:*`,
+        },
+      }, async ({path, run, source}) => {
+        // pkg-a -> pkg-b -> pkg-a -> ..., both of them requesting pkg-c
+        // as a peer dependency
+        for (const [name, next] of [[`pkg-a`, `pkg-b`], [`pkg-b`, `pkg-a`]] as const) {
+          await xfs.mkdirPromise(ppath.join(path, `packages/${name}` as PortablePath), {recursive: true});
+          await xfs.writeJsonPromise(ppath.join(path, `packages/${name}/package.json` as PortablePath), {
+            name,
+            version: `1.0.0`,
+            dependencies: {
+              [next]: `workspace:*`,
+            },
+            peerDependencies: {
+              [`pkg-c`]: `*`,
+            },
+          });
+        }
+
+        await xfs.writeFilePromise(ppath.join(path, `packages/pkg-a/index.js` as PortablePath), `module.exports = require('pkg-b/peer');\n`);
+        await xfs.writeFilePromise(ppath.join(path, `packages/pkg-b/peer.js` as PortablePath), `module.exports = require('pkg-c');\n`);
+
+        await xfs.mkdirPromise(ppath.join(path, `packages/pkg-c` as PortablePath), {recursive: true});
+        await xfs.writeJsonPromise(ppath.join(path, `packages/pkg-c/package.json` as PortablePath), {
+          name: `pkg-c`,
+          version: `1.0.0`,
+        });
+        await xfs.writeFilePromise(ppath.join(path, `packages/pkg-c/index.js` as PortablePath), `module.exports = 42;\n`);
+
+        await run(`install`);
+
+        // pkg-b gets pkg-c through pkg-a, which gets it from the root
+        await expect(source(`require('pkg-a')`)).resolves.toEqual(42);
+      }),
+    );
   });
 });

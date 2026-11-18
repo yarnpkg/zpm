@@ -56,6 +56,24 @@ impl FromStr for DedupeStrategy {
 ///
 /// This command accepts glob patterns as arguments. Make sure to escape the patterns, to prevent your own shell from trying to expand them.
 ///
+/// ## Examples
+///
+/// Dedupe all packages
+///
+/// `yarn dedupe`
+///
+/// Dedupe a specific package
+///
+/// `yarn dedupe lodash`
+///
+/// Dedupe all packages with the `@babel/*` scope
+///
+/// `yarn dedupe '@babel/*'`
+///
+/// Check for duplicates (can be used as a CI step)
+///
+/// `yarn dedupe --check`
+///
 #[cli::command]
 #[cli::path("dedupe")]
 #[cli::category("Scripting commands")]

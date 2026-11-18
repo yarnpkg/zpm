@@ -21,9 +21,6 @@ use crate::{
 /// If `-R,--recursive` is set, Yarn refreshes all lockfile resolutions matching the selected packages without editing manifests. Depending on the
 /// goal, you may want to run both `yarn up` and `yarn up -R`.
 ///
-/// If `-i,--interactive` is set, or if the `preferInteractive` setting is enabled, the command offers various choices depending on the
-/// detected upgrade paths. Some upgrades require this flag in order to resolve ambiguities.
-///
 /// The `-C,--caret`, `-E,--exact`, and `-T,--tilde` options have the same meaning as in `yarn add`: they choose the range modifier used when the
 /// requested descriptor has no explicit range or uses a tag.
 ///
@@ -44,6 +41,24 @@ use crate::{
 /// your own shell from trying to expand them.
 ///
 /// **Note:** The ranges have to be static, only the package scopes and names can contain glob patterns.
+///
+/// ## Examples
+///
+/// Upgrade all instances of lodash to the latest release
+///
+/// `yarn up lodash`
+///
+/// Upgrade all instances of lodash to 4.17.21
+///
+/// `yarn up lodash@4.17.21`
+///
+/// Upgrade all instances of packages with the `@babel` scope to the latest release
+///
+/// `yarn up '@babel/*'`
+///
+/// Refresh the lockfile resolutions of lodash without changing the manifests
+///
+/// `yarn up -R lodash`
 ///
 #[cli::command]
 #[cli::path("up")]

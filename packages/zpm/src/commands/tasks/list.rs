@@ -17,6 +17,17 @@ use super::helpers::format_start_time;
 ///
 /// The output shows each task's name, current status (running or stopped),
 /// and when it was started (for running tasks).
+///
+/// ## Examples
+///
+/// List the long-lived tasks of the project
+///
+/// `yarn tasks`
+///
+/// List the long-lived tasks of the project as NDJSON
+///
+/// `yarn tasks --json`
+///
 #[cli::command]
 #[cli::path("tasks")]
 #[cli::category("Task management commands")]

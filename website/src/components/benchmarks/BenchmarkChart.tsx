@@ -1,10 +1,19 @@
-import {useState, useEffect, useMemo, useRef, useCallback, type JSX}                                                          from 'react';
+import {useState, useEffect, useId, useMemo, useRef, useCallback, type JSX}                                                   from 'react';
 
 import type {HoverInfo}                                                                                                       from './BenchmarkTooltip';
 import {SERIES_COLORS, median, getSeriesValues, type SeriesMeta, type Scenario, type Project, type Incident, type BenchPoint} from './BenchmarksDashboard';
 import type {VersionEntry}                                                                                                    from './useVersions';
 
 const ML = 30, MR = 6, MT = 8, MB = 18;
+
+// When outliers are excluded, the y-axis stops right above the value that
+// more than this share of the data points of each series stay under
+const OUTLIER_THRESHOLD = 0.75;
+
+function outlierCap(values: Array<number>): number {
+  const sorted = [...values].sort((a, b) => a - b);
+  return sorted[Math.min(sorted.length - 1, Math.floor(sorted.length * OUTLIER_THRESHOLD))];
+}
 
 const GITHUB_REPOS: Record<string, {repo: string, tagPrefix: string}> = {
   npm: {repo: `npm/cli`, tagPrefix: `v`},
@@ -20,6 +29,7 @@ interface Props {
   seriesOrder: ReadonlyArray<string>;
   seriesMeta: Record<string, SeriesMeta>;
   mutedSeries: Record<string, boolean>;
+  excludeOutliers: boolean;
   incidents: Array<Incident>;
   versions: Record<string, Array<VersionEntry>> | null;
   showVersions: boolean;
@@ -27,7 +37,8 @@ interface Props {
   onHover: (info: HoverInfo | null | ((prev: HoverInfo | null) => HoverInfo | null)) => void;
 }
 
-export function BenchmarkChart({scenario, project, data, seriesOrder, seriesMeta, mutedSeries, incidents, versions, showVersions, hoveredIndex, onHover}: Props): JSX.Element {
+export function BenchmarkChart({scenario, project, data, seriesOrder, seriesMeta, mutedSeries, excludeOutliers, incidents, versions, showVersions, hoveredIndex, onHover}: Props): JSX.Element {
+  const clipId = `bench-clip-${useId().replace(/[^a-zA-Z0-9]/g, ``)}`;
   const svgRef = useRef<SVGSVGElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const [size, setSize] = useState<{w: number, h: number} | null>(null);
@@ -60,32 +71,33 @@ export function BenchmarkChart({scenario, project, data, seriesOrder, seriesMeta
       return null;
 
     const visible = seriesOrder.filter(s => !mutedSeries[s]);
-    const allVals: Array<number> = [];
+
+    // Highest value to keep in view, for each visible series
+    const seriesTops: Array<number> = [];
     for (const sid of visible) {
-      const vals = getSeriesValues(data, sid);
-      for (const v of vals) {
-        if (v !== null) {
-          allVals.push(v);
-        }
+      const vals = getSeriesValues(data, sid).filter((v): v is number => v !== null);
+      if (vals.length) {
+        seriesTops.push(excludeOutliers ? outlierCap(vals) : Math.max(...vals));
       }
     }
 
-    if (!allVals.length)
+    if (!seriesTops.length)
       return null;
 
 
     const yMin = 0;
-    let yMax = Math.max(...allVals);
+    let yMax = Math.max(...seriesTops);
     const pad = yMax * 0.12 || 0.1;
     yMax = yMax + pad;
 
-    const points = data[seriesOrder[0]];
+    // Every series of a chart shares the same time axis
+    const points = Object.values(data)[0];
     const N = points?.length ?? 0;
     if (!N)
       return null;
 
 
-    const xScale = (i: number) => ML + (i / (N - 1)) * pw;
+    const xScale = (i: number) => ML + (N > 1 ? i / (N - 1) : 0.5) * pw;
     const yScale = (v: number) => MT + ph - ((v - yMin) / (yMax - yMin)) * ph;
 
     const incidentSet: Record<number, boolean> = {};
@@ -199,7 +211,7 @@ export function BenchmarkChart({scenario, project, data, seriesOrder, seriesMeta
       pct: (yScale(v) / h * 100),
     }));
 
-    const dateIndices = [0, Math.floor(N / 4), Math.floor(N / 2), Math.floor(3 * N / 4), N - 1];
+    const dateIndices = [...new Set([0, Math.floor(N / 4), Math.floor(N / 2), Math.floor(3 * N / 4), N - 1])];
     const xLabels = dateIndices.map(idx => {
       const ts = points[idx].timestamp;
       const d = new Date(ts * 1000);
@@ -217,7 +229,7 @@ export function BenchmarkChart({scenario, project, data, seriesOrder, seriesMeta
       yTicks, xLabels,
       drawOrder,
     };
-  }, [data, seriesOrder, seriesMeta, mutedSeries, incidents, versions, showVersions, size]);
+  }, [data, seriesOrder, seriesMeta, mutedSeries, excludeOutliers, incidents, versions, showVersions, size]);
 
   const zpmValues = useMemo(() => getSeriesValues(data, `zpm`), [data]);
   const zpmMedian = useMemo(() => median(zpmValues), [zpmValues]);
@@ -490,19 +502,28 @@ export function BenchmarkChart({scenario, project, data, seriesOrder, seriesMeta
             <rect x={chartData.band.x} y={chartData.band.y} width={chartData.band.w} height={chartData.band.h} className={`ax-band`} />
           )}
 
-          {chartData.paths.map(p => (
-            <path key={p.id} d={p.d} className={p.cls} stroke={p.color} style={{[`--c` as any]: p.color}} />
-          ))}
-
-          {chartData.versionDots.map((dot, i) =>
-            dot.url ? (
-              <a key={i} href={dot.url} target={`_blank`} rel={`noopener noreferrer`} className={`version-dot-link`}>
-                <circle cx={dot.cx} cy={dot.cy} r={dot.r} fill={dot.color} className={dot.cls} />
-              </a>
-            ) : (
-              <circle key={i} cx={dot.cx} cy={dot.cy} r={dot.r} fill={dot.color} className={dot.cls} />
-            ),
+          {/* Outliers run off the top of the chart rather than over its surroundings */}
+          {excludeOutliers && (
+            <clipPath id={clipId}>
+              <rect x={ML - 4} y={MT} width={chartData.pw + 8} height={chartData.ph + 4} />
+            </clipPath>
           )}
+
+          <g clipPath={excludeOutliers ? `url(#${clipId})` : undefined}>
+            {chartData.paths.map(p => (
+              <path key={p.id} d={p.d} className={p.cls} stroke={p.color} style={{[`--c` as any]: p.color}} />
+            ))}
+
+            {chartData.versionDots.map((dot, i) =>
+              dot.url ? (
+                <a key={i} href={dot.url} target={`_blank`} rel={`noopener noreferrer`} className={`version-dot-link`}>
+                  <circle cx={dot.cx} cy={dot.cy} r={dot.r} fill={dot.color} className={dot.cls} />
+                </a>
+              ) : (
+                <circle key={i} cx={dot.cx} cy={dot.cy} r={dot.r} fill={dot.color} className={dot.cls} />
+              ),
+            )}
+          </g>
 
           {hoveredIndex !== null && hoveredIndex < chartData.N && (
             <line

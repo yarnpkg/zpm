@@ -388,6 +388,50 @@ describe(`Commands`, () => {
     );
 
     test(
+      `it should update the registry entry in place when it is keyed without the protocol`,
+      makeTemporaryEnv({}, async ({path, run, source}) => {
+        const url = await startPackageServer();
+        const protocolLessKey = url.replace(/^https?:/, ``);
+
+        const rcPath = ppath.join(path, PortablePath.parent, SPEC_RC_FILENAME);
+        await xfs.writeJsonPromise(rcPath, {
+          npmRegistries: {
+            [protocolLessKey]: {
+              npmAlwaysAuth: true,
+            },
+          },
+        });
+
+        await run(`npm`, `login`, {
+          env: {
+            YARN_INJECT_NPM_USER: validLogins.fooUser.username,
+            YARN_INJECT_NPM_PASSWORD: validLogins.fooUser.password,
+            YARN_RC_FILENAME: SPEC_RC_FILENAME,
+          },
+        });
+
+        const finalRcFileContent = parseSyml(await xfs.readFilePromise(rcPath, `utf8`));
+
+        expect(finalRcFileContent).toStrictEqual({
+          npmRegistries: {
+            [protocolLessKey]: {
+              npmAlwaysAuth: `true`, // parseSyml doesn't parse booleans
+              npmAuthToken: expect.any(String),
+            },
+          },
+        });
+
+        await expect(run(`npm`, `whoami`, {
+          env: {
+            YARN_RC_FILENAME: SPEC_RC_FILENAME,
+          },
+        })).resolves.toMatchObject({
+          stdout: expect.stringContaining(validLogins.fooUser.username),
+        });
+      }),
+    );
+
+    test(
       `it should store npmAlwaysAuth when passed as option`,
       makeTemporaryEnv({}, async ({path, run, source}) => {
         const rcPath = ppath.join(path, PortablePath.parent, SPEC_RC_FILENAME);

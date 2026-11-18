@@ -220,16 +220,40 @@ impl FromFileString for std::time::Duration {
     }
 }
 
+/// Durations are written as a single integer followed by the largest unit
+/// that represents them exactly, from milliseconds to days (`0s`, `90s`,
+/// `3h`, `1d`, `36h`, `1500ms`). The unit is always explicit so that the
+/// result doesn't depend on how a bare number would be interpreted, and the
+/// units are the ones Yarn 4 also understands. Weeks aren't used, since `7d`
+/// and `14d` are easier to read than `1w` and `2w`. Durations with a
+/// sub-millisecond part fall back to nanoseconds to stay exact.
 impl ToFileString for std::time::Duration {
     fn to_file_string(&self) -> String {
-        let ms = self.as_millis();
-        if ms == 0 {
-            "0s".to_string()
-        } else if ms % 1000 == 0 {
-            format!("{}s", ms / 1000)
-        } else {
-            format!("{}ms", ms)
+        const UNITS: [(&str, u128); 4] = [
+            ("d", 24 * 60 * 60 * 1000),
+            ("h", 60 * 60 * 1000),
+            ("m", 60 * 1000),
+            ("s", 1000),
+        ];
+
+        if self.is_zero() {
+            return "0s".to_string();
         }
+
+        if self.subsec_nanos() % 1_000_000 != 0 {
+            return format!("{}ns", self.as_nanos());
+        }
+
+        let ms
+            = self.as_millis();
+
+        for (unit, multiplier) in UNITS {
+            if ms % multiplier == 0 {
+                return format!("{}{}", ms / multiplier, unit);
+            }
+        }
+
+        format!("{}ms", ms)
     }
 }
 
@@ -237,6 +261,48 @@ impl ToHumanString for std::time::Duration {
     fn to_print_string(&self) -> String {
         DataType::Number.colorize(&self.to_file_string())
     }
+}
+
+/// The unit in which a duration setting reads a value that has none (`1440`
+/// rather than `1440m`); it's declared per setting in the configuration
+/// schema, mirroring the `unit` of Berry's duration settings.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DurationUnit {
+    Milliseconds,
+    Seconds,
+    Minutes,
+    Hours,
+    Days,
+    Weeks,
+}
+
+impl DurationUnit {
+    fn to_time_unit(self) -> fundu::TimeUnit {
+        match self {
+            DurationUnit::Milliseconds => fundu::TimeUnit::MilliSecond,
+            DurationUnit::Seconds => fundu::TimeUnit::Second,
+            DurationUnit::Minutes => fundu::TimeUnit::Minute,
+            DurationUnit::Hours => fundu::TimeUnit::Hour,
+            DurationUnit::Days => fundu::TimeUnit::Day,
+            DurationUnit::Weeks => fundu::TimeUnit::Week,
+        }
+    }
+}
+
+/// Parses a duration, reading a value without unit as a number of `unit`.
+/// The accepted units (`ms`, `s`, `m`, `h`, `d`, `w`, plus `ns` and `Ms` for
+/// microseconds) mean the same thing as in Berry, and so do decimal values.
+pub fn parse_duration_with_unit(s: &str, unit: DurationUnit) -> Result<std::time::Duration, fundu::ParseError> {
+    let parser
+        = fundu::DurationParser::builder()
+            .default_time_units()
+            .default_unit(unit.to_time_unit())
+            .build();
+
+    // Negative durations are rejected by the parser in this configuration, so
+    // the conversion can't fail
+    parser.parse(s)
+        .map(|duration| duration.try_into().unwrap())
 }
 
 impl FromFileString for String {
@@ -387,3 +453,86 @@ macro_rules! impl_file_string_serialization(($type:ty) => {
         }
     }
 });
+
+#[cfg(test)]
+mod tests {
+    use std::time::Duration;
+
+    use rstest::rstest;
+
+    use super::*;
+
+    #[rstest]
+    // A value without unit is a number of the setting's unit
+    #[case("1440", DurationUnit::Minutes, Duration::from_secs(24 * 60 * 60))]
+    #[case("1440", DurationUnit::Seconds, Duration::from_secs(1440))]
+    #[case("1440", DurationUnit::Milliseconds, Duration::from_millis(1440))]
+    #[case("2", DurationUnit::Hours, Duration::from_secs(2 * 60 * 60))]
+    #[case("2", DurationUnit::Days, Duration::from_secs(2 * 24 * 60 * 60))]
+    #[case("2", DurationUnit::Weeks, Duration::from_secs(2 * 7 * 24 * 60 * 60))]
+    #[case("0", DurationUnit::Minutes, Duration::ZERO)]
+    // Decimals, with or without leading digit
+    #[case("1.5", DurationUnit::Minutes, Duration::from_secs(90))]
+    #[case(".5", DurationUnit::Minutes, Duration::from_secs(30))]
+    #[case("0.25", DurationUnit::Seconds, Duration::from_millis(250))]
+    #[case("1.5d", DurationUnit::Minutes, Duration::from_secs(36 * 60 * 60))]
+    // An explicit unit wins over the setting's unit, whatever it is
+    #[case("1440ms", DurationUnit::Minutes, Duration::from_millis(1440))]
+    #[case("1440s", DurationUnit::Minutes, Duration::from_secs(1440))]
+    #[case("30m", DurationUnit::Seconds, Duration::from_secs(30 * 60))]
+    #[case("3h", DurationUnit::Milliseconds, Duration::from_secs(3 * 60 * 60))]
+    #[case("7d", DurationUnit::Seconds, Duration::from_secs(7 * 24 * 60 * 60))]
+    #[case("2w", DurationUnit::Minutes, Duration::from_secs(2 * 7 * 24 * 60 * 60))]
+    #[case("0s", DurationUnit::Minutes, Duration::ZERO)]
+    // Units Berry doesn't know about, kept for compatibility with earlier Yarn 6 releases
+    #[case("1500Ms", DurationUnit::Minutes, Duration::from_micros(1500))]
+    #[case("1500ns", DurationUnit::Minutes, Duration::from_nanos(1500))]
+    fn test_parse_duration_with_unit(#[case] input: &str, #[case] unit: DurationUnit, #[case] expected: Duration) {
+        assert_eq!(parse_duration_with_unit(input, unit).unwrap(), expected);
+    }
+
+    #[rstest]
+    #[case("")]
+    #[case("-5")]
+    #[case("-5m")]
+    #[case("5 m")]
+    #[case("1M")]
+    #[case("1y")]
+    #[case("5 minutes")]
+    #[case("abc")]
+    fn test_parse_duration_with_unit_errors(#[case] input: &str) {
+        assert!(parse_duration_with_unit(input, DurationUnit::Minutes).is_err());
+    }
+
+    #[rstest]
+    #[case(Duration::ZERO, "0s")]
+    #[case(Duration::from_millis(1), "1ms")]
+    #[case(Duration::from_millis(1500), "1500ms")]
+    #[case(Duration::from_secs(1), "1s")]
+    #[case(Duration::from_secs(90), "90s")]
+    #[case(Duration::from_secs(60), "1m")]
+    #[case(Duration::from_secs(90 * 60), "90m")]
+    #[case(Duration::from_secs(3 * 60 * 60), "3h")]
+    #[case(Duration::from_secs(36 * 60 * 60), "36h")]
+    #[case(Duration::from_secs(24 * 60 * 60), "1d")]
+    #[case(Duration::from_secs(7 * 24 * 60 * 60), "7d")]
+    #[case(Duration::from_secs(400 * 24 * 60 * 60), "400d")]
+    #[case(Duration::from_nanos(1_500), "1500ns")]
+    #[case(Duration::new(1, 1), "1000000001ns")]
+    fn durations_should_use_a_canonical_file_string(#[case] duration: Duration, #[case] expected: &str) {
+        assert_eq!(duration.to_file_string(), expected);
+        assert_eq!(Duration::from_file_string(expected).unwrap(), duration);
+    }
+
+    #[rstest]
+    #[case("0", "0s")]
+    #[case("0ms", "0s")]
+    #[case("3h", "3h")]
+    #[case("180m", "3h")]
+    #[case("1.5h", "90m")]
+    #[case("1w", "7d")]
+    #[case("86400s", "1d")]
+    fn durations_should_normalize_equivalent_inputs(#[case] input: &str, #[case] expected: &str) {
+        assert_eq!(Duration::from_file_string(input).unwrap().to_file_string(), expected);
+    }
+}

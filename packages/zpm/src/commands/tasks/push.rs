@@ -12,6 +12,17 @@ use crate::error::Error;
 ///
 /// This is useful for dynamically spawning subtasks based on runtime conditions,
 /// such as triggering build steps after certain conditions are met.
+///
+/// ## Examples
+///
+/// Schedule the `build` task from within a running task
+///
+/// `yarn tasks push build`
+///
+/// Schedule multiple tasks at once
+///
+/// `yarn tasks push lint test`
+///
 #[cli::command]
 #[cli::path("tasks", "push")]
 #[cli::category("Task management commands")]

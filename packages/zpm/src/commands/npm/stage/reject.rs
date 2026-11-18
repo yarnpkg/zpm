@@ -15,6 +15,12 @@ use super::{registry_auth, StageId};
 /// This command permanently removes a package version from the active workspace's publish registry's staging area.
 /// If the registry requires two-factor authentication, use `--otp` or enter the code when prompted.
 ///
+/// ## Examples
+///
+/// Reject a staged package
+///
+/// `yarn npm stage reject 1de6f3db-2ed9-4d72-b3dd-8f0e2b474a2f`
+///
 #[cli::command]
 #[cli::path("npm", "stage", "reject")]
 #[cli::category("Npm-related commands")]

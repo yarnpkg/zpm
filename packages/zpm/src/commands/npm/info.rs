@@ -10,6 +10,7 @@ use zpm_utils::FromFileString;
 use crate::{
     error::Error,
     http_npm::{self, AuthorizationMode, GetAuthorizationOptions, GetPackageMetadataParams, get_authorization, get_registry_for_ident},
+    npm,
     project::Project,
 };
 
@@ -26,6 +27,24 @@ use crate::{
 /// - `<name>@<range>` — return information about the highest version that satisfies the range.
 ///
 /// - `<name>@<tag>` — return information about the version associated with the given dist-tag.
+///
+/// ## Examples
+///
+/// Show the latest version of react
+///
+/// `yarn npm info react`
+///
+/// Show information about react@16.12.0
+///
+/// `yarn npm info react@16.12.0`
+///
+/// Show the version of react tagged as `next`
+///
+/// `yarn npm info react@next`
+///
+/// Show the highest version of react matching a range
+///
+/// `yarn npm info react@^17`
 ///
 #[cli::command]
 #[cli::path("npm", "info")]
@@ -73,8 +92,8 @@ impl Info {
         #[derive(Deserialize)]
         struct RegistryMetadata<'a> {
             #[serde(default, rename = "dist-tags")]
-            dist_tags: BTreeMap<String, zpm_semver::Version>,
-            #[serde(borrow)]
+            dist_tags: BTreeMap<String, String>,
+            #[serde(borrow, deserialize_with = "npm::deserialize_packument_versions")]
             versions: BTreeMap<zpm_semver::Version, RawJsonValue<'a>>,
         }
 
@@ -83,20 +102,20 @@ impl Info {
 
         let target_version = match selector {
             Selector::Latest => {
-                registry_data.dist_tags.get("latest")
-                    .cloned()
-                    .ok_or_else(|| Error::TagNotFound("latest".to_string()))?
+                npm::get_dist_tag_version(&ident, &registry_data.dist_tags, "latest")?
             },
             Selector::Tag(tag) => {
-                registry_data.dist_tags.get(&tag)
-                    .cloned()
-                    .ok_or_else(|| Error::TagNotFound(tag))?
+                npm::get_dist_tag_version(&ident, &registry_data.dist_tags, &tag)
+                    .map_err(|error| match error {
+                        Error::TagNotFound(_) => npm::find_ignored_version_error(&ident, &bytes[..], &tag).unwrap_or(error),
+                        error => error,
+                    })?
             },
             Selector::Range(range) => {
                 registry_data.versions.keys().rev()
                     .find(|version| range.check(version))
                     .cloned()
-                    .ok_or_else(|| Error::PackageNotFound(ident.clone()))?
+                    .ok_or_else(|| npm::find_ignored_version_error(&ident, &bytes[..], range.source.as_str()).unwrap_or_else(|| Error::PackageNotFound(ident.clone())))?
             },
         };
 

@@ -8,7 +8,7 @@ sidebar:
 ---
 
 :::danger
-PnPify is mostly deprecated since Yarn supports [`node_modules`](/configuration/yarnrc#nodeLinker) installs out of the box.
+PnPify is mostly deprecated since Yarn supports [`node_modules`](/configuration/yarnrc#field-nodelinker) installs out of the box.
 :::
 
 ## Motivation
@@ -35,7 +35,7 @@ yarn add @yarnpkg/pnpify
 yarn pnpify tsc
 ```
 
-More details about the run command can be found on its [dedicated page](https://yarnpkg.com/cli/pnpify/run).
+More details about the run command can be found in its [usage documentation](https://github.com/yarnpkg/berry/blob/master/packages/yarnpkg-pnpify/sources/commands/RunCommand.ts).
 
 ## Caveat
 

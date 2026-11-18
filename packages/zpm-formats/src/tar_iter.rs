@@ -34,23 +34,64 @@ impl<'a> TarIterator<'a> {
         }
     }
 
+    /// PAX records are "<length> <keyword>=<value>\n", where <length> counts
+    /// the whole record. Values aren't always text: `SCHILY.xattr.*` records
+    /// hold raw extended attributes (bsdtar on macOS adds a binary
+    /// `com.apple.provenance` to every file), which may contain newlines and
+    /// aren't UTF-8. Records are thus split on their length when it points at
+    /// a record end (falling back to the next newline when it doesn't), and
+    /// values that aren't UTF-8 are skipped unless they're one we read.
     fn parse_pax_headers(&self, data: &[u8]) -> Result<HashMap<String, String>, Error> {
-        let mut headers = HashMap::new();
-        let content = std::str::from_utf8(data)?;
+        let mut headers
+            = HashMap::new();
 
-        for line in content.lines() {
-            if line.is_empty() {
+        let mut rest
+            = data;
+
+        while !rest.is_empty() {
+            let line_end
+                = rest.iter().position(|&c| c == b'\n')
+                    .map_or(rest.len(), |pos| pos + 1);
+
+            let length
+                = rest.iter().position(|&c| c == b' ')
+                    .and_then(|space_pos| std::str::from_utf8(&rest[..space_pos]).ok())
+                    .and_then(|length| length.parse::<usize>().ok())
+                    .filter(|&length| length > 0 && length <= rest.len() && rest[length - 1] == b'\n')
+                    .unwrap_or(line_end);
+
+            let record
+                = &rest[..length];
+            let record
+                = record.strip_suffix(b"\n").unwrap_or(record);
+
+            rest = &rest[length..];
+
+            let Some(space_pos) = record.iter().position(|&c| c == b' ') else {
                 continue;
-            }
+            };
 
-            // PAX format: "length keyword=value\n"
-            if let Some(space_pos) = line.find(' ') {
-                let keyword_value = &line[space_pos + 1..];
-                if let Some(eq_pos) = keyword_value.find('=') {
-                    let keyword = &keyword_value[..eq_pos];
-                    let value = &keyword_value[eq_pos + 1..];
+            let record
+                = &record[space_pos + 1..];
+
+            let Some(eq_pos) = record.iter().position(|&c| c == b'=') else {
+                continue;
+            };
+
+            let Ok(keyword) = std::str::from_utf8(&record[..eq_pos]) else {
+                continue;
+            };
+
+            match std::str::from_utf8(&record[eq_pos + 1..]) {
+                Ok(value) => {
                     headers.insert(keyword.to_string(), value.to_string());
-                }
+                },
+
+                Err(err) if keyword == "path" || keyword == "linkpath" => {
+                    return Err(err.into());
+                },
+
+                Err(_) => {},
             }
         }
 
@@ -304,6 +345,39 @@ mod tests {
 
         assert_eq!(headers.get("comment"), Some(&"679be5902097ed612fb5062b5549f3f32b6f5f47".to_string()));
         assert_eq!(headers.get("path"), Some(&"strophejs-plugin-stream-management-679be5902097ed612fb5062b5549f3f32b6f5f47/src/strophe.stream-management.js".to_string()));
+    }
+
+    #[test]
+    fn test_pax_header_parsing_binary_xattr() {
+        // As written by bsdtar on macOS (e.g. the cypress@15 npm tarball)
+        let pax_data = b"57 LIBARCHIVE.xattr.com.apple.provenance=AQIAF+h7EYaCXbU\n49 SCHILY.xattr.com.apple.provenance=\x01\x02\x00\x17\xe8{\x11\x86\x82]\xb5\n17 path=a/b/c.js\n";
+
+        let iterator = TarIterator::new(&[]);
+        let headers = iterator.parse_pax_headers(pax_data).unwrap();
+
+        assert_eq!(headers.get("LIBARCHIVE.xattr.com.apple.provenance"), Some(&"AQIAF+h7EYaCXbU".to_string()));
+        assert_eq!(headers.get("SCHILY.xattr.com.apple.provenance"), None);
+        assert_eq!(headers.get("path"), Some(&"a/b/c.js".to_string()));
+    }
+
+    #[test]
+    fn test_pax_header_parsing_value_with_newline() {
+        let pax_data = b"17 comment=a\nb\nc\n13 path=a.js\n";
+
+        let iterator = TarIterator::new(&[]);
+        let headers = iterator.parse_pax_headers(pax_data).unwrap();
+
+        assert_eq!(headers.get("comment"), Some(&"a\nb\nc".to_string()));
+        assert_eq!(headers.get("path"), Some(&"a.js".to_string()));
+    }
+
+    #[test]
+    fn test_pax_header_parsing_binary_path() {
+        let pax_data = b"13 path=\xe8.js\n";
+
+        let iterator = TarIterator::new(&[]);
+
+        assert!(iterator.parse_pax_headers(pax_data).is_err());
     }
 
     #[test]

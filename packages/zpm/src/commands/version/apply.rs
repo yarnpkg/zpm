@@ -1,42 +1,54 @@
-use std::collections::BTreeMap;
-
 use clipanion::cli;
-use indexmap::IndexMap;
-use zpm_utils::{AbstractValue, tree};
 
-use crate::{error::Error, project, versioning};
+use crate::{error::Error, project};
 
-/// Apply deferred version decisions
+use super::immediate::{bump_versions, parse_prerelease_pattern, BumpOptions};
+
+/// Apply deferred records to workspaces
 ///
-/// This command applies deferred version changes and removes their definitions from the repository.
+/// This command will apply the deferred version changes to workspaces. The applied records are removed from the project, unless `--prerelease` is
+/// set, in which case they are kept so that a later stable apply can still consume them.
 ///
-/// If `--prerelease` is set, the given prerelease identifier (by default `rc.%n`) is used for all new versions and the version definitions are kept.
+/// It is equivalent to running `yarn version decline --immediate`: by default only the current workspace will be bumped, `--all` applies the
+/// deferred records of all the workspaces in the project, and attempting to apply a record that would lower the version of a workspace will throw
+/// an error unless `--force` is set. For more information on the options, see the `yarn version` command.
 ///
-/// By default only the current workspace will be bumped, but you can configure this behavior by using one of:
+/// This command only updates the versions of the bumped workspaces; it doesn't update the ranges that other workspaces use to depend on them. Use
+/// the `workspace:^` / `workspace:~` ranges if you need them to follow the version bumps.
 ///
-/// - `--recursive` to also apply the version bump on its dependencies
-/// - `--all` to apply the version bump on all packages in the repository
+/// ## Examples
 ///
-/// This command also updates local `workspace:` references so they keep pointing to the same workspaces after the version bump.
+/// Apply the deferred version change to the current workspace
+///
+/// `yarn version apply`
+///
+/// Apply the deferred version changes to all the workspaces of the project
+///
+/// `yarn version apply --all`
+///
 #[cli::command]
 #[cli::path("version", "apply")]
 #[cli::category("Project management")]
 pub struct VersionApply {
-    /// Apply deferred version changes for all workspaces
+    /// Apply the deferred records of all workspaces
     #[cli::option("--all", default = false)]
     all: bool,
 
-    /// Print the version changes without writing them
+    /// Not supported yet; consider using `--all` instead
+    #[cli::option("-R,--recursive", default = false)]
+    recursive: bool,
+
+    /// Specify a prerelease pattern to use when computing the new versions
+    #[cli::option("--prerelease")]
+    prerelease: Option<Option<String>>,
+
+    /// Print the new versions without actually bumping them
     #[cli::option("--dry-run", default = false)]
     dry_run: bool,
 
-    /// Apply versions as prereleases using this identifier pattern
-    #[cli::option("--prerelease")]
-    prerelease: Option<String>,
-
-    /// Release the transitive workspaces as well
-    #[cli::option("-R,--recursive", default = false)]
-    recursive: bool,
+    /// Bypass the check for bumping to a lower version than the current one
+    #[cli::option("--force", default = false)]
+    force: bool,
 
     /// Format the output as an NDJSON stream
     #[cli::option("--json", default = false)]
@@ -45,96 +57,21 @@ pub struct VersionApply {
 
 impl VersionApply {
     pub async fn execute(&self) -> Result<(), Error> {
+        if self.recursive && !self.all {
+            return Err(Error::RecursiveVersionApplyNotImplemented);
+        }
+
         let project
             = project::Project::new(None).await?;
 
-        let active_workspace
-            = project.active_workspace()?;
-
-        let versioning
-            = versioning::Versioning::new(&project);
-
-        let mut releases
-            = versioning.resolve_releases(versioning::ResolveOptions {
-                prerelease: self.prerelease.as_deref(),
-            })?;
-
-        if self.all {
-            if releases.is_empty() {
-                return Err(Error::NoVersionBumpRequiredForProject);
-            }
-        } else {
-            if self.recursive {
-                return Err(Error::RecursiveVersionApplyNotImplemented);
-            } else {
-                let Some(requested_version) = releases.remove(&active_workspace.name) else {
-                    return Ok(());
-                };
-
-                releases = BTreeMap::from_iter([(
-                    active_workspace.name.clone(),
-                    requested_version,
-                )]);
-            }
-        }
-
-        let mut root_children
-            = Vec::new();
-
-        for (workspace_ident, next_version) in releases.iter() {
-            let workspace
-                = project.workspace_by_ident(workspace_ident)?;
-
-            let mut workspace_children
-                = IndexMap::new();
-
-            let current_version
-                = workspace.manifest.remote.version.as_ref()
-                    .ok_or(Error::NoVersionFoundForWorkspace(workspace_ident.clone()))?;
-
-            workspace_children.insert("current".to_string(), tree::Node {
-                label: Some("Current version".to_string()),
-                value: Some(AbstractValue::new(current_version.clone())),
-                children: None,
-            });
-
-            workspace_children.insert("next".to_string(), tree::Node {
-                label: Some("Next version".to_string()),
-                value: Some(AbstractValue::new(next_version.clone())),
-                children: None,
-            });
-
-            root_children.push(tree::Node {
-                label: None,
-                value: Some(AbstractValue::new(workspace_ident.clone())),
-                children: Some(tree::TreeNodeChildren::Map(workspace_children)),
-            });
-        }
-
-        let root_node = tree::Node {
-            label: None,
-            value: None,
-            children: Some(tree::TreeNodeChildren::Vec(root_children)),
-        };
-
-        let rendering
-            = tree::TreeRenderer::new()
-                .render(&root_node, self.json);
-
-        print!("{}", rendering);
-
-        if self.dry_run {
-            return Ok(());
-        }
-
-        for (workspace_ident, version) in releases.iter() {
-            if self.prerelease.is_some() {
-                versioning.set_manifest_version(workspace_ident, version)?;
-            } else {
-                versioning.apply_version(workspace_ident, version)?;
-            }
-        }
-
-        Ok(())
+        bump_versions(&project, BumpOptions {
+            strategy: None,
+            all: self.all,
+            deferred: false,
+            prerelease: parse_prerelease_pattern(&self.prerelease)?,
+            dry_run: self.dry_run,
+            force: self.force,
+            json: self.json,
+        }).await
     }
 }

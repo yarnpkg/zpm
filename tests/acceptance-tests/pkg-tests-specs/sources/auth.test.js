@@ -260,6 +260,165 @@ describe(`Auth tests`, () => {
   );
 
   test(
+    `it should match registries url keys written without the protocol`,
+    makeTemporaryEnv(
+      {
+        dependencies: {[`@private/package`]: `1.0.0`},
+      },
+      async ({path, run, source}) => {
+        const url = await startPackageServer();
+
+        await writeFile(`${path}/.yarnrc.yml`, [
+          `npmScopes:`,
+          `  private:`,
+          `    npmRegistryServer: "${url}"`,
+          `npmRegistries:`,
+          `  "${url.replace(/^https?:/, ``)}":`, // Yarn 4's `//host` form
+          `    npmAuthToken: ${validLogins.fooUser.npmAuthToken}`,
+        ].join(`\n`));
+
+        await run(`install`);
+
+        await expect(source(`require('@private/package')`)).resolves.toMatchObject({
+          name: `@private/package`,
+          version: `1.0.0`,
+        });
+      },
+    ),
+  );
+
+  test(
+    `it should match registries url keys written without the protocol but with a trailing slash`,
+    makeTemporaryEnv(
+      {
+        dependencies: {[`@private/package`]: `1.0.0`},
+      },
+      async ({path, run, source}) => {
+        const url = await startPackageServer();
+
+        await writeFile(`${path}/.yarnrc.yml`, [
+          `npmScopes:`,
+          `  private:`,
+          `    npmRegistryServer: "${url}/"`,
+          `npmRegistries:`,
+          `  "${url.replace(/^https?:/, ``)}/":`,
+          `    npmAuthToken: ${validLogins.fooUser.npmAuthToken}`,
+        ].join(`\n`));
+
+        await run(`install`);
+
+        await expect(source(`require('@private/package')`)).resolves.toMatchObject({
+          name: `@private/package`,
+          version: `1.0.0`,
+        });
+      },
+    ),
+  );
+
+  test(
+    `it should honor npmAlwaysAuth from registries url keys written without the protocol`,
+    makeTemporaryEnv(
+      {
+        dependencies: {[`private-package`]: `1.0.0`},
+      },
+      async ({path, run, source}) => {
+        const url = await startPackageServer();
+
+        await writeFile(`${path}/.yarnrc.yml`, [
+          `npmRegistryServer: "${url}"`,
+          `npmRegistries:`,
+          `  "${url.replace(/^https?:/, ``)}":`,
+          `    npmAlwaysAuth: true`,
+          `    npmAuthToken: ${validLogins.fooUser.npmAuthToken}`,
+        ].join(`\n`));
+
+        await run(`install`);
+
+        await expect(source(`require('private-package')`)).resolves.toMatchObject({
+          name: `private-package`,
+          version: `1.0.0`,
+        });
+      },
+    ),
+  );
+
+  test(
+    `it should fail to install packages if npmAlwaysAuth is set to true without auth present in registries url keys written without the protocol`,
+    makeTemporaryEnv(
+      {
+        dependencies: {[`no-deps`]: `1.0.0`},
+      },
+      async ({path, run, source}) => {
+        const url = await startPackageServer();
+
+        await writeFile(`${path}/.yarnrc.yml`, [
+          `npmRegistryServer: "${url}"`,
+          `npmRegistries:`,
+          `  "${url.replace(/^https?:/, ``)}":`,
+          `    npmAlwaysAuth: true`,
+        ].join(`\n`));
+
+        await expect(run(`install`)).rejects.toThrow(/No authentication configured for request/);
+      },
+    ),
+  );
+
+  test(
+    `it should prefer registries url keys with the protocol over the ones without`,
+    makeTemporaryEnv(
+      {
+        dependencies: {[`@private/package`]: `1.0.0`},
+      },
+      async ({path, run, source}) => {
+        const url = await startPackageServer();
+
+        await writeFile(`${path}/.yarnrc.yml`, [
+          `npmScopes:`,
+          `  private:`,
+          `    npmRegistryServer: "${url}"`,
+          `npmRegistries:`,
+          `  "${url.replace(/^https?:/, ``)}":`,
+          `    npmAuthToken: ${INVALID_AUTH_TOKEN}`,
+          `  "${url}/":`,
+          `    npmAuthToken: ${validLogins.fooUser.npmAuthToken}`,
+        ].join(`\n`));
+
+        await run(`install`);
+
+        await expect(source(`require('@private/package')`)).resolves.toMatchObject({
+          name: `@private/package`,
+          version: `1.0.0`,
+        });
+      },
+    ),
+  );
+
+  test(
+    `it should ignore registries url keys without the protocol when one with the protocol exists`,
+    makeTemporaryEnv(
+      {
+        dependencies: {[`@private/package`]: `1.0.0`},
+      },
+      async ({path, run, source}) => {
+        const url = await startPackageServer();
+
+        await writeFile(`${path}/.yarnrc.yml`, [
+          `npmScopes:`,
+          `  private:`,
+          `    npmRegistryServer: "${url}"`,
+          `npmRegistries:`,
+          `  "${url}":`,
+          `    npmAuthToken: ${INVALID_AUTH_TOKEN}`,
+          `  "${url.replace(/^https?:/, ``)}":`,
+          `    npmAuthToken: ${validLogins.fooUser.npmAuthToken}`,
+        ].join(`\n`));
+
+        await expect(run(`install`)).rejects.toThrow(/Invalid authentication \(as an unknown user\)/);
+      },
+    ),
+  );
+
+  test(
     `it should install packages using source rule authentication`,
     makeTemporaryEnv(
       {

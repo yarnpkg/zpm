@@ -9,6 +9,13 @@ use crate::{commands::tasks::run::run_silent_dependencies, error::Error, project
 use super::tasks as task_run;
 
 /// List scripts from the current workspace
+///
+/// ## Examples
+///
+/// List the scripts available in the current workspace
+///
+/// `yarn run`
+///
 #[cli::command]
 #[cli::path("run")]
 #[cli::category("Scripting commands")]
@@ -52,6 +59,25 @@ impl RunList {
 ///   matching name, Yarn runs that script.
 ///
 /// Script commands run from the workspace that declares them. Dependency binaries run from the current working directory unless `--run-cwd` is set.
+///
+/// ## Examples
+///
+/// Run the tests from the local workspace
+///
+/// `yarn run test`
+///
+/// Same thing, but without the "run" keyword
+///
+/// `yarn test`
+///
+/// Run a binary from the top-level workspace
+///
+/// `yarn run -T tsc`
+///
+/// Inspect Webpack while running
+///
+/// `yarn run --inspect-brk webpack`
+///
 #[cli::command(default, proxy)]
 #[cli::path("run")]
 #[cli::category("Scripting commands")]

@@ -62,6 +62,25 @@ use crate::workspace_selection::{FollowedDependencies, WorkspaceSelection};
 /// `CI` environment variable is set) they run in an in-process daemon instead
 /// (`--standalone`), which can be toggled with `--standalone`/`--no-standalone`.
 /// Runs started from within a task always reuse the daemon running it.
+///
+/// ## Examples
+///
+/// Run the `build` task of the current workspace (and its dependencies)
+///
+/// `yarn tasks run build`
+///
+/// Run the `test` task, forwarding extra arguments to it
+///
+/// `yarn tasks run test --watch`
+///
+/// Run the `build` task in all workspaces declaring it
+///
+/// `yarn tasks run -A build`
+///
+/// Run the `build` task in the workspaces affected by the changes since the base refs
+///
+/// `yarn tasks run --since --recursive build`
+///
 #[cli::command(proxy)]
 #[cli::path("tasks", "run")]
 #[cli::category("Task management commands")]
@@ -161,6 +180,7 @@ impl TaskRun {
             since: &self.since,
             head: &self.head,
             recursive: self.recursive,
+            worktree: false,
             follow_dependencies: self.follow_dependencies,
             follow_dependents: self.follow_dependents,
             followed_dependencies: &self.followed_dependencies,

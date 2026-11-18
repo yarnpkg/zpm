@@ -16,6 +16,16 @@ use crate::{constraints::{check_constraints, structs::{ConstraintsOutput, Worksp
 ///
 /// Constraints are configured through JavaScript or TypeScript constraint files.
 ///
+/// ## Examples
+///
+/// Check that all constraints are satisfied
+///
+/// `yarn constraints`
+///
+/// Autofix all unmet constraints
+///
+/// `yarn constraints --fix`
+///
 #[cli::command]
 #[cli::path("constraints")]
 #[cli::category("Project management")]
@@ -83,7 +93,7 @@ impl Constraints {
 
             if should_break {
                 if self.json {
-                    println!("{}", String::from_utf8_lossy(&output.raw_json));
+                    print!("{}", String::from_utf8_lossy(&output.raw_json));
                 }
 
                 if !output.all_workspace_errors.is_empty() {

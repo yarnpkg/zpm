@@ -219,7 +219,7 @@ fn generate_split_setup(project: &Project, state: &PnpState) -> Result<(), Error
 
     project.pnp_data_path()
         .fs_create_parent()?
-        .fs_change(JsonDocument::to_string(&state)?, false)?;
+        .fs_change(format!("{}\n", JsonDocument::to_string(&state)?), false)?;
 
     Ok(())
 }
@@ -236,9 +236,7 @@ pub async fn link_project_pnp<'a>(project: &'a Project, install: &'a Install) ->
     let virtual_folder = project.project_cwd
         .with_join(&project.config.settings.virtual_folder.value);
 
-    if project.config.settings.enable_local_cache_cleanup.value {
-        linker::helpers::fs_remove_nm(nm_path)?;
-    }
+    linker::helpers::fs_remove_nm(nm_path)?;
 
     let dependencies_meta
         = linker::helpers::TopLevelConfiguration::from_project(project);
@@ -259,9 +257,12 @@ pub async fn link_project_pnp<'a>(project: &'a Project, install: &'a Install) ->
     let unplugged_path
         = project.unplugged_path();
 
+    // Not going through `fs_read_dir`, as the folder is often missing and
+    // that shouldn't build a `PathError`
     let mut extraneous_unplugged_packages
-        = unplugged_path.fs_read_dir()
-            .ok_missing()?
+        = std::fs::read_dir(unplugged_path.to_path_buf())
+            .ok_missing()
+            .map_err(zpm_utils::PathError::from)?
             .into_iter()
             .flatten()
             .filter_map(|entry| entry.ok())

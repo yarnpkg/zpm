@@ -21,8 +21,15 @@ env:
 
 jobs:
   build:
-    name: 'Building the benchmark binary'
-    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        platform:
+          - [Linux, linux, ubuntu-latest, x86_64-unknown-linux-musl]
+          - [macOS, macos, macos-latest, aarch64-apple-darwin]
+
+    name: 'Building the ${{matrix.platform[0]}} benchmark binary'
+    runs-on: ${{matrix.platform[2]}}
 
     steps:
     - name: Checkout the repo
@@ -31,24 +38,32 @@ jobs:
     - name: Build the repository
       uses: ./.github/actions/build
       with:
-        target: x86_64-unknown-linux-musl
+        target: ${{matrix.platform[3]}}
         profile: release-lto
 
     - name: Store the build artifacts
       uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
       with:
-        name: benchmark-binary
-        path: target/x86_64-unknown-linux-musl/release-lto
+        name: benchmark-binary-${{matrix.platform[1]}}
+        path: target/${{matrix.platform[3]}}/release-lto
 
   benchmark:
     strategy:
       fail-fast: false
       matrix:
+        # The results of each platform are published separately (the website
+        # has a toggle to pick the one to display, Linux being the default)
+        platform:
+          - [Linux, linux, ubuntu-latest]
+          - [macOS, macos, macos-latest]
+
         packageManager: ${{ fromJSON(github.event_name == 'schedule' && '[["Yarn 6.x","zpm"],["Yarn 4.x","yarn"],["npm","npm"],["pnpm","pnpm"],["Yarn Classic","classic"]]' || '[["Yarn 6.x","zpm"]]') }}
+
         benchmark:
           - [Next.js, next]
           - [Gatsby, gatsby]
           - [Monorepo, monorepo]
+
         scenario:
           - [Full cold install, install-full-cold]
           - [Cache only, install-cache-only]
@@ -57,8 +72,12 @@ jobs:
 
     needs: [build]
 
-    name: 'Running ${{matrix.packageManager[0]}} on ${{matrix.benchmark[0]}} (${{matrix.scenario[0]}})'
-    runs-on: ubuntu-latest
+    # A platform whose build failed shouldn't prevent the other one from
+    # being measured (its own jobs fail when downloading the binary)
+    if: ${{ !cancelled() }}
+
+    name: 'Running ${{matrix.packageManager[0]}} on ${{matrix.benchmark[0]}} (${{matrix.scenario[0]}}, ${{matrix.platform[0]}})'
+    runs-on: ${{matrix.platform[2]}}
 
     steps:
     - name: Checkout the repo
@@ -69,7 +88,7 @@ jobs:
 
     - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
       with:
-        name: benchmark-binary
+        name: benchmark-binary-${{matrix.platform[1]}}
         path: local
 
     - name: Set the +x flag on the binaries
@@ -77,9 +96,26 @@ jobs:
         chmod +x local/{yarn,yarn-bin}
 
     - name: Install Hyperfine
+      if: runner.os == 'Linux'
       run: |
-        wget https://github.com/sharkdp/hyperfine/releases/download/v1.10.0/hyperfine_1.10.0_amd64.deb
-        sudo dpkg -i hyperfine_1.10.0_amd64.deb
+        wget https://github.com/sharkdp/hyperfine/releases/download/v1.18.0/hyperfine_1.18.0_amd64.deb
+        sudo dpkg -i hyperfine_1.18.0_amd64.deb
+
+    - name: Install Hyperfine
+      if: runner.os == 'macOS'
+      run: |
+        brew install hyperfine
+        hyperfine --version
+
+    # npm and Yarn Classic need about 15GB to install the monorepo fixture
+    # (cache + node_modules), and bench-run.sh keeps a snapshot of the
+    # installed project to reset it between runs, which is more than the
+    # Linux runners have left
+    - name: Free up some disk space
+      if: runner.os == 'Linux' && matrix.benchmark[1] == 'monorepo'
+      run: |
+        sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc /opt/hostedtoolcache/CodeQL
+        df -h /
 
     - name: 'Creates a temporary directory'
       run: |
@@ -89,14 +125,30 @@ jobs:
     - name: Prepare Node
       uses: ./.github/actions/prepare-node
 
+    # prepare-node installs the pnpm version the test suite expects; the
+    # benchmarks compare against the current pnpm release instead
+    - name: Install the latest pnpm
+      if: matrix.packageManager[1] == 'pnpm'
+      run: |
+        npm install --global pnpm@latest
+        # Outside of the checkout: pnpm refuses to run (even `--version`) in
+        # a project whose packageManager field names another package manager
+        cd "$RUNNER_TEMP" && pnpm --version
+
     - name: 'Run the performance test'
       run: |
-        bash scripts/bench-run.sh ${{matrix.packageManager[1]}} ${{matrix.benchmark[1]}} hyperfine "$BENCH_DIR" ${{matrix.scenario[1]}} || true
+        bash scripts/bench-run.sh ${{matrix.packageManager[1]}} ${{matrix.benchmark[1]}} hyperfine "$BENCH_DIR" ${{matrix.scenario[1]}}
 
-        if [[ '${{github.event.inputs.sendReport}}' != 'false' ]]; then
-          yarn node scripts/submit-bench-data.js ${{matrix.packageManager[1]}} ${{matrix.benchmark[1]}} "$BENCH_DIR"
+        if [[ -f "$BENCH_DIR/bench-version.txt" ]]; then
+          echo "Measured ${{matrix.packageManager[0]}} $(cat "$BENCH_DIR/bench-version.txt") on ${{matrix.benchmark[0]}} (${{matrix.scenario[0]}}, ${{matrix.platform[0]}})" >> "$GITHUB_STEP_SUMMARY"
         fi
       env:
-        DD_API_KEY: ${{secrets.DD_API_KEY}}
         HYPERFINE_OPTIONS: ${{github.event.inputs.hyperfineOptions}}
         YARN_ENABLE_HARDENED_MODE: '0'
+
+    - name: 'Submit the results'
+      if: github.event.inputs.sendReport != 'false'
+      run: |
+        yarn node scripts/submit-bench-data.js ${{matrix.packageManager[1]}} ${{matrix.benchmark[1]}} "$BENCH_DIR" ${{matrix.platform[1]}}
+      env:
+        DD_API_KEY: ${{secrets.DD_API_KEY}}

@@ -11,6 +11,24 @@ use crate::error::Error;
 ///
 /// It never writes the deprecated `yarnPath` field.
 ///
+/// ## Examples
+///
+/// Use the latest stable release of Yarn 6
+///
+/// `yarn set version zpm`
+///
+/// Use the latest canary release of Yarn 6
+///
+/// `yarn set version zpm-canary`
+///
+/// Use the latest stable release of Yarn 4
+///
+/// `yarn set version berry`
+///
+/// Use a specific release
+///
+/// `yarn set version 1.22.22`
+///
 #[cli::command]
 #[cli::path("set", "version")]
 #[cli::category("Configuration commands")]

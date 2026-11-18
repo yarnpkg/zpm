@@ -48,9 +48,14 @@ impl PackageMap {
         // A package that previously hosted nested packages can't be
         // skipped wholesale: the nested folders may have to disappear,
         // and only a template expansion prunes them.
+        !self.hosts_nested_packages(id)
+    }
+
+    /// True when packages were nested inside the folder of `id`.
+    pub(crate) fn hosts_nested_packages(&self, id: &str) -> bool {
         let nested_prefix = format!("{id}/");
 
-        !self.packages
+        self.packages
             .range(nested_prefix.clone()..)
             .next()
             .is_some_and(|(key, _)| key.starts_with(&nested_prefix))
@@ -60,7 +65,9 @@ impl PackageMap {
 /// Reads a package map left by a previous install; `None` when absent
 /// or unreadable (in which case the linker just syncs everything).
 pub fn load_package_map(package_map_path: &Path) -> Option<PackageMap> {
-    let src = package_map_path.fs_read_text().ok()?;
+    // Not going through `fs_read_text`, as the errors are discarded (and
+    // the file is missing on first install)
+    let src = std::fs::read_to_string(package_map_path.to_path_buf()).ok()?;
 
     JsonDocument::hydrate_from_str(&src).ok()
 }
@@ -254,10 +261,15 @@ impl<'a> PnpmPackageMapBuilder<'a> {
     }
 
     pub fn build(&self) -> Result<PackageMap, Error> {
-        let top_level_package_map_node
+        // A focused install that doesn't include the root workspace has no
+        // top-level dependencies to share with the loose map
+        let empty_dependencies
+            = BTreeMap::new();
+
+        let top_level_dependencies
             = self.package_map_nodes_by_locator
                 .get(&self.top_level_locator)
-                .ok_or_else(|| package_map_error("expected the top-level package to have been registered"))?;
+                .map_or(&empty_dependencies, |node| &node.dependencies);
 
         let package_ids_by_locator: BTreeMap<Locator, String>
             = self.package_map_nodes_by_locator
@@ -292,7 +304,7 @@ impl<'a> PnpmPackageMapBuilder<'a> {
                 NodePackageMapType::Standard => package_map_node.dependencies.clone(),
                 NodePackageMapType::Loose => {
                     let mut dependencies
-                        = top_level_package_map_node.dependencies.clone();
+                        = top_level_dependencies.clone();
 
                     dependencies.extend(package_map_node.dependencies.clone());
                     dependencies

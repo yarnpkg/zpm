@@ -4,6 +4,17 @@ use zpm_utils::{IoResultExt, Path};
 use crate::{cache, errors::Error};
 
 /// Remove cached Yarn binaries
+///
+/// ## Examples
+///
+/// Remove all cached Yarn binaries
+///
+/// `yarn switch cache --clean`
+///
+/// Remove the cached Yarn binaries older than seven days
+///
+/// `yarn switch cache --clean --old`
+///
 #[cli::command]
 #[cli::path("switch", "cache")]
 #[cli::category("Cache management")]

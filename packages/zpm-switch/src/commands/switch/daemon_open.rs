@@ -21,6 +21,16 @@ use crate::{
 /// This command starts the selected Yarn daemon when needed and prints its WebSocket URL. `--open` is intended for machine callers that only need
 /// the endpoint, while `--start` also allows human-readable status output.
 ///
+/// ## Examples
+///
+/// Start the daemon of the current project if needed
+///
+/// `yarn switch daemon --start`
+///
+/// Print the WebSocket URL of the daemon of the current project
+///
+/// `yarn switch daemon --open`
+///
 #[cli::command]
 #[cli::path("switch", "daemon")]
 #[cli::category("Daemon management")]
@@ -51,6 +61,8 @@ impl DaemonOpenCommand {
 
         let find_result
             = find_closest_package_manager(&project_cwd)?;
+
+        find_result.check_dev_engines()?;
 
         let detected_root
             = find_result
@@ -261,6 +273,12 @@ impl DaemonOpenCommand {
 }
 
 /// Send a raw JSON request to the current project daemon
+///
+/// ## Examples
+///
+/// Ping the daemon of the current project
+///
+/// `yarn switch daemon --send '{"type": "ping"}'`
 ///
 #[cli::command]
 #[cli::path("switch", "daemon")]

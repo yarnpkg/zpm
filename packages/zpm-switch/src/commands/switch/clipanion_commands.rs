@@ -3,6 +3,13 @@ use clipanion::{cli, prelude::CommandProvider};
 use crate::commands::SwitchExecCli;
 
 /// Print the registered Yarn Switch command metadata
+///
+/// ## Examples
+///
+/// Print the Yarn Switch command metadata
+///
+/// `yarn switch --clipanion-commands`
+///
 #[cli::command]
 #[cli::path("switch")]
 #[cli::category("Switch commands")]

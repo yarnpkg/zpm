@@ -24,6 +24,14 @@ const PROJECTS = [
   { id: 'monorepo', name: 'Monorepo' },
 ];
 
+// Linux results are reported under the name of the project; the other
+// platforms append their id to it (`next-macos`)
+const PLATFORMS = [
+  { id: 'linux', name: 'Linux', runner: 'ubuntu-latest', specs: 'x64 · 4 vCPU · 16 GB' },
+  { id: 'macos', name: 'macOS', runner: 'macos-latest',  specs: 'arm64 · 3 vCPU · 7 GB' },
+];
+const DEFAULT_PLATFORM = 'linux';
+
 const SCENARIOS = [
   { id: 'install-full-cold',      num: '01', title: 'Full cold install',  desc: 'Simulates the very first install on a machine that has never seen the project — no cache, no lockfile, no artifacts. Everything is fetched from the registry and written from scratch.' },
   { id: 'install-cache-only',     num: '02', title: 'Cache only',         desc: 'Like checking out a repo for the first time on a CI runner that has already built other projects. The lockfile is missing so resolution runs from scratch, but tarballs are reused from the global cache.' },
@@ -31,21 +39,46 @@ const SCENARIOS = [
   { id: 'install-ready',          num: '04', title: 'Recurrent call',     desc: 'Everything is already in place. Measures how quickly the manager can verify the tree and exit — matters every time you run install as part of a script or editor hook.' },
 ];
 
-const DATA: Record<string, Record<string, Record<string, { timestamp: number; value: number | null }[]>>> = {};
+const parseTest = (test: string) => {
+  for (const platform of PLATFORMS) {
+    if (platform.id !== DEFAULT_PLATFORM && test.endsWith(`-${platform.id}`)) {
+      return { project: test.slice(0, -platform.id.length - 1), platform: platform.id };
+    }
+  }
+
+  return { project: test, platform: DEFAULT_PLATFORM };
+};
+
+const platformEntries: Record<string, { subtest: string; project: string; pm: string; points: BenchPoint[] }[]> = {};
 for (const entry of benchmarkData as BenchEntry[]) {
+  const { project, platform } = parseTest(entry.test);
   if (!SERIES_ORDER.includes(entry.pm as any)) continue;
-  if (!PROJECTS.some(p => p.id === entry.test)) continue;
-  if (!DATA[entry.subtest]) DATA[entry.subtest] = {};
-  if (!DATA[entry.subtest][entry.test]) DATA[entry.subtest][entry.test] = {};
-  DATA[entry.subtest][entry.test][entry.pm] = entry.points;
+  if (!PROJECTS.some(p => p.id === project)) continue;
+  (platformEntries[platform] ??= []).push({ subtest: entry.subtest, project, pm: entry.pm, points: entry.points });
 }
 
-const lastPoint = (benchmarkData as BenchEntry[]).find(e => e.pm === 'zpm')?.points.filter(p => p.value !== null).pop();
-const lastRunDate = lastPoint ? new Date(lastPoint.timestamp * 1000).toISOString().slice(0, 10) : 'N/A';
+// The charts address the points by index, so every series of a platform is
+// laid out on the same time axis (a series only has points from the day it
+// was first measured, which isn't the same for every series)
+const DATA: Record<string, Record<string, Record<string, Record<string, BenchPoint[]>>>> = {};
+for (const platform of PLATFORMS) {
+  const entries = platformEntries[platform.id] ?? [];
+  const timestamps = [...new Set(entries.flatMap(e => e.points.map(p => p.timestamp)))].sort((a, b) => a - b);
+
+  const platformData: (typeof DATA)[string] = DATA[platform.id] = {};
+  for (const entry of entries) {
+    const values = new Map(entry.points.map(p => [p.timestamp, p.value]));
+    ((platformData[entry.subtest] ??= {})[entry.project] ??= {})[entry.pm] = timestamps.map(timestamp => ({ timestamp, value: values.get(timestamp) ?? null }));
+  }
+}
+
+const lastRunTs = Math.max(...(benchmarkData as BenchEntry[]).filter(e => e.pm === 'zpm').flatMap(e => e.points.filter(p => p.value !== null).map(p => p.timestamp)));
+const lastRunDate = Number.isFinite(lastRunTs) ? new Date(lastRunTs * 1000).toISOString().slice(0, 10) : 'N/A';
 
 const allTimestamps = (benchmarkData as BenchEntry[]).flatMap(e => e.points.map(p => p.timestamp));
 const benchMinTs = Math.min(...allTimestamps);
 const benchMaxTs = Math.max(...allTimestamps);
+const benchHistoryDays = Math.round((benchMaxTs - benchMinTs) / 86400);
 
 const INCIDENTS = [
   {
@@ -58,6 +91,21 @@ const INCIDENTS = [
 
 <BaseLayout title="Benchmarks — Yarn" variant="docs" activePage="benchmarks" description="Interactive benchmarks comparing Yarn, npm, and pnpm install performance across real-world projects.">
 <style is:global slot="head">
+  :root {
+    --series-zpm: oklch(0.82 0.11 232);
+    --series-yarn: oklch(0.56 0.20 264);
+    --series-classic: oklch(0.56 0.20 264);
+    --series-npm: oklch(0.66 0.21 25);
+    --series-pnpm: oklch(0.78 0.16 65);
+  }
+  html[data-theme="light"] {
+    --series-zpm: oklch(0.72 0.13 235);
+    --series-yarn: oklch(0.36 0.17 264);
+    --series-classic: oklch(0.36 0.17 264);
+    --series-npm: oklch(0.57 0.22 27);
+    --series-pnpm: oklch(0.70 0.17 58);
+  }
+
   .bench-header {
     display: grid;
     grid-template-columns: 1fr auto;
@@ -369,7 +417,7 @@ const INCIDENTS = [
 
   .ax-line { stroke: var(--line); stroke-width: 1; }
   .ax-line-strong { stroke: var(--line-strong); stroke-width: 1; }
-  .ax-band { fill: var(--accent-soft); opacity: 0.6; }
+  .ax-band { fill: var(--series-zpm); opacity: 0.1; }
   .crosshair {
     stroke: var(--fg-mute);
     stroke-width: 1;
@@ -499,9 +547,8 @@ const INCIDENTS = [
     transform: scaleX(0);
     animation: bench-grow 1.2s cubic-bezier(0.22, 1, 0.36, 1) forwards;
   }
-  .summary-bar .fill.self { background: var(--accent); }
   .summary-bar .val { color: var(--fg); text-align: right; font-variant-numeric: tabular-nums; }
-  .summary-bar .val.self { color: var(--accent); }
+  .summary-bar .val.self { font-weight: 600; }
   @keyframes bench-grow { to { transform: scaleX(var(--w, 1)); } }
 
   .bench-sticky {
@@ -523,6 +570,11 @@ const INCIDENTS = [
     margin-bottom: 16px;
   }
 
+  .filter-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px 32px;
+  }
   .filter-bar {
     display: flex;
     flex-wrap: wrap;
@@ -621,7 +673,7 @@ const INCIDENTS = [
     .bench-controls.open .controls-body {
       display: flex;
     }
-    .filter-bar {
+    .filter-row {
       padding-bottom: 14px;
       border-bottom: 1px solid var(--line);
     }
@@ -674,7 +726,7 @@ const INCIDENTS = [
         <span class="text-[var(--fg)]">Yarn 4.x</span>,
         <span class="text-[var(--fg)]">npm</span>,
         <span class="text-[var(--fg)]">pnpm</span>, and
-        <span class="text-[var(--fg)]">Yarn Classic</span> across four install scenarios on three reference projects. Lower is better.
+        <span class="text-[var(--fg)]">Yarn Classic</span> across four install scenarios on three reference projects, on Linux and macOS. Lower is better.
       </p>
     </div>
     <div class="bench-meta">
@@ -683,12 +735,14 @@ const INCIDENTS = [
         <div class="v">{lastRunDate}</div>
       </div>
       <div>
-        <div class="k">Runner</div>
-        <div class="v">ubuntu-22.04 <span class="unit">4 vCPU · 16 GB</span></div>
+        <div class="k">Runners</div>
+        {PLATFORMS.map(platform => (
+          <div class="v">{platform.runner} <span class="unit">{platform.specs}</span></div>
+        ))}
       </div>
       <div>
         <div class="k">Data points</div>
-        <div class="v">90 <span class="unit">days of history</span></div>
+        <div class="v">{benchHistoryDays} <span class="unit">days of history</span></div>
       </div>
     </div>
   </div>
@@ -700,6 +754,8 @@ const INCIDENTS = [
     seriesOrder={SERIES_ORDER}
     seriesMeta={SERIES_META}
     projects={PROJECTS}
+    platforms={PLATFORMS.map(({ id, name }) => ({ id, name }))}
+    defaultPlatform={DEFAULT_PLATFORM}
     scenarios={SCENARIOS}
     incidents={INCIDENTS}
     benchMinTs={benchMinTs}
@@ -712,8 +768,9 @@ const INCIDENTS = [
     <p>Every four hours &mdash; and on every push to <code>main</code> &mdash; a GitHub Actions workflow runs the full benchmark matrix. Each combination of scenario, project, and package manager is timed with <a href="https://github.com/sharkdp/hyperfine">Hyperfine</a>, measuring wall-clock duration. The results are published here automatically.</p>
 
     <h3 id="how-benchmarks-run">How benchmarks run</h3>
-    <p>Hyperfine executes each install command a minimum of 10 times after 1 warmup run. Before every timed run, a <em>prepare</em> step resets the environment to match the scenario &mdash; for example, deleting <code>node_modules</code>, the lockfile, or the global cache &mdash; so each measurement starts from the same state. The final result is the median of all timed runs.</p>
-    <p>The runner is <code>ubuntu-latest</code> on GitHub Actions. zpm is compiled from source with the <code>release-lto</code> profile; all other managers use their latest stable release at the time of each run.</p>
+    <p>Hyperfine executes each install command a minimum of 10 times after 1 warmup run (down to 3 times for the few combinations where a single install takes several minutes, such as npm on the monorepo). Before every timed run, a <em>prepare</em> step resets the environment to match the scenario &mdash; for example, deleting <code>node_modules</code>, the lockfile, or the global cache &mdash; so each measurement starts from the same state. The final result is the mean of all timed runs.</p>
+    <p>The benchmarks run on GitHub Actions, on both the <code>ubuntu-latest</code> (x64) and <code>macos-latest</code> (arm64) runners; the <em>Platform</em> setting picks which results are displayed, Linux being the default. The two aren't the same hardware, so durations shouldn't be compared across platforms. zpm is compiled from source with the <code>release-lto</code> profile; all other managers use their latest stable release at the time of each run.</p>
+    <p>Shared runners are noisy, and a run occasionally takes several times longer than its neighbours. The <em>Exclude outliers</em> setting caps the vertical axis of each chart right above the 75th percentile of its slowest visible series, so that more than 75% of the data points of every series stay in view and the rare spikes run off the top of the chart instead of flattening everything else.</p>
 
     <div class="admonition note">
       <div class="adm-header">
@@ -721,7 +778,7 @@ const INCIDENTS = [
         <span>NOTE</span>
       </div>
       <div class="adm-body">
-        Series rendered with a dashed stroke (<span class="mono">yarn classic</span>) are kept for historical reference. Yarn classic is in maintenance and we do not recommend it for new projects &mdash; the modern release line is what you want for production work.
+        Series rendered with a dashed stroke (<span class="mono">yarn classic</span>) are kept for historical reference, and are hidden until you click their legend entry. Yarn classic is in maintenance and we do not recommend it for new projects &mdash; the modern release line is what you want for production work.
       </div>
     </div>
 
@@ -748,7 +805,7 @@ const INCIDENTS = [
           </tr>
           <tr>
             <td>monorepo</td>
-            <td>Synthetic monorepo of around ~1.5k workspaces, each with their own arbitrary set of dependencies.</td>
+            <td>Synthetic monorepo of around 6k workspaces, each with their own arbitrary set of dependencies. It's a Yarn project: the manifests are translated for the other package managers (<code>workspace:</code> ranges, resolutions), and npm is only measured on Linux since it needs more memory to install it than the macOS runners have.</td>
           </tr>
         </tbody>
       </table>

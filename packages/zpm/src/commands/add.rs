@@ -2,7 +2,7 @@ use std::collections::{HashMap, HashSet};
 
 use clipanion::cli;
 use zpm_parsers::{Document, JsonDocument, Value};
-use zpm_primitives::{AnonymousSemverRange, Descriptor};
+use zpm_primitives::{AnonymousSemverRange, Descriptor, Range};
 use zpm_semver::RangeKind;
 use zpm_utils::{FromFileString, ToFileString, ToHumanString};
 
@@ -151,14 +151,10 @@ async fn expand_with_types<'a>(install_context: &InstallContext<'a>, _resolve_op
 ///
 /// - If the added package doesn't specify a range, Yarn resolves the `latest` tag and uses the returned version to generate a semver range. The
 ///   range uses the `^` modifier by default, unless `defaultSemverRangePrefix`, `-T,--tilde`, or `-E,--exact` selects a different modifier. There
-///   are two exceptions: workspace packages use their local version, and `-P,--peer` defaults to `*` without resolving the range.
+///   are two exceptions: workspace packages use their local version, and `-P,--peer` defaults to `*` without resolving the range (unless the
+///   range references a catalog, such as `catalog:` or `catalog:<name>`, in which case it's kept as-is).
 ///
 /// - If the added package specifies a range (such as `^1.0.0`, `latest`, or `rc`), Yarn will add this range as-is in the resulting package.json entry (in particular, tags such as `rc` will be encoded as-is rather than being converted into a semver range).
-///
-/// If the `--cached` option is used, Yarn will preferably reuse the highest version already used somewhere within the project, even if through a transitive dependency.
-///
-/// If the `-i,--interactive` option is used, or if the `preferInteractive` setting is enabled, Yarn first checks whether other workspaces in the
-/// project already use the specified package and offers to reuse those ranges.
 ///
 /// If the `--mode=<mode>` option is set, Yarn will change which artifacts are generated. The modes currently supported are:
 ///
@@ -167,6 +163,25 @@ async fn expand_with_types<'a>(install_context: &InstallContext<'a>, _resolve_op
 /// - `update-lockfile` will skip the link step altogether, and only fetch packages that are missing from the lockfile (or that have no associated checksums). This mode is typically used by tools like Renovate or Dependabot to keep a lockfile up-to-date without incurring the full install cost.
 ///
 /// For a compilation of all the supported protocols, please consult the dedicated page from our website: https://yarnpkg.com/protocols.
+///
+/// ## Examples
+///
+/// Add a regular package to the current workspace
+///
+/// `yarn add lodash`
+///
+/// Add a specific version for a package to the current workspace
+///
+/// `yarn add lodash@4.17.21`
+///
+/// Add a package to the `devDependencies` of the current workspace
+///
+/// `yarn add -D typescript`
+///
+/// Add a local package (gzipped tarball format) to the current workspace
+///
+/// `yarn add local-package-name@file:../path/to/local-package-name-v0.1.2.tgz`
+///
 #[cli::command]
 #[cli::path("add")]
 #[cli::category("Dependency management")]
@@ -340,9 +355,16 @@ impl Add {
             }
 
             if request.peer {
+                // Catalog references are kept as-is, as they're resolved
+                // into the catalog's range at install time
+                let peer_range = match &descriptor.range {
+                    Range::Catalog(_) => descriptor.range.to_file_string(),
+                    _ => "*".to_string(),
+                };
+
                 document.set_path(
                     &zpm_parsers::Path::from_segments(vec!["peerDependencies".to_string(), descriptor.ident.to_file_string()]),
-                    Value::String("*".to_string()),
+                    Value::String(peer_range),
                 )?;
             }
 

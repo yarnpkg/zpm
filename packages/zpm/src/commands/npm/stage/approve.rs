@@ -17,6 +17,16 @@ use super::{registry_auth, StageId};
 /// If an approval fails, the command stops; earlier successful approvals remain published.
 /// If the registry requires two-factor authentication, use `--otp` or enter the code when prompted.
 ///
+/// ## Examples
+///
+/// Approve a staged package
+///
+/// `yarn npm stage approve 1de6f3db-2ed9-4d72-b3dd-8f0e2b474a2f`
+///
+/// Approve two staged packages using a one-time password
+///
+/// `yarn npm stage approve 1de6f3db-2ed9-4d72-b3dd-8f0e2b474a2f 2c7f4e1a-3b8d-4e5f-9a6b-7c8d9e0f1a2b --otp 123456`
+///
 #[cli::command]
 #[cli::path("npm", "stage", "approve")]
 #[cli::category("Npm-related commands")]

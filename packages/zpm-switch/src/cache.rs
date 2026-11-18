@@ -143,9 +143,7 @@ fn access(key_data: &CacheKey) -> Result<(Path, bool), Error> {
     let key_hash
         = Hash64::from_string(&key_string);
 
-    let cache_path = Path::home_dir()?
-        .ok_or(Error::MissingHomeFolder)?
-        .with_join(&cache_dir()?)
+    let cache_path = cache_dir()?
         .with_join_str(key_hash.short());
 
     let ready_path = cache_path
@@ -180,7 +178,7 @@ pub async fn ensure<R: Future<Output = Result<(), Error>>, F: FnOnce(Path) -> R>
                 f(temp_dir.clone()).await?;
 
                 let meta_content
-                    = JsonDocument::to_string(&key_data)?;
+                    = format!("{}\n", JsonDocument::to_string(&key_data)?);
 
                 temp_dir
                     .with_join_str("meta.json")

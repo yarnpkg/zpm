@@ -22,6 +22,24 @@ use crate::{
 ///
 /// This command only prints information directly related to selected packages. To understand why a package is installed, use `yarn why`.
 ///
+/// ## Examples
+///
+/// Show information about Lodash
+///
+/// `yarn info lodash`
+///
+/// Show the workspaces and packages that depend on Lodash
+///
+/// `yarn info lodash --dependents`
+///
+/// Show all versions of React used as direct dependencies by any workspace
+///
+/// `yarn info react -A`
+///
+/// List the names of all the packages in the project
+///
+/// `yarn info -AR --name-only`
+///
 #[cli::command]
 #[cli::path("info")]
 #[cli::category("Dependency management")]

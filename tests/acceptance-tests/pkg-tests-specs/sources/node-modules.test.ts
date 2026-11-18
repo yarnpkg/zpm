@@ -2,6 +2,7 @@ import {WindowsLinkType}                           from '@yarnpkg/core';
 import {xfs, npath, PortablePath, ppath, Filename} from '@yarnpkg/fslib';
 
 const {
+  exec: {execFile},
   fs: {writeFile, writeJson, FsLinkType, determineLinkType},
   tests: {testIf},
 } = require(`pkg-tests-core`);
@@ -270,6 +271,81 @@ describe(`Node Modules`, () => {
             stdout: `2.0.0\n`,
           });
         }
+      },
+    ),
+  );
+
+  testIf(() => process.platform === `win32` && typeof process.env.MSYSTEM !== `undefined`,
+    `should generate .bin shims that run from MSYS2 shells without argument path conversion`,
+    makeTemporaryEnv(
+      {
+        dependencies: {
+          [`has-bin-entries`]: `1.0.0`,
+        },
+      },
+      {
+        nodeLinker: `node-modules`,
+      },
+      async ({path, run}) => {
+        await run(`install`);
+
+        // A bin reached through an absolute path (or the PATH) gets an MSYS path as `$0`
+        await expect(execFile(`sh`, [`-c`, `"$PWD/node_modules/.bin/has-bin-entries" foo`], {
+          cwd: path,
+          env: {
+            ...process.env,
+            MSYS_NO_PATHCONV: `1`,
+            MSYS2_ARG_CONV_EXCL: `*`,
+          },
+        })).resolves.toMatchObject({
+          stdout: `foo\n`,
+        });
+      },
+    ),
+  );
+
+  testIf(() => process.platform === `win32`,
+    `should generate .bin shims for bins using an env -S shebang`,
+    makeTemporaryEnv(
+      {
+        name: `pkg`,
+        bin: `bin.js`,
+      },
+      {
+        nodeLinker: `node-modules`,
+      },
+      async ({path, run}) => {
+        await writeFile(`${path}/bin.js`, `#!/usr/bin/env -S node --enable-source-maps\nconsole.log(process.execArgv.join(\` \`));\n`);
+        await run(`install`);
+
+        await expect(execFile(`cmd.exe`, [`/d`, `/s`, `/c`, `node_modules\\.bin\\pkg`], {
+          cwd: path,
+        })).resolves.toMatchObject({
+          stdout: `--enable-source-maps\n`,
+        });
+      },
+    ),
+  );
+
+  testIf(() => process.platform === `win32` && typeof process.env.MSYSTEM !== `undefined`,
+    `should generate .bin shims running bins through the interpreter from their shebang`,
+    makeTemporaryEnv(
+      {
+        name: `pkg`,
+        bin: `bin.sh`,
+      },
+      {
+        nodeLinker: `node-modules`,
+      },
+      async ({path, run}) => {
+        await writeFile(`${path}/bin.sh`, `#!/bin/sh\necho "shell: $1"\n`);
+        await run(`install`);
+
+        await expect(execFile(`sh`, [`-c`, `node_modules/.bin/pkg foo`], {
+          cwd: path,
+        })).resolves.toMatchObject({
+          stdout: `shell: foo\n`,
+        });
       },
     ),
   );
@@ -606,10 +682,18 @@ describe(`Node Modules`, () => {
 
         await run(`install`);
 
-        const binPath = `${path}/node_modules/.bin/dep1` as PortablePath;
-        await expect(xfs.lstatPromise(binPath)).resolves.toBeDefined();
+        const binPaths = [`${path}/node_modules/.bin/dep1` as PortablePath];
+        if (process.platform === `win32`)
+          binPaths.push(`${path}/node_modules/.bin/dep1.cmd` as PortablePath);
+
+        for (const binPath of binPaths)
+          await expect(xfs.lstatPromise(binPath)).resolves.toBeDefined();
+
         await run(`remove`, `dep1`);
-        await expect(xfs.lstatPromise(binPath)).rejects.toBeDefined();
+
+        for (const binPath of binPaths) {
+          await expect(xfs.lstatPromise(binPath)).rejects.toBeDefined();
+        }
       },
     ),
   );
@@ -1034,6 +1118,32 @@ describe(`Node Modules`, () => {
 
         expect(await xfs.existsPromise(`${path}/node_modules/bar` as PortablePath)).toEqual(false);
         expect(await xfs.existsPromise(`${path}/foo/node_modules/bar` as PortablePath)).toEqual(true);
+      },
+    ),
+  );
+
+  test(`should self-reference workspaces whose folder is nested inside another workspace`,
+    makeTemporaryEnv(
+      {
+        private: true,
+        workspaces: [`packages/*`, `packages/*/*`],
+      },
+      {
+        nodeLinker: `node-modules`,
+      },
+      async ({path, run, source}) => {
+        await writeJson(npath.toPortablePath(`${path}/packages/a/package.json`), {
+          name: `a`,
+        });
+        await writeJson(npath.toPortablePath(`${path}/packages/a/b/package.json`), {
+          name: `b`,
+        });
+
+        await run(`install`);
+
+        await expect(source(`require('a/package.json').name`)).resolves.toEqual(`a`);
+        await expect(source(`require('b/package.json').name`)).resolves.toEqual(`b`);
+        expect(await xfs.existsPromise(`${path}/packages/a/node_modules/b` as PortablePath)).toEqual(false);
       },
     ),
   );
@@ -1658,6 +1768,108 @@ describe(`Node Modules`, () => {
       },
     ),
   );
+
+  for (const nmMode of [`hardlinks-local`, `hardlinks-global`]) {
+    test(`should install packages nested in other packages in nmMode: ${nmMode}`,
+      makeTemporaryEnv(
+        {
+          dependencies: {
+            [`no-deps`]: `2.0.0`,
+            [`one-fixed-dep`]: `1.0.0`,
+          },
+        },
+        {
+          nodeLinker: `node-modules`,
+          nmMode,
+        },
+        async ({path, run, source}) => {
+          // one-fixed-dep depends on no-deps@1.0.0, which can't be hoisted next to no-deps@2.0.0
+          await run(`install`);
+
+          await expect(xfs.existsPromise(`${path}/node_modules/one-fixed-dep/index.js` as PortablePath)).resolves.toEqual(true);
+          await expect(source(`require('one-fixed-dep')`)).resolves.toMatchObject({
+            dependencies: {[`no-deps`]: {version: `1.0.0`}},
+          });
+
+          await run(`install`);
+
+          await expect(source(`require('one-fixed-dep')`)).resolves.toMatchObject({
+            dependencies: {[`no-deps`]: {version: `1.0.0`}},
+          });
+
+          // Once no-deps@1.0.0 can be hoisted, the nested copy must go
+          await writeJson(ppath.resolve(path, Filename.manifest), {
+            dependencies: {
+              [`one-fixed-dep`]: `1.0.0`,
+            },
+          });
+
+          await run(`install`);
+
+          await expect(xfs.existsPromise(`${path}/node_modules/one-fixed-dep/node_modules` as PortablePath)).resolves.toEqual(false);
+          await expect(source(`require('no-deps/package.json').version`)).resolves.toEqual(`1.0.0`);
+          await expect(source(`require('one-fixed-dep')`)).resolves.toMatchObject({
+            dependencies: {[`no-deps`]: {version: `1.0.0`}},
+          });
+        },
+      ),
+    );
+  }
+
+  for (const nmMode of [`classic`, `hardlinks-local`, `hardlinks-global`]) {
+    test(`should replace bundled dependencies with nested packages in nmMode: ${nmMode}`,
+      makeTemporaryEnv(
+        {
+          dependencies: {
+            [`no-deps`]: `2.0.0`,
+            [`@scoped/no-deps`]: `2.0.0`,
+            [`has-bundled`]: `file:./has-bundled`,
+          },
+        },
+        {
+          nodeLinker: `node-modules`,
+          nmMode,
+        },
+        async ({path, run, source}) => {
+          await writeJson(`${path}/has-bundled/package.json`, {
+            name: `has-bundled`,
+            version: `1.0.0`,
+            dependencies: {
+              [`no-deps`]: `1.0.0`,
+              [`@scoped/no-deps`]: `1.0.0`,
+            },
+            bundledDependencies: [`no-deps`],
+          });
+          await writeFile(`${path}/has-bundled/index.js`,
+            `module.exports = [require('no-deps/package.json').version, require('@scoped/no-deps/package.json').version];`);
+          await writeJson(`${path}/has-bundled/node_modules/no-deps/package.json`, {
+            name: `no-deps`,
+            version: `1.0.0-bundled`,
+          });
+
+          await run(`install`);
+
+          await expect(source(`require('has-bundled')`)).resolves.toEqual([`1.0.0`, `1.0.0`]);
+
+          await run(`install`);
+
+          await expect(source(`require('has-bundled')`)).resolves.toEqual([`1.0.0`, `1.0.0`]);
+
+          // Once nothing nests, the archive's own node_modules is back
+          await writeJson(ppath.resolve(path, Filename.manifest), {
+            dependencies: {
+              [`has-bundled`]: `file:./has-bundled`,
+            },
+          });
+
+          await run(`install`);
+
+          await expect(xfs.existsPromise(`${path}/node_modules/has-bundled/node_modules/@scoped` as PortablePath)).resolves.toEqual(false);
+          await expect(source(`require('has-bundled')`)).resolves.toEqual([`1.0.0-bundled`, `1.0.0`]);
+        },
+      ),
+    );
+  }
 
   test(`should give priority to direct workspace dependencies over indirect regular dependencies`,
     // Despite 'one-fixed-dep' and 'has-bin-entries' depend on 'no-deps:1.0.0',

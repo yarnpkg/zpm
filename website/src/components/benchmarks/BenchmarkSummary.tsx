@@ -85,7 +85,7 @@ function SummaryCard({title, agg}: {title: string, agg: ReturnType<typeof aggreg
                 className={`fill${a.accent ? ` self` : ``}`}
                 style={{
                   [`--w` as any]: a.normalized.toFixed(3),
-                  ...(!a.accent ? {background: a.color} : {}),
+                  background: a.color,
                 }}
               />
             </div>
