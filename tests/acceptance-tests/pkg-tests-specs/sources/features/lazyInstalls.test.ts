@@ -111,6 +111,28 @@ describe(`Features`, () => {
       );
 
       test(
+        `it should fail to run scripts before installation when lazy installs are disabled via ${configuration}`,
+        makeTemporaryEnv({
+          scripts: {
+            hello: `echo hello`,
+          },
+        }, async ({path, run}) => {
+          await yarn.writeConfiguration(path, {
+            enableLazyInstalls: configuration !== `project`,
+          });
+
+          await expect(run(`run`, `hello`, {env})).rejects.toThrow(`Install state file not found`);
+          expect(await xfs.existsPromise(ppath.join(path, `.yarn/ignore/install` as PortablePath))).toBe(false);
+          expect(await xfs.existsPromise(ppath.join(path, Filename.lockfile))).toBe(false);
+
+          await run(`install`, {env});
+          await expect(run(`run`, `hello`, {env})).resolves.toMatchObject({
+            stdout: `hello\n`,
+          });
+        }),
+      );
+
+      test(
         `it should not create an installation when lazy installs are disabled via ${configuration}`,
         makeTemporaryEnv({}, async ({path, run}) => {
           await yarn.writeConfiguration(path, {
