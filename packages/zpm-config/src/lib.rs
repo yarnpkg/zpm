@@ -2330,6 +2330,7 @@ merge_settings!(crate::types::NodeLinker, |s: &str| FromFileString::from_file_st
 merge_settings!(crate::types::NodePackageMapType, |s: &str| FromFileString::from_file_string(s).unwrap());
 merge_settings!(crate::types::IslandLinker, |s: &str| FromFileString::from_file_string(s).unwrap());
 merge_settings!(crate::types::PythonPreference, |s: &str| FromFileString::from_file_string(s).unwrap());
+merge_settings!(crate::types::RustPreference, |s: &str| FromFileString::from_file_string(s).unwrap());
 merge_settings!(crate::types::LazyInstallMode, |s: &str| FromFileString::from_file_string(s).unwrap());
 merge_settings!(crate::types::PnpFallbackMode, |s: &str| FromFileString::from_file_string(s).unwrap());
 merge_settings!(crate::types::NmHoistingLimits, |s: &str| FromFileString::from_file_string(s).unwrap());

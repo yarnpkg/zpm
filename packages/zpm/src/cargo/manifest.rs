@@ -12,12 +12,12 @@ use zpm_utils::{FromFileString, Path, ToFileString};
 
 use crate::error::Error;
 
-use super::{CrateSource, Dependency, DependencyKind, DependencySource, Summary, add_implicit_features};
+use super::{CrateSource, Dependency, DependencyKind, DependencySource, PatchTarget, Registries, RustVersion, Summary, add_implicit_features, canonical_git_url, parse_rust_version};
 
 pub const MANIFEST_NAME: &str
     = "Cargo.toml";
 
-const DEPENDENCY_TABLES: [(&str, DependencyKind); 5] = [
+pub const DEPENDENCY_TABLES: [(&str, DependencyKind); 5] = [
     ("dependencies", DependencyKind::Normal),
     ("build-dependencies", DependencyKind::Build),
     ("build_dependencies", DependencyKind::Build),
@@ -46,6 +46,43 @@ pub enum PathDependencies<'a> {
     /// The manifest is part of a git checkout; Cargo treats its path
     /// dependencies as other crates of the same repository
     Git(&'a CargoGitSource),
+}
+
+/// What reading the dependencies of a manifest takes besides the manifest.
+pub struct ManifestContext<'a> {
+    pub path_dependencies: PathDependencies<'a>,
+    pub registries: &'a Registries,
+}
+
+impl<'a> ManifestContext<'a> {
+    pub fn local(registries: &'a Registries) -> Self {
+        Self {path_dependencies: PathDependencies::Local, registries}
+    }
+
+    pub fn git(source: &'a CargoGitSource, registries: &'a Registries) -> Self {
+        Self {path_dependencies: PathDependencies::Git(source), registries}
+    }
+}
+
+/// A `[replace]` entry: the registry crate it applies to, and what takes
+/// its place.
+#[derive(Clone, Debug)]
+pub struct Replacement {
+    pub name: String,
+    pub version: CargoSemver,
+    pub dependency: Dependency,
+}
+
+/// The `name` and `version` of a `[replace]` key (`name:1.2.3`,
+/// `name@1.2.3`, or either after `<registry url>#`).
+fn parse_replace_key(key: &str) -> Option<(String, CargoSemver)> {
+    let spec
+        = key.rsplit_once('#').map_or(key, |(_, spec)| spec);
+
+    let (name, version)
+        = spec.rsplit_once(['@', ':'])?;
+
+    Some((name.to_string(), CargoSemver::parse(version)?))
 }
 
 impl Manifest {
@@ -121,12 +158,115 @@ impl Manifest {
         Ok(dirs.into_iter().collect())
     }
 
-    /// The tables changing where crates come from, which only apply when
-    /// set at the root of a workspace.
-    pub fn source_overrides(&self) -> Vec<&'static str> {
-        ["patch", "replace"].into_iter()
-            .filter(|name| self.table(name).is_some_and(|table| !table.is_empty()))
+    /// The `[patch]` tables: more candidates for the crates of a source,
+    /// taken from the disk or from git. Like Cargo, they're only read from
+    /// the root of a workspace.
+    pub fn patches(&self, context: &ManifestContext<'_>) -> Result<Vec<(PatchTarget, Dependency)>, Error> {
+        let mut patches
+            = Vec::new();
+
+        let Some(sources) = self.table("patch") else {
+            return Ok(patches);
+        };
+
+        for (source, entries) in sources.iter() {
+            // A source is a registry (by name or by index) or a repository
+            let target = match context.registries.by_name(source) {
+                Some(registry) => PatchTarget::Registry(registry),
+
+                None if !source.contains("://") => {
+                    return Err(manifest_error(&self.dir, format!("[patch.{}] refers to a registry that isn't defined", source)));
+                },
+
+                None => match context.registries.names.values().any(|index| *index == super::index::normalize_index_url(source)) {
+                    true => PatchTarget::Registry(context.registries.from_url(source)),
+                    false => PatchTarget::Git(canonical_git_url(source)),
+                },
+            };
+
+            for (name, item) in entries.as_table_like().into_iter().flat_map(|table| table.iter()) {
+                let dependency
+                    = self.parse_dependency(name, item, DependencyKind::Normal, None, None, context)?;
+
+                if matches!(dependency.source, DependencySource::Registry(_)) {
+                    return Err(manifest_error(&self.dir, format!("the patch for `{}` must point to a path or to a git repository", name)));
+                }
+
+                patches.push((target.clone(), dependency));
+            }
+        }
+
+        Ok(patches)
+    }
+
+    /// The `[replace]` table, which `[patch]` superseded.
+    pub fn replacements(&self, context: &ManifestContext<'_>) -> Result<Vec<Replacement>, Error> {
+        let mut replacements
+            = Vec::new();
+
+        for (key, item) in self.table("replace").into_iter().flat_map(|table| table.iter()) {
+            let (name, version)
+                = parse_replace_key(key)
+                    .ok_or_else(|| manifest_error(&self.dir, format!("`{}` isn't a valid [replace] key; expected `<name>:<version>`", key)))?;
+
+            let dependency
+                = self.parse_dependency(&name, item, DependencyKind::Normal, None, None, context)?;
+
+            if matches!(dependency.source, DependencySource::Registry(_)) {
+                return Err(manifest_error(&self.dir, format!("the replacement for `{}` must point to a path or to a git repository", key)));
+            }
+
+            replacements.push(Replacement {name, version, dependency});
+        }
+
+        Ok(replacements)
+    }
+
+    /// The names of the crates the `[patch]` tables mention.
+    pub fn patched_names(&self) -> BTreeSet<String> {
+        self.table("patch").into_iter()
+            .flat_map(|sources| sources.iter())
+            .filter_map(|(_, entries)| entries.as_table_like())
+            .flat_map(|entries| entries.iter())
+            .map(|(name, item)| {
+                item.as_table_like()
+                    .and_then(|table| table.get("package"))
+                    .and_then(|package| package.as_str())
+                    .unwrap_or(name)
+                    .to_string()
+            })
             .collect()
+    }
+
+    /// The crates the `[replace]` table swaps.
+    pub fn replaced_crates(&self) -> BTreeSet<(String, CargoSemver)> {
+        self.table("replace").into_iter()
+            .flat_map(|table| table.iter())
+            .filter_map(|(key, _)| parse_replace_key(key))
+            .collect()
+    }
+
+    /// Whether the resolution prefers the versions supporting the
+    /// project's Rust version, which Cargo does starting from the third
+    /// version of its resolver (the default of the 2024 edition).
+    pub fn prefers_compatible_rust_versions(&self) -> bool {
+        let field = |table: Option<&dyn TableLike>, name: &str| {
+            table.and_then(|table| table.get(name)).and_then(|item| item.as_str()).map(|value| value.to_string())
+        };
+
+        let resolver
+            = field(self.workspace(), "resolver").or_else(|| field(self.package(), "resolver"));
+
+        match resolver {
+            Some(resolver) => resolver.parse::<u32>().is_ok_and(|resolver| resolver >= 3),
+            None => field(self.package(), "edition").and_then(|edition| edition.parse::<u32>().ok()).is_some_and(|edition| edition >= 2024),
+        }
+    }
+
+    pub fn rust_version(&self, workspace: Option<&Manifest>) -> Option<RustVersion> {
+        self.package_field("rust-version", workspace)
+            .or_else(|| self.package_field("rust_version", workspace))
+            .and_then(|version| parse_rust_version(&version))
     }
 
     /// Looks for the manifest declaring the workspace a crate belongs to.
@@ -167,7 +307,7 @@ impl Manifest {
     }
 
     /// Builds the summary of the package this manifest declares.
-    pub fn summarize(&self, workspace: Option<&Manifest>, source: CrateSource, path_dependencies: &PathDependencies<'_>) -> Result<Summary, Error> {
+    pub fn summarize(&self, workspace: Option<&Manifest>, source: CrateSource, context: &ManifestContext<'_>) -> Result<Summary, Error> {
         let package
             = self.package()
                 .ok_or_else(|| manifest_error(&self.dir, "this manifest doesn't declare a package"))?;
@@ -190,12 +330,12 @@ impl Manifest {
         let mut dependencies
             = Vec::new();
 
-        self.collect_dependencies(self.document.as_table(), None, workspace, path_dependencies, &mut dependencies)?;
+        self.collect_dependencies(self.document.as_table(), None, workspace, context, &mut dependencies)?;
 
         if let Some(targets) = self.table("target") {
             for (target, tables) in targets.iter() {
                 if let Some(tables) = tables.as_table_like() {
-                    self.collect_dependencies(tables, Some(target.to_string()), workspace, path_dependencies, &mut dependencies)?;
+                    self.collect_dependencies(tables, Some(target.to_string()), workspace, context, &mut dependencies)?;
                 }
             }
         }
@@ -224,6 +364,8 @@ impl Manifest {
             checksum: None,
             yanked: false,
             links,
+            rust_version: self.rust_version(workspace),
+            replaced_by: None,
         })
     }
 
@@ -246,21 +388,21 @@ impl Manifest {
             .map(|value| value.to_string())
     }
 
-    fn collect_dependencies(&self, tables: &dyn TableLike, target: Option<String>, workspace: Option<&Manifest>, path_dependencies: &PathDependencies<'_>, dependencies: &mut Vec<Dependency>) -> Result<(), Error> {
+    fn collect_dependencies(&self, tables: &dyn TableLike, target: Option<String>, workspace: Option<&Manifest>, context: &ManifestContext<'_>, dependencies: &mut Vec<Dependency>) -> Result<(), Error> {
         for (table_name, kind) in DEPENDENCY_TABLES {
             let Some(table) = tables.get(table_name).and_then(|item| item.as_table_like()) else {
                 continue;
             };
 
             for (name, item) in table.iter() {
-                dependencies.push(self.parse_dependency(name, item, kind, target.clone(), workspace, path_dependencies)?);
+                dependencies.push(self.parse_dependency(name, item, kind, target.clone(), workspace, context)?);
             }
         }
 
         Ok(())
     }
 
-    fn parse_dependency(&self, name: &str, item: &Item, kind: DependencyKind, target: Option<String>, workspace: Option<&Manifest>, path_dependencies: &PathDependencies<'_>) -> Result<Dependency, Error> {
+    fn parse_dependency(&self, name: &str, item: &Item, kind: DependencyKind, target: Option<String>, workspace: Option<&Manifest>, context: &ManifestContext<'_>) -> Result<Dependency, Error> {
         let mut spec
             = DependencySpec::from_item(item, &self.dir)
                 .ok_or_else(|| manifest_error(&self.dir, format!("the `{}` dependency is neither a string nor a table", name)))?;
@@ -281,10 +423,17 @@ impl Manifest {
             spec = spec.inherit(inherited);
         }
 
-        // Silently resolving those from the default registry would be wrong
-        if let Some(registry) = &spec.registry {
-            return Err(manifest_error(&self.dir, format!("`{}` comes from the `{}` registry; alternate registries aren't supported yet", name, registry)));
-        }
+        // Manifests name registries; published crates give their index
+        let registry = match (&spec.registry, &spec.registry_index) {
+            (Some(registry), _) => context.registries.by_name(registry).ok_or_else(|| manifest_error(&self.dir, format!(
+                "`{}` comes from the `{}` registry, which isn't defined; declare it in the `cargoRegistries` setting or in .cargo/config.toml",
+                name,
+                registry,
+            )))?,
+
+            (None, Some(index)) => context.registries.from_url(index),
+            (None, None) => None,
+        };
 
         let requirement = match &spec.version {
             Some(version) => CargoRequirement::from_file_string(version)
@@ -293,7 +442,7 @@ impl Manifest {
             None => CargoRequirement::any(),
         };
 
-        let source = match (&spec.path, &spec.git, path_dependencies) {
+        let source = match (&spec.path, &spec.git, &context.path_dependencies) {
             // Cargo ignores the paths of the dependencies of a crate that
             // doesn't come from the disk; they're crates of the same source
             (Some(_), _, PathDependencies::Git(source))
@@ -306,7 +455,7 @@ impl Manifest {
                 => DependencySource::Git(git.clone()),
 
             (None, None, _)
-                => DependencySource::Registry,
+                => DependencySource::Registry(registry),
         };
 
         Ok(Dependency {
@@ -487,20 +636,21 @@ fn expand_member_pattern(root: &Path, pattern: &str) -> Vec<Path> {
 
 /// A dependency as written in a manifest, before inheritance.
 #[derive(Clone, Debug, Default)]
-struct DependencySpec {
-    version: Option<String>,
-    package: Option<String>,
-    path: Option<Path>,
-    git: Option<CargoGitSource>,
-    registry: Option<String>,
-    features: Vec<String>,
-    default_features: Option<bool>,
-    optional: bool,
-    inherited: bool,
+pub struct DependencySpec {
+    pub version: Option<String>,
+    pub package: Option<String>,
+    pub path: Option<Path>,
+    pub git: Option<CargoGitSource>,
+    pub registry: Option<String>,
+    pub registry_index: Option<String>,
+    pub features: Vec<String>,
+    pub default_features: Option<bool>,
+    pub optional: bool,
+    pub inherited: bool,
 }
 
 impl DependencySpec {
-    fn from_item(item: &Item, base_dir: &Path) -> Option<DependencySpec> {
+    pub fn from_item(item: &Item, base_dir: &Path) -> Option<DependencySpec> {
         if let Some(version) = item.as_str() {
             return Some(DependencySpec {
                 version: Some(version.to_string()),
@@ -537,6 +687,7 @@ impl DependencySpec {
             path: string("path").map(|path| base_dir.with_join_str(path)),
             git,
             registry: string("registry"),
+            registry_index: string("registry-index").or_else(|| string("registry_index")),
             features: table.get("features")
                 .and_then(|item| item.as_array())
                 .map(|array| array.iter().filter_map(|value| value.as_str()).map(|value| value.to_string()).collect())
@@ -587,6 +738,10 @@ impl DependencySpec {
 
         if let Some(registry) = &self.registry {
             table.insert("registry", registry.as_str().into());
+        }
+
+        if let Some(registry_index) = &self.registry_index {
+            table.insert("registry-index", registry_index.as_str().into());
         }
 
         if let Some(git) = &self.git {
@@ -686,7 +841,7 @@ workspace = true
             = manifest("/repo/crates/app", MEMBER);
 
         let summary
-            = member.summarize(Some(&workspace), CrateSource::Path(member.dir.clone()), &PathDependencies::Local).unwrap();
+            = member.summarize(Some(&workspace), CrateSource::Path(member.dir.clone()), &ManifestContext::local(&Registries::default())).unwrap();
 
         assert_eq!(summary.name, "app");
         assert_eq!(summary.version.to_string(), "1.2.3");
@@ -730,7 +885,7 @@ workspace = true
             = manifest("/checkout/crates/app", MEMBER);
 
         let summary
-            = member.summarize(Some(&workspace), CrateSource::Git {source: source.clone(), commit: "0".repeat(40)}, &PathDependencies::Git(&source)).unwrap();
+            = member.summarize(Some(&workspace), CrateSource::Git {source: source.clone(), commit: "0".repeat(40)}, &ManifestContext::git(&source, &Registries::default())).unwrap();
 
         let core
             = summary.dependencies.iter().find(|dependency| dependency.name_in_toml == "core").unwrap();
@@ -738,21 +893,107 @@ workspace = true
         assert_eq!(core.source, DependencySource::Git(source));
     }
 
+    fn registries() -> Registries {
+        Registries {
+            default_index: "https://index.crates.io/".to_string(),
+            names: BTreeMap::from([("internal".to_string(), "https://crates.example.org/index/".to_string())]),
+            tokens: BTreeMap::new(),
+        }
+    }
+
     #[test]
-    fn test_unsupported_sources_are_reported() {
-        let alternate
-            = manifest("/repo", "[package]\nname = \"app\"\n\n[dependencies]\nprivate = { version = \"1\", registry = \"internal\" }\n");
+    fn test_registries() {
+        let registries
+            = registries();
+
+        let app = manifest("/repo", r#"
+[package]
+name = "app"
+rust-version = "1.70"
+
+[dependencies]
+private = { version = "1", registry = "internal" }
+published = { version = "1", registry-index = "sparse+https://crates.example.org/index" }
+public = { version = "1", registry-index = "https://github.com/rust-lang/crates.io-index" }
+"#);
+
+        let summary
+            = app.summarize(None, CrateSource::Path(app.dir.clone()), &ManifestContext::local(&registries)).unwrap();
+
+        let sources
+            = summary.dependencies.iter().map(|dependency| (dependency.name_in_toml.as_str(), dependency.source.clone())).collect::<BTreeMap<_, _>>();
+
+        let internal
+            = DependencySource::Registry(Some("https://crates.example.org/index/".to_string()));
+
+        assert_eq!(sources["private"], internal);
+        assert_eq!(sources["published"], internal);
+        assert_eq!(sources["public"], DependencySource::Registry(None));
+        assert_eq!(summary.rust_version, Some((1, 70, 0)));
+
+        let unknown
+            = manifest("/repo", "[package]\nname = \"app\"\n\n[dependencies]\nprivate = { version = \"1\", registry = \"nope\" }\n");
 
         let error
-            = alternate.summarize(None, CrateSource::Path(alternate.dir.clone()), &PathDependencies::Local).unwrap_err();
+            = unknown.summarize(None, CrateSource::Path(unknown.dir.clone()), &ManifestContext::local(&registries)).unwrap_err();
 
-        assert!(error.to_string().contains("alternate registries aren't supported yet"), "{}", error);
+        assert!(error.to_string().contains("which isn't defined"), "{}", error);
+    }
 
-        let patched
-            = manifest("/repo", "[workspace]\n\n[patch.crates-io]\nserde = { path = \"../serde\" }\n");
+    #[test]
+    fn test_patches_and_replacements() {
+        let registries
+            = registries();
 
-        assert_eq!(patched.source_overrides(), vec!["patch"]);
-        assert!(manifest("/repo", WORKSPACE).source_overrides().is_empty());
+        let root = manifest("/repo", r#"
+[workspace]
+resolver = "3"
+
+[patch.crates-io]
+serde = { path = "forks/serde" }
+renamed = { package = "real", git = "https://example.com/real.git", branch = "fix" }
+
+[patch.internal]
+private = { path = "forks/private" }
+
+[patch."https://github.com/Example/Upstream.git"]
+upstream = { path = "forks/upstream" }
+
+[replace]
+"log:0.4.20" = { path = "forks/log" }
+"https://github.com/rust-lang/crates.io-index#libc@0.2.150" = { git = "https://example.com/libc.git" }
+"#);
+
+        let context
+            = ManifestContext::local(&registries);
+
+        let patches = root.patches(&context).unwrap().into_iter()
+            .map(|(target, dependency)| (dependency.package.clone(), (target, dependency.source)))
+            .collect::<BTreeMap<_, _>>();
+
+        assert_eq!(patches["serde"], (PatchTarget::Registry(None), DependencySource::Path(Path::from_file_string("/repo/forks/serde").unwrap())));
+        assert_eq!(patches["real"].0, PatchTarget::Registry(None));
+        assert_eq!(patches["private"].0, PatchTarget::Registry(Some("https://crates.example.org/index/".to_string())));
+        assert_eq!(patches["upstream"].0, PatchTarget::Git("https://github.com/example/upstream".to_string()));
+
+        assert_eq!(root.patched_names(), BTreeSet::from(["private".to_string(), "real".to_string(), "serde".to_string(), "upstream".to_string()]));
+
+        let replacements = root.replacements(&context).unwrap().into_iter()
+            .map(|replacement| format!("{} {}", replacement.name, replacement.version))
+            .collect::<Vec<_>>();
+
+        assert_eq!(replacements, vec!["log 0.4.20", "libc 0.2.150"]);
+        assert_eq!(root.replaced_crates().len(), 2);
+
+        assert!(root.prefers_compatible_rust_versions());
+        assert!(!manifest("/repo", "[workspace]\nresolver = \"2\"\n").prefers_compatible_rust_versions());
+        assert!(manifest("/repo", "[package]\nname = \"app\"\nedition = \"2024\"\n").prefers_compatible_rust_versions());
+        assert!(!manifest("/repo", "[package]\nname = \"app\"\nedition = \"2021\"\n").prefers_compatible_rust_versions());
+
+        let invalid
+            = manifest("/repo", "[patch.crates-io]\nserde = \"1\"\n");
+
+        assert!(invalid.patches(&context).is_err());
     }
 
     #[test]
@@ -768,7 +1009,7 @@ workspace = true
         // The standalone manifest must describe the very same package
         // without any workspace around
         let summary
-            = standalone.summarize(None, CrateSource::Path(standalone.dir.clone()), &PathDependencies::Local).unwrap();
+            = standalone.summarize(None, CrateSource::Path(standalone.dir.clone()), &ManifestContext::local(&Registries::default())).unwrap();
 
         assert_eq!(summary.version.to_string(), "1.2.3");
         assert!(standalone.document.get("lints").is_none());

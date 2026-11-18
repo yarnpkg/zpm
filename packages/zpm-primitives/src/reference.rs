@@ -34,6 +34,13 @@ fn format_pypi_registry(ident: &Ident, version: &crate::PypiVersion, url: Option
     }
 }
 
+fn format_cargo_registry(version: &crate::CargoVersion, registry: &Option<String>) -> String {
+    match registry {
+        Some(registry) => format!("cargo:{}#{}", version.to_file_string(), registry),
+        None => format!("cargo:{}", version.to_file_string()),
+    }
+}
+
 fn format_local(protocol: &str, path: &str, hash: &Option<Hash64>) -> String {
     match hash {
         Some(hash) => format!("{}:{}#{}", protocol, path, hash.to_file_string()),
@@ -118,11 +125,14 @@ pub enum Reference {
         path: String,
     },
 
-    #[pattern(r"cargo:(?<version>[^#@]+)")]
-    #[to_file_string(|params| format!("cargo:{}", params.version.to_file_string()))]
-    #[to_print_string(|params| DataType::Reference.colorize(&format!("cargo:{}", params.version.to_file_string())))]
+    // The registry (the URL of its index) is only set when it isn't
+    // the default one
+    #[pattern(r"cargo:(?<version>[^#@]+)(?:#(?<registry>.+))?")]
+    #[to_file_string(|params| format_cargo_registry(&params.version, &params.registry))]
+    #[to_print_string(|params| DataType::Reference.colorize(&format_cargo_registry(&params.version, &params.registry)))]
     CargoRegistry {
         version: crate::CargoVersion,
+        registry: Option<String>,
     },
 
     #[pattern(r"file:(?<path>.*\.(?:tgz|tar\.gz))(?:#(?<hash>[a-f0-9]*))?")]
@@ -374,6 +384,7 @@ fn test_cargo_references() {
     for (str, slug) in [
         ("cargo:1.0.228", "cargo-1.0.228"),
         ("cargo:0.11.1+wasi-snapshot-preview1", "cargo-0.11.1+wasi-snapshot-preview1"),
+        ("cargo:1.2.3#https://crates.example.org/index/", "cargo-1.2.3"),
         ("cargo:git+https://github.com/arcanis/dialoguer.git?branch=mael%2Fconfirm-prompt-height#2646dce8d26caa6e7d4eee80836dffd7813afcd1", "cargo-git"),
         ("cargo:path+packages/zpm-utils", "cargo-path"),
     ] {

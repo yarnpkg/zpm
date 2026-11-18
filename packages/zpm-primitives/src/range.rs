@@ -60,6 +60,16 @@ fn format_cargo_range(ident: &Option<Ident>, selector: &str) -> String {
     }
 }
 
+fn format_cargo_registry_range(ident: &Option<Ident>, requirement: &CargoRequirement, registry: &Option<String>) -> String {
+    let base
+        = format_cargo_range(ident, &requirement.to_file_string());
+
+    match registry {
+        Some(registry) => format!("{}#{}", base, registry),
+        None => base,
+    }
+}
+
 fn format_jsr_semver(ident: &Option<Ident>, range: &zpm_semver::Range) -> String {
     match ident {
         Some(ident) => format!("jsr:{}@{}", ident.to_file_string(), range.to_file_string()),
@@ -176,14 +186,16 @@ pub enum Range {
         path: String,
     },
 
-    // A crate from the registry. The ident is set when the dependency
-    // was renamed (`package = "..."` in the manifest).
-    #[pattern(r"cargo:(?:(?<ident>[^#@]+)@)?(?<requirement>[^#@]+)")]
-    #[to_file_string(|params| format_cargo_range(&params.ident, &params.requirement.to_file_string()))]
-    #[to_print_string(|params| DataType::Range.colorize(&format_cargo_range(&params.ident, &params.requirement.to_file_string())))]
+    // A crate from a registry. The ident is set when the dependency was
+    // renamed (`package = "..."` in the manifest), and the registry (the
+    // URL of its index) when it isn't the default one.
+    #[pattern(r"cargo:(?:(?<ident>[^#@]+)@)?(?<requirement>[^#@]+)(?:#(?<registry>.+))?")]
+    #[to_file_string(|params| format_cargo_registry_range(&params.ident, &params.requirement, &params.registry))]
+    #[to_print_string(|params| DataType::Range.colorize(&format_cargo_registry_range(&params.ident, &params.requirement, &params.registry)))]
     Cargo {
         ident: Option<Ident>,
         requirement: CargoRequirement,
+        registry: Option<String>,
     },
 
     #[pattern(r"jsr:(?:(?<ident>.*)@)?(?<range>.*)")]
@@ -494,6 +506,8 @@ mod tests {
     #[case("cargo:^1.0.207")]
     #[case("cargo:>=0.6,<0.10")]
     #[case("cargo:codspeed-divan-compat@4.2.0")]
+    #[case("cargo:^1.2#https://crates.example.org/index/")]
+    #[case("cargo:real-name@^1.2#https://crates.example.org/index/")]
     #[case("cargo:git+https://github.com/arcanis/dialoguer.git?branch=mael%2Fconfirm-prompt-height")]
     #[case("cargo:git+ssh://git@example.com/user/repo.git")]
     #[case("cargo:path+packages/zpm-utils")]

@@ -1,15 +1,14 @@
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 use clipanion::cli;
-use zpm_parsers::{Document, JsonDocument, Value};
-use zpm_primitives::{Ident, IdentGlob};
+use zpm_primitives::{Descriptor, Ident, IdentGlob};
 use zpm_semver::RangeKind;
-use zpm_utils::ToFileString;
 
 use crate::{
-    descriptor_loose::{self, LooseDescriptor},
+    descriptor_loose::{self, LooseDescriptor, LooseResolution},
     error::Error,
     install::InstallContext,
+    manifest::dependencies::{ManifestScope, ManifestSet, upgrade_descriptor},
     project::{InstallMode, Project, RunInstallOptions, Workspace}
 };
 
@@ -113,13 +112,53 @@ impl Up {
             project.config.settings.disable_age_gate();
         }
 
-        let all_idents = project.workspaces.iter()
+        let mut manifest_sets = project.workspaces.iter()
+            .map(|workspace| ManifestSet::open(&project, workspace, ManifestScope::All))
+            .collect::<Result<Vec<_>, Error>>()?;
+
+        let package_idents = project.workspaces.iter()
             .flat_map(|workspace| self.list_workspace_idents(workspace))
+            .collect::<BTreeSet<_>>();
+
+        // The dependencies declared outside of the package.json files (in
+        // Cargo.toml files, say) are upgraded within their own ecosystem
+        let mut foreign_descriptors: BTreeMap<Ident, BTreeSet<Descriptor>>
+            = BTreeMap::new();
+
+        for dependency in manifest_sets.iter().flat_map(|set| set.companions()).flat_map(|manifest| manifest.dependencies()) {
+            foreign_descriptors.entry(dependency.descriptor.ident.clone()).or_default().insert(dependency.descriptor);
+        }
+
+        let all_idents = package_idents.iter()
+            .chain(foreign_descriptors.keys())
+            .cloned()
             .collect::<BTreeSet<_>>();
 
         let expanded_descriptors = self.descriptors.iter()
             .flat_map(|descriptor| descriptor.expand(&all_idents))
             .collect::<Vec<_>>();
+
+        let mut package_requests
+            = Vec::new();
+        let mut foreign_requests
+            = BTreeSet::new();
+
+        for descriptor in expanded_descriptors {
+            match &descriptor {
+                LooseDescriptor::Ident(params) if foreign_descriptors.contains_key(&params.ident) => {
+                    foreign_requests.extend(foreign_descriptors[&params.ident].iter().cloned());
+
+                    // Names aren't unique across ecosystems
+                    if package_idents.contains(&params.ident) {
+                        package_requests.push(descriptor);
+                    }
+                },
+
+                _ => {
+                    package_requests.push(descriptor);
+                },
+            }
+        }
 
         let range_kind = if self.fixed {
             RangeKind::Exact
@@ -147,38 +186,25 @@ impl Up {
             .with_package_cache(Some(&package_cache))
             .with_project(Some(&project));
 
-        let loose_resolutions
-            = LooseDescriptor::resolve_all(&install_context, &resolve_options, &expanded_descriptors).await?;
+        let mut loose_resolutions
+            = LooseDescriptor::resolve_all(&install_context, &resolve_options, &package_requests).await?;
 
-        for workspace in &project.workspaces {
-            let manifest_path = workspace.path
-                .with_join_str("package.json");
+        for descriptor in &foreign_requests {
+            if let Some(descriptor) = upgrade_descriptor(&install_context, range_kind, descriptor).await? {
+                loose_resolutions.push(LooseResolution {descriptor, locator: None});
+            }
+        }
 
-            let manifest_content = manifest_path
-                .fs_read_prealloc()?;
-
-            let mut document
-                = JsonDocument::new(manifest_content)?;
-
+        for manifest_set in &mut manifest_sets {
             for resolution in loose_resolutions.iter() {
-                document.update_path(
-                    &zpm_parsers::Path::from_segments(vec!["dependencies".to_string(), resolution.descriptor.ident.to_file_string()]),
-                    Value::String(resolution.descriptor.range.to_anonymous_range().to_file_string()),
-                )?;
-
-                document.update_path(
-                    &zpm_parsers::Path::from_segments(vec!["devDependencies".to_string(), resolution.descriptor.ident.to_file_string()]),
-                    Value::String(resolution.descriptor.range.to_anonymous_range().to_file_string()),
-                )?;
-
-                document.update_path(
-                    &zpm_parsers::Path::from_segments(vec!["optionalDependencies".to_string(), resolution.descriptor.ident.to_file_string()]),
-                    Value::String(resolution.descriptor.range.to_anonymous_range().to_file_string()),
-                )?;
+                for manifest in manifest_set.iter_mut() {
+                    if manifest.accepts(&resolution.descriptor.range) {
+                        manifest.update(&resolution.descriptor)?;
+                    }
+                }
             }
 
-            manifest_path
-                .fs_change(&document.input, false)?;
+            manifest_set.save()?;
         }
 
         let mut project
@@ -217,7 +243,13 @@ impl Up {
 
         let lockfile = project.lockfile()?;
 
+        // Crates are locked by their islands rather than by the project
+        let island_descriptors = lockfile.islands.values()
+            .flat_map(|island| island.keys())
+            .filter(|descriptor| crate::cargo::editor::is_cargo_range(&descriptor.range));
+
         let enforced_resolutions = lockfile.resolutions.keys()
+            .chain(island_descriptors)
             .filter(|descriptor| {
                 patterns.iter().any(|pattern| pattern.check(&descriptor.ident))
             })

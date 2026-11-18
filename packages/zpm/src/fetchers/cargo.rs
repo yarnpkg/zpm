@@ -62,17 +62,21 @@ pub async fn fetch_registry(context: &InstallContext<'_>, locator: &Locator, par
         // The index is the only place the checksums are published at; the
         // listing is read from the disk when it already has the version
         let summary
-            = index::fetch_version(&cargo_context, name, &params.version.to_semver()).await?;
+            = index::fetch_version(&cargo_context, &params.registry, name, &params.version.to_semver()).await?;
 
         let expected_checksum
             = summary.checksum.clone().unwrap_or_default();
 
-        let download_url
-            = index::fetch_config(&cargo_context).await?
-                .download_url(name, params.version.as_str(), &expected_checksum);
+        let config
+            = index::fetch_config(&cargo_context, &params.registry).await?;
 
-        let (_, bytes)
-            = project.http_client.get(&download_url)?.send_bytes().await?;
+        let download_url
+            = config.download_url(name, params.version.as_str(), &expected_checksum);
+
+        let (_, bytes) = project.http_client.get(&download_url)?
+            .header("authorization", index::download_authorization(&cargo_context, &params.registry, &config, &download_url))
+            .send_bytes()
+            .await?;
 
         if hex::encode(sha2::Sha256::digest(&bytes)) != expected_checksum.to_ascii_lowercase() {
             return Err(Error::ChecksumMismatch(locator.clone()));
@@ -103,7 +107,7 @@ pub async fn fetch_git(context: &InstallContext<'_>, locator: &Locator, params: 
         = git::ensure_checkout(&cargo_context, &params.source, &params.commit).await?;
 
     let packages
-        = git::read_packages(&checkout_dir, &params.source, &params.commit)?;
+        = git::read_packages(&checkout_dir, &params.source, &params.commit, &cargo_context.registries)?;
 
     let package = packages.get(locator.ident.as_str())
         .ok_or_else(|| Error::CargoError(format!("No crate named {} was found in {}", locator.ident.as_str(), params.source.url())))?;

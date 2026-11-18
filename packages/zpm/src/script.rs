@@ -451,6 +451,7 @@ pub struct ScriptEnvironment {
     trust_check_enabled: bool,
     trust_check_project_cwd: Option<Path>,
     venv_bin: Option<Path>,
+    toolchain_bin: Option<Path>,
     global_folder: Option<Path>,
 }
 
@@ -467,6 +468,7 @@ impl ScriptEnvironment {
             trust_check_enabled: false,
             trust_check_project_cwd: None,
             venv_bin: None,
+            toolchain_bin: None,
             global_folder: None,
         };
 
@@ -722,6 +724,7 @@ impl ScriptEnvironment {
         self.attach_package_variables(project, locator)?;
         self.refresh_package_map(project);
         self.attach_venv(project, package_cwd_rel);
+        self.attach_rust_toolchain(project, package_cwd_rel);
 
         let binaries
             = project.package_visible_binaries(locator)?;
@@ -748,6 +751,19 @@ impl ScriptEnvironment {
 
         self.env.insert("VIRTUAL_ENV".to_string(), Some(venv.to_native_string()));
         self.venv_bin = Some(venv.with_join_str("bin"));
+    }
+
+    /// Workspaces of cargo islands run their scripts with their Rust
+    /// toolchain in the PATH, when it's one Yarn manages (the others
+    /// already are in it).
+    fn attach_rust_toolchain(&mut self, project: &Project, package_cwd_rel: &Path) {
+        let Some(workspace) = project.try_island_by_rel_path(package_cwd_rel, zpm_config::IslandLinker::Cargo) else {
+            return;
+        };
+
+        if let Some(toolchain) = crate::cargo::toolchain::find_installed(&project.config, &workspace.path) {
+            self.toolchain_bin = Some(toolchain.bin_dir);
+        }
     }
 
     pub fn with_cwd(mut self, cwd: Path) -> Self {
@@ -830,6 +846,10 @@ impl ScriptEnvironment {
 
         if let Some(venv_bin) = &self.venv_bin {
             next_env_path = format!("{}{}{}", venv_bin.to_native_string(), PATH_LIST_SEPARATOR, next_env_path);
+        }
+
+        if let Some(toolchain_bin) = &self.toolchain_bin {
+            next_env_path = format!("{}{}{}", toolchain_bin.to_native_string(), PATH_LIST_SEPARATOR, next_env_path);
         }
 
         // Rust only looks for `.exe` files when resolving programs on Windows,

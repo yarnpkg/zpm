@@ -109,9 +109,25 @@ function locked_versions() {
 
 diff <(locked_versions "${TEMP_DIR}/Cargo.lock.before") <(locked_versions Cargo.lock)
 
-# Cargo is only needed to build; when it's around, it must accept what
-# Yarn generated as-is (--locked), and never reach for the network (--offline)
-if command -v cargo > /dev/null; then
-  CARGO_HOME="${TEMP_DIR}/cargo-home" cargo run --offline --locked --quiet -p hello > "${TEMP_DIR}/output.txt"
-  grep -F '{"message":"Hello world from crates installed by Yarn!"}' "${TEMP_DIR}/output.txt"
-fi
+# Building doesn't need anything from the machine either: Yarn provides
+# the toolchain the project asks for. Cargo must accept what Yarn generated
+# as-is (--locked), and never reach for the network (--offline).
+cat > rust-toolchain.toml <<'TOML'
+[toolchain]
+channel = "1.93.0"
+TOML
+
+yarn install
+
+CARGO_HOME="${TEMP_DIR}/cargo-home" yarn cargo run --offline --locked --quiet -p hello > "${TEMP_DIR}/output.txt"
+grep -F '{"message":"Hello world from crates installed by Yarn!"}' "${TEMP_DIR}/output.txt"
+
+yarn cargo --version | grep -F 'cargo 1.93.0'
+
+# The commands editing dependencies work on the Cargo.toml of the crate
+# they're run from
+(cd crates/hello && yarn add cargo:itoa && yarn remove fastrand)
+grep -F 'itoa = "1.' crates/hello/Cargo.toml
+! grep -F 'fastrand' crates/hello/Cargo.toml Cargo.lock
+
+yarn why itoa | grep -F 'hello@cargo:path+crates/hello'

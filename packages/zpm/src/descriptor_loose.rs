@@ -42,6 +42,22 @@ pub enum LooseDescriptor {
         selector: Option<String>,
     },
 
+    // `cargo:serde`, `cargo:serde@1.0`: a crate, for the workspaces whose
+    // dependencies are listed in a Cargo.toml
+    #[pattern(r"cargo:(?<ident>[^@:+]+)(?:@(?<selector>.+))?")]
+    #[to_file_string(|params| match &params.selector {
+        Some(selector) => format!("cargo:{}@{}", params.ident.to_file_string(), selector),
+        None => format!("cargo:{}", params.ident.to_file_string()),
+    })]
+    #[to_print_string(|params| DataType::Ident.colorize(&match &params.selector {
+        Some(selector) => format!("cargo:{}@{}", params.ident.to_file_string(), selector),
+        None => format!("cargo:{}", params.ident.to_file_string()),
+    }))]
+    Cargo {
+        ident: Ident,
+        selector: Option<String>,
+    },
+
     #[pattern(r"(?<descriptor>.*)")]
     #[to_file_string(|params| params.descriptor.to_file_string())]
     #[to_print_string(|params| params.descriptor.to_print_string())]
@@ -80,6 +96,7 @@ impl LooseDescriptor {
                     .collect(),
 
             LooseDescriptor::Range(_) |
+            LooseDescriptor::Cargo(_) |
             LooseDescriptor::Jsr(_) =>
                 vec![self.clone()],
         }
@@ -202,6 +219,23 @@ impl LooseDescriptor {
 
             LooseDescriptor::Range(RangeLooseDescriptor {range}) => {
                 Err(Error::UnsufficientLooseDescriptor(range.clone()))
+            },
+
+            LooseDescriptor::Cargo(CargoLooseDescriptor {ident, selector}) => {
+                let requirement = match selector {
+                    Some(selector) => zpm_primitives::CargoRequirement::from_file_string(selector)
+                        .map_err(|err| Error::CargoError(err.to_string()))?,
+
+                    None => crate::cargo::editor::latest_requirement(context, &None, ident.as_str(), options.range_kind).await?,
+                };
+
+                let descriptor
+                    = Descriptor::new(ident.clone(), zpm_primitives::CargoRange {ident: None, requirement, registry: None}.into());
+
+                Ok(LooseResolution {
+                    descriptor,
+                    locator: None,
+                })
             },
 
             LooseDescriptor::Jsr(JsrLooseDescriptor {ident, selector}) => {

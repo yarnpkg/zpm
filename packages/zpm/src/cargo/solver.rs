@@ -16,6 +16,14 @@
 //! - A requirement spanning several buckets (`>=1, <3`) is yet another
 //!   proxy, with one version per bucket it can be satisfied from.
 //!
+//! - `[patch]` tables add candidates to a source (the fork of a crate,
+//!   say), which are preferred over the published versions whenever they
+//!   satisfy the requirement; `[replace]` swaps one precise version for
+//!   another crate.
+//!
+//! - When the workspace opts in (resolver 3), the versions supporting its
+//!   Rust version are preferred over newer ones that don't.
+//!
 //! The result is what `cargo generate-lockfile` computes: a resolution
 //! valid for every platform at once, with the workspace members' features
 //! all enabled and their dev-dependencies included. Like Cargo, this
@@ -29,7 +37,7 @@ use pubgrub::{Dependencies, DependencyProvider, PackageResolutionStatistics, Ran
 use zpm_primitives::{CargoBucket, CargoGitSource, CargoReq, CargoSemver};
 use zpm_utils::{Path, ToFileString};
 
-use super::{Dependency, DependencyKind, DependencySource, FeatureValue, Summary, git::GitPackage, index::CrateVersions};
+use super::{CrateSource, Dependency, DependencyKind, DependencySource, FeatureValue, PatchTarget, RegistryIndex, RustVersion, Summary, canonical_git_url, git::GitPackage, index::CrateVersions, manifest::Replacement};
 
 pub type VersionSet = Ranges<CargoSemver>;
 
@@ -54,18 +62,19 @@ pub struct GitRepository {
 /// Where the solver gets its data from. The install uses the registry
 /// index, the disk and git; tests use in-memory fixtures.
 pub trait CrateCatalog {
-    fn registry(&self, name: &str) -> Result<Arc<CrateVersions>, SolverError>;
+    fn registry(&self, registry: &RegistryIndex, name: &str) -> Result<Arc<CrateVersions>, SolverError>;
     fn path(&self, dir: &Path) -> Result<Arc<Summary>, SolverError>;
     fn git(&self, source: &CargoGitSource) -> Result<Arc<GitRepository>, SolverError>;
 
     /// Hints that those crates are about to be requested
-    fn prefetch(&self, _names: &[String]) {}
+    fn prefetch(&self, _crates: &[(RegistryIndex, String)]) {}
 }
 
 /// Identity of a crate in the graph.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum PackageKey {
     Registry {
+        registry: RegistryIndex,
         name: String,
         bucket: CargoBucket,
     },
@@ -94,7 +103,8 @@ impl PackageKey {
 impl fmt::Display for PackageKey {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            PackageKey::Registry {name, bucket} => write!(f, "{} ({})", name, bucket),
+            PackageKey::Registry {registry: None, name, bucket} => write!(f, "{} ({})", name, bucket),
+            PackageKey::Registry {registry: Some(registry), name, bucket} => write!(f, "{} ({}, from {})", name, bucket, registry),
             PackageKey::Git {name, source} => write!(f, "{} ({})", name, source.as_str()),
             PackageKey::Path {name, dir} => write!(f, "{} ({})", name, dir.to_file_string()),
         }
@@ -104,6 +114,7 @@ impl fmt::Display for PackageKey {
 /// A registry requirement that can be satisfied from several buckets.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 struct WideRequirement {
+    registry: RegistryIndex,
     name: String,
     requirement: String,
     features: Vec<String>,
@@ -132,6 +143,76 @@ impl fmt::Display for SolverPackage {
 #[derive(Clone, Debug, Default)]
 pub struct LockedVersions {
     pub registry: BTreeMap<String, BTreeSet<CargoSemver>>,
+}
+
+/// What a resolution is computed from, besides the crates themselves.
+#[derive(Clone, Debug, Default)]
+pub struct SolveOptions {
+    /// Folders of the workspace members
+    pub members: BTreeSet<Path>,
+
+    pub locked: LockedVersions,
+
+    /// The Rust versions the workspace has to build with. Candidates are
+    /// tried from those supporting the most of them to those supporting
+    /// the fewest; empty when the workspace doesn't ask for it.
+    pub rust_versions: Vec<RustVersion>,
+
+    pub patches: Vec<(PatchTarget, Dependency)>,
+    pub replacements: Vec<Replacement>,
+}
+
+/// The crate a patch or a replacement points to.
+fn source_summary<C: CrateCatalog>(catalog: &C, dependency: &Dependency) -> Result<Arc<Summary>, SolverError> {
+    match &dependency.source {
+        DependencySource::Path(dir) => {
+            catalog.path(dir)
+        },
+
+        DependencySource::Git(source) => {
+            catalog.git(source)?.packages.get(&dependency.package)
+                .map(|package| package.summary.clone())
+                .ok_or_else(|| SolverError(format!("No crate named {} was found in {}", dependency.package, source.url())))
+        },
+
+        DependencySource::Registry(_) => {
+            Err(SolverError(format!("The patch for {} must point to a path or to a git repository", dependency.package)))
+        },
+    }
+}
+
+/// The package a crate living on the disk or in a repository stands for.
+fn key_of(summary: &Summary) -> PackageKey {
+    match &summary.source {
+        CrateSource::Registry(registry) => PackageKey::Registry {
+            registry: registry.clone(),
+            name: summary.name.clone(),
+            bucket: summary.version.bucket(),
+        },
+
+        CrateSource::Git {source, ..} => PackageKey::Git {
+            name: summary.name.clone(),
+            source: source.clone(),
+        },
+
+        CrateSource::Path(dir) => PackageKey::Path {
+            name: summary.name.clone(),
+            dir: dir.clone(),
+        },
+    }
+}
+
+/// The registry crate a `[replace]` entry applies to keeps its identity,
+/// but gets built from the replacement.
+fn replaced(original: &Summary, replacement: &Arc<Summary>) -> Summary {
+    Summary {
+        dependencies: replacement.dependencies.clone(),
+        features: replacement.features.clone(),
+        links: replacement.links.clone(),
+        rust_version: replacement.rust_version,
+        replaced_by: Some(replacement.clone()),
+        ..original.clone()
+    }
 }
 
 fn root_version() -> CargoSemver {
@@ -240,33 +321,50 @@ struct RegistryCrate {
 
 struct CargoProvider<'a, C: CrateCatalog> {
     catalog: &'a C,
-    members: &'a BTreeSet<Path>,
-    locked: &'a LockedVersions,
-    registry: RefCell<HashMap<String, Arc<RegistryCrate>>>,
+    options: &'a SolveOptions,
+    patches: HashMap<(PatchTarget, String), Vec<Arc<Summary>>>,
+    replacements: HashMap<(String, CargoSemver), Arc<Summary>>,
+    registry: RefCell<HashMap<(RegistryIndex, String), Arc<RegistryCrate>>>,
     discovery: RefCell<HashMap<String, usize>>,
 }
 
 impl<'a, C: CrateCatalog> CargoProvider<'a, C> {
-    fn registry_crate(&self, name: &str) -> Result<Arc<RegistryCrate>, SolverError> {
-        if let Some(registry_crate) = self.registry.borrow().get(name) {
+    fn registry_crate(&self, registry: &RegistryIndex, name: &str) -> Result<Arc<RegistryCrate>, SolverError> {
+        let cache_key
+            = (registry.clone(), name.to_string());
+
+        if let Some(registry_crate) = self.registry.borrow().get(&cache_key) {
             return Ok(registry_crate.clone());
         }
 
         let versions
-            = self.catalog.registry(name)?;
+            = self.catalog.registry(registry, name)?;
 
         let locked
-            = self.locked.registry.get(name);
+            = self.options.locked.registry.get(name);
 
-        let candidates = versions.versions.iter()
+        let patches = self.patches.get(&(PatchTarget::Registry(registry.clone()), name.to_string()))
+            .map(|patches| patches.as_slice())
+            .unwrap_or_default();
+
+        // Patches are candidates like the others, except that they hide
+        // the published version they share their version with
+        let mut candidates = versions.versions.iter()
             .filter(|summary| !summary.yanked || locked.is_some_and(|locked| locked.contains(&summary.version)))
-            .cloned()
-            .collect();
+            .filter(|summary| !patches.iter().any(|patch| patch.version == summary.version))
+            .map(|summary| match self.replacements.get(&(name.to_string(), summary.version.clone())) {
+                Some(replacement) => Arc::new(replaced(summary, replacement)),
+                None => summary.clone(),
+            })
+            .chain(patches.iter().cloned())
+            .collect::<Vec<_>>();
+
+        candidates.sort_by(|a, b| a.version.cmp(&b.version));
 
         let registry_crate
             = Arc::new(RegistryCrate {candidates});
 
-        self.registry.borrow_mut().insert(name.to_string(), registry_crate.clone());
+        self.registry.borrow_mut().insert(cache_key, registry_crate.clone());
 
         Ok(registry_crate)
     }
@@ -275,45 +373,58 @@ impl<'a, C: CrateCatalog> CargoProvider<'a, C> {
         let registry
             = self.registry.borrow();
 
-        let names = dependencies
-            .filter(|dependency| dependency.source == DependencySource::Registry)
-            .map(|dependency| dependency.package.clone())
-            .filter(|name| !registry.contains_key(name))
+        let crates = dependencies
+            .filter_map(|dependency| match &dependency.source {
+                DependencySource::Registry(registry) => Some((registry.clone(), dependency.package.clone())),
+                _ => None,
+            })
+            .filter(|key| !registry.contains_key(key))
             .collect::<BTreeSet<_>>();
 
         drop(registry);
 
-        if names.len() > 1 {
-            self.catalog.prefetch(&names.into_iter().collect::<Vec<_>>());
+        if crates.len() > 1 {
+            self.catalog.prefetch(&crates.into_iter().collect::<Vec<_>>());
         }
     }
 
     fn is_member(&self, key: &PackageKey) -> bool {
-        matches!(key, PackageKey::Path {dir, ..} if self.members.contains(dir))
+        matches!(key, PackageKey::Path {dir, ..} if self.options.members.contains(dir))
     }
 
-    /// The versions of a package, preferred ones first: the locked ones,
-    /// then the highest.
+    /// How many of the workspace's Rust versions a crate supports.
+    fn rust_compatibility(&self, summary: &Summary) -> usize {
+        self.options.rust_versions.iter()
+            .filter(|rust_version| summary.rust_version.is_none_or(|required| required <= **rust_version))
+            .count()
+    }
+
+    /// How much a candidate is wanted, the same way Cargo ranks them:
+    /// what the lockfile holds and the patches come first, then what
+    /// supports the workspace's Rust version, then the highest version.
+    fn preference(&self, summary: &Summary) -> (bool, usize, CargoSemver) {
+        let is_locked
+            = self.options.locked.registry.get(&summary.name).is_some_and(|locked| locked.contains(&summary.version));
+
+        let is_patch
+            = !matches!(summary.source, CrateSource::Registry(_));
+
+        (is_locked || is_patch, self.rust_compatibility(summary), summary.version.clone())
+    }
+
+    /// The versions of a package, preferred ones first.
     fn candidates(&self, key: &PackageKey) -> Result<Vec<Arc<Summary>>, SolverError> {
         match key {
-            PackageKey::Registry {name, bucket} => {
+            PackageKey::Registry {registry, name, bucket} => {
                 let registry_crate
-                    = self.registry_crate(name)?;
-
-                let locked
-                    = self.locked.registry.get(name);
+                    = self.registry_crate(registry, name)?;
 
                 let mut candidates = registry_crate.candidates.iter()
                     .filter(|summary| &summary.version.bucket() == bucket)
                     .cloned()
                     .collect::<Vec<_>>();
 
-                candidates.sort_by_key(|summary| {
-                    let is_locked
-                        = locked.is_some_and(|locked| locked.contains(&summary.version));
-
-                    Reverse((is_locked, summary.version.clone()))
-                });
+                candidates.sort_by_key(|summary| Reverse(self.preference(summary)));
 
                 Ok(candidates)
             },
@@ -344,9 +455,9 @@ impl<'a, C: CrateCatalog> CargoProvider<'a, C> {
     /// requirement accepts.
     fn edge_target(&self, dependency: &Dependency, features: &[String]) -> Result<EdgeTarget, SolverError> {
         match &dependency.source {
-            DependencySource::Registry => {
+            DependencySource::Registry(registry) => {
                 let registry_crate
-                    = self.registry_crate(&dependency.package)?;
+                    = self.registry_crate(registry, &dependency.package)?;
 
                 let buckets = registry_crate.candidates.iter()
                     .filter(|summary| dependency.req.matches(&summary.version))
@@ -355,6 +466,7 @@ impl<'a, C: CrateCatalog> CargoProvider<'a, C> {
 
                 if buckets.len() > 1 {
                     return Ok(EdgeTarget::Wide(WideRequirement {
+                        registry: registry.clone(),
                         name: dependency.package.clone(),
                         requirement: dependency.requirement.as_str().to_string(),
                         features: features.to_vec(),
@@ -369,10 +481,18 @@ impl<'a, C: CrateCatalog> CargoProvider<'a, C> {
                 let set
                     = bucket_set(&registry_crate, &bucket, &dependency.req);
 
-                Ok(EdgeTarget::Single(PackageKey::Registry {name: dependency.package.clone(), bucket}, set))
+                Ok(EdgeTarget::Single(PackageKey::Registry {registry: registry.clone(), name: dependency.package.clone(), bucket}, set))
             },
 
             DependencySource::Git(source) => {
+                // A patched repository gives way to its patch
+                let patch = self.patches.get(&(PatchTarget::Git(canonical_git_url(source.url())), dependency.package.clone()))
+                    .and_then(|patches| patches.first());
+
+                if let Some(patch) = patch {
+                    return Ok(EdgeTarget::Single(key_of(patch), Ranges::singleton(patch.version.clone())));
+                }
+
                 let key = PackageKey::Git {
                     name: dependency.package.clone(),
                     source: source.clone(),
@@ -423,7 +543,7 @@ impl<'a, C: CrateCatalog> CargoProvider<'a, C> {
         let mut constraints
             = HashMap::new();
 
-        for dir in self.members {
+        for dir in &self.options.members {
             let summary
                 = self.catalog.path(dir)?;
 
@@ -535,34 +655,31 @@ impl<'a, C: CrateCatalog> CargoProvider<'a, C> {
     /// ones first.
     fn wide_buckets(&self, wide: &WideRequirement) -> Result<Vec<CargoBucket>, SolverError> {
         let registry_crate
-            = self.registry_crate(&wide.name)?;
+            = self.registry_crate(&wide.registry, &wide.name)?;
 
         let req
             = CargoReq::parse(&wide.requirement)
                 .ok_or_else(|| SolverError(format!("Invalid requirement: {}", wide.requirement)))?;
 
-        let locked
-            = self.locked.registry.get(&wide.name);
-
-        let mut buckets = registry_crate.candidates.iter()
+        // A bucket is as good as the best version it can offer
+        let mut candidates = registry_crate.candidates.iter()
             .filter(|summary| req.matches(&summary.version))
-            .map(|summary| (locked.is_some_and(|locked| locked.contains(&summary.version)), summary.version.bucket()))
             .collect::<Vec<_>>();
 
-        buckets.sort_by(|a, b| b.0.cmp(&a.0).then_with(|| CargoSemver::bucket_floor(&b.1).cmp(&CargoSemver::bucket_floor(&a.1))));
+        candidates.sort_by_key(|summary| Reverse(self.preference(summary)));
 
         let mut seen
             = BTreeSet::new();
 
-        Ok(buckets.into_iter()
-            .map(|(_, bucket)| bucket)
+        Ok(candidates.into_iter()
+            .map(|summary| summary.version.bucket())
             .filter(|bucket| seen.insert(bucket.clone()))
             .collect())
     }
 
     fn wide_dependencies(&self, wide: &WideRequirement, version: &CargoSemver) -> Result<HashMap<SolverPackage, VersionSet>, SolverError> {
         let registry_crate
-            = self.registry_crate(&wide.name)?;
+            = self.registry_crate(&wide.registry, &wide.name)?;
 
         let req
             = CargoReq::parse(&wide.requirement)
@@ -575,6 +692,7 @@ impl<'a, C: CrateCatalog> CargoProvider<'a, C> {
             = bucket_set(&registry_crate, &bucket, &req);
 
         let key = PackageKey::Registry {
+            registry: wide.registry.clone(),
             name: wide.name.clone(),
             bucket,
         };
@@ -633,7 +751,7 @@ impl<'a, C: CrateCatalog> DependencyProvider for CargoProvider<'a, C> {
 
         let tier = if is_pinned {
             3
-        } else if self.locked.registry.contains_key(name) {
+        } else if self.options.locked.registry.contains_key(name) {
             2
         } else if stats.conflict_count() > 0 {
             1
@@ -707,6 +825,11 @@ pub struct SolvedPackage {
 #[derive(Clone, Debug, Default)]
 pub struct Solution {
     pub packages: Vec<SolvedPackage>,
+
+    /// The patches that didn't make it into the graph, because nothing
+    /// depends on the crate or because another version was preferred.
+    /// Cargo keeps track of them in its lockfile.
+    pub unused_patches: Vec<Arc<Summary>>,
 }
 
 fn describe_failure<C: CrateCatalog>(error: pubgrub::PubGrubError<CargoProvider<'_, C>>) -> String {
@@ -731,17 +854,48 @@ fn describe_failure<C: CrateCatalog>(error: pubgrub::PubGrubError<CargoProvider<
     }
 }
 
-/// Resolves the dependencies of the given workspace members.
-pub fn solve<C: CrateCatalog>(catalog: &C, members: &BTreeSet<Path>, locked: &LockedVersions) -> Result<Solution, SolverError> {
+/// Resolves the dependencies of the workspace members.
+pub fn solve<C: CrateCatalog>(catalog: &C, options: &SolveOptions) -> Result<Solution, SolverError> {
+    let mut patches: HashMap<(PatchTarget, String), Vec<Arc<Summary>>>
+        = HashMap::new();
+
+    for (target, dependency) in &options.patches {
+        let summary
+            = source_summary(catalog, dependency)?;
+
+        patches.entry((target.clone(), summary.name.clone())).or_default().push(summary);
+    }
+
+    let mut replacements
+        = HashMap::new();
+
+    for replacement in &options.replacements {
+        let summary
+            = source_summary(catalog, &replacement.dependency)?;
+
+        if summary.name != replacement.name || summary.version != replacement.version {
+            return Err(SolverError(format!(
+                "{} {} can only be replaced by a crate with the same name and version (found {} {})",
+                replacement.name, replacement.version,
+                summary.name, summary.version,
+            )));
+        }
+
+        replacements.insert((replacement.name.clone(), replacement.version.clone()), summary);
+    }
+
     let provider = CargoProvider {
         catalog,
-        members,
-        locked,
+        options,
+        patches,
+        replacements,
         registry: RefCell::new(HashMap::new()),
         discovery: RefCell::new(HashMap::new()),
     };
 
-    catalog.prefetch(&locked.registry.keys().cloned().collect::<Vec<_>>());
+    // Locked crates are most likely from the default registry; the others
+    // are fetched as the solver gets to them
+    catalog.prefetch(&options.locked.registry.keys().map(|name| (None, name.clone())).collect::<Vec<_>>());
 
     let selected
         = pubgrub::resolve(&provider, SolverPackage::Root, root_version())
@@ -799,6 +953,7 @@ pub fn solve<C: CrateCatalog>(catalog: &C, members: &BTreeSet<Path>, locked: &Lo
                 EdgeTarget::Wide(wide) => PackageKey::Registry {
                     bucket: wide_choices.get(&wide).cloned()
                         .ok_or_else(|| SolverError(format!("The solver didn't pick a version for {} ({})", wide.name, wide.requirement)))?,
+                    registry: wide.registry,
                     name: wide.name,
                 },
             };
@@ -823,7 +978,23 @@ pub fn solve<C: CrateCatalog>(catalog: &C, members: &BTreeSet<Path>, locked: &Lo
 
     check_links(&packages)?;
 
-    Ok(Solution {packages})
+    let identity
+        = |summary: &Summary| (summary.name.clone(), summary.version.clone(), summary.source.clone());
+
+    let used = packages.iter()
+        .map(|package| identity(&package.summary))
+        .collect::<BTreeSet<_>>();
+
+    let mut unused_patches = provider.patches.values()
+        .flatten()
+        .filter(|patch| !used.contains(&identity(patch)))
+        .cloned()
+        .collect::<Vec<_>>();
+
+    unused_patches.sort_by_key(|patch| identity(patch));
+    unused_patches.dedup_by_key(|patch| identity(patch));
+
+    Ok(Solution {packages, unused_patches})
 }
 
 /// A native library can only be linked once, so at most one crate of the
@@ -855,8 +1026,6 @@ mod tests {
     use zpm_primitives::CargoRequirement;
     use zpm_utils::FromFileString;
 
-    use crate::cargo::CrateSource;
-
     use super::*;
 
     #[derive(Default)]
@@ -865,10 +1034,19 @@ mod tests {
         paths: BTreeMap<Path, Arc<Summary>>,
     }
 
+    const INTERNAL: &str
+        = "https://crates.example.org/index/";
+
     impl CrateCatalog for Fixtures {
-        fn registry(&self, name: &str) -> Result<Arc<CrateVersions>, SolverError> {
-            let mut versions = self.registry.get(name).cloned()
-                .ok_or_else(|| SolverError(format!("Unknown crate {}", name)))?;
+        fn registry(&self, registry: &RegistryIndex, name: &str) -> Result<Arc<CrateVersions>, SolverError> {
+            // The crates of the other registry are published as `internal/<name>`
+            let key = match registry {
+                Some(_) => format!("internal/{}", name),
+                None => name.to_string(),
+            };
+
+            let mut versions = self.registry.get(&key).cloned()
+                .ok_or_else(|| SolverError(format!("Unknown crate {}", key)))?;
 
             versions.sort_by(|a, b| a.version.cmp(&b.version));
 
@@ -907,7 +1085,7 @@ mod tests {
             optional: false,
             kind: DependencyKind::Normal,
             target: None,
-            source: DependencySource::Registry,
+            source: DependencySource::Registry(None),
         };
 
         for option in parts {
@@ -919,6 +1097,7 @@ mod tests {
                 ("kind", "build") => dependency.kind = DependencyKind::Build,
                 ("package", package) => dependency.package = package.to_string(),
                 ("path", path) => dependency.source = DependencySource::Path(Path::from_file_string(path).unwrap()),
+                ("registry", "internal") => dependency.source = DependencySource::Registry(Some(INTERNAL.to_string())),
                 _ => panic!("Unknown option {}", option),
             }
         }
@@ -939,61 +1118,71 @@ mod tests {
         Summary {
             name: name.to_string(),
             version: CargoSemver::parse(version).unwrap(),
-            source: CrateSource::Registry,
+            source: CrateSource::Registry(None),
             dependencies,
             features,
             checksum: None,
             yanked: false,
             links: None,
+            rust_version: None,
+            replaced_by: None,
         }
     }
 
     impl Fixtures {
         fn publish(&mut self, name: &str, version: &str, dependencies: &[&str], features: &[(&str, &[&str])]) -> &mut Self {
+            // `internal/<name>` publishes on the other registry
+            let mut published
+                = summary(name.trim_start_matches("internal/"), version, dependencies, features);
+
+            if name.starts_with("internal/") {
+                published.source = CrateSource::Registry(Some(INTERNAL.to_string()));
+            }
+
             self.registry.entry(name.to_string()).or_default()
-                .push(Arc::new(summary(name, version, dependencies, features)));
+                .push(Arc::new(published));
 
             self
+        }
+
+        fn update(&mut self, name: &str, version: &str, update: impl FnOnce(&mut Summary)) -> &mut Self {
+            let versions
+                = self.registry.get_mut(name).unwrap();
+
+            let index
+                = versions.iter().position(|summary| summary.version.to_string() == version).unwrap();
+
+            let mut updated
+                = (*versions[index]).clone();
+
+            update(&mut updated);
+            versions[index] = Arc::new(updated);
+
+            self
+        }
+
+        fn rust_version(&mut self, name: &str, version: &str, rust_version: RustVersion) -> &mut Self {
+            self.update(name, version, |summary| summary.rust_version = Some(rust_version))
         }
 
         fn yank(&mut self, name: &str, version: &str) -> &mut Self {
-            let versions
-                = self.registry.get_mut(name).unwrap();
-
-            let index
-                = versions.iter().position(|summary| summary.version.to_string() == version).unwrap();
-
-            let mut yanked
-                = (*versions[index]).clone();
-
-            yanked.yanked = true;
-            versions[index] = Arc::new(yanked);
-
-            self
+            self.update(name, version, |summary| summary.yanked = true)
         }
 
         fn link(&mut self, name: &str, version: &str, links: &str) -> &mut Self {
-            let versions
-                = self.registry.get_mut(name).unwrap();
-
-            let index
-                = versions.iter().position(|summary| summary.version.to_string() == version).unwrap();
-
-            let mut linked
-                = (*versions[index]).clone();
-
-            linked.links = Some(links.to_string());
-            versions[index] = Arc::new(linked);
-
-            self
+            self.update(name, version, |summary| summary.links = Some(links.to_string()))
         }
 
         fn local(&mut self, dir: &str, name: &str, dependencies: &[&str], features: &[(&str, &[&str])]) -> &mut Self {
+            self.local_version(dir, name, "0.1.0", dependencies, features)
+        }
+
+        fn local_version(&mut self, dir: &str, name: &str, version: &str, dependencies: &[&str], features: &[(&str, &[&str])]) -> &mut Self {
             let dir
                 = Path::from_file_string(dir).unwrap();
 
             let mut local
-                = summary(name, "0.1.0", dependencies, features);
+                = summary(name, version, dependencies, features);
 
             local.source = CrateSource::Path(dir.clone());
 
@@ -1002,19 +1191,26 @@ mod tests {
         }
 
         fn solve_with(&self, members: &[&str], locked: &[(&str, &str)]) -> Result<Vec<String>, String> {
-            let members = members.iter()
+            let mut options
+                = SolveOptions::default();
+
+            for (name, version) in locked {
+                options.locked.registry.entry(name.to_string()).or_default().insert(CargoSemver::parse(version).unwrap());
+            }
+
+            self.solve_options(members, options)
+        }
+
+        fn solve_options(&self, members: &[&str], mut options: SolveOptions) -> Result<Vec<String>, String> {
+            options.members = members.iter()
                 .map(|dir| Path::from_file_string(dir).unwrap())
                 .collect();
 
-            let mut locked_versions
-                = LockedVersions::default();
-
-            for (name, version) in locked {
-                locked_versions.registry.entry(name.to_string()).or_default().insert(CargoSemver::parse(version).unwrap());
-            }
-
             let solution
-                = solve(self, &members, &locked_versions).map_err(|err| err.0)?;
+                = solve(self, &options).map_err(|err| err.0)?;
+
+            let unused = solution.unused_patches.iter()
+                .map(|patch| format!("unused patch: {}@{}", patch.name, patch.version));
 
             Ok(solution.packages.iter().map(|package| {
                 let features = package.features.iter()
@@ -1035,8 +1231,20 @@ mod tests {
 
                 edges.sort();
 
-                format!("{}@{} [{}] -> {}", package.summary.name, package.summary.version, features.join(","), edges.join(" "))
-            }).collect())
+                // `!` marks the patches, `~` what was replaced
+                let marker = match (&package.summary.source, &package.key) {
+                    _ if package.summary.replaced_by.is_some() => "~",
+                    (CrateSource::Registry(Some(_)), _) => "+internal",
+                    (CrateSource::Path(_) | CrateSource::Git {..}, PackageKey::Registry {..}) => "!",
+                    _ => "",
+                };
+
+                format!("{}@{}{} [{}] -> {}", package.summary.name, package.summary.version, marker, features.join(","), edges.join(" "))
+            }).chain(unused).collect())
+        }
+
+        fn patch(target: PatchTarget, spec: &str) -> (PatchTarget, Dependency) {
+            (target, dependency(spec))
         }
 
         fn solve(&self) -> Result<Vec<String>, String> {
@@ -1283,6 +1491,165 @@ mod tests {
             "a@2.0.0 [default,x] -> ",
             "app@0.1.0 [] -> a@1.0.0 a@2.0.0 lib@0.1.0",
             "lib@0.1.0 [default] -> a@2.0.0",
+        ]);
+    }
+
+    #[test]
+    fn test_patches_are_candidates_among_the_others() {
+        let mut fixtures
+            = Fixtures::default();
+
+        fixtures
+            .local("/app", "app", &["a 1", "b 1"], &[])
+            .publish("a", "1.0.0", &[], &[])
+            .publish("a", "1.1.0", &["old 1"], &[])
+            .publish("b", "1.0.0", &[], &[])
+            .publish("b", "1.5.0", &[], &[])
+            .publish("old", "1.0.0", &[], &[])
+            .publish("new", "1.0.0", &[], &[])
+            // Same version as the latest `a`: the fork hides it
+            .local_version("/forks/a", "a", "1.1.0", &["new 1"], &[])
+            // Older than the latest `b`, but patches are preferred
+            .local_version("/forks/b", "b", "1.2.0", &[], &[])
+            // Nothing depends on `c`, and `old` wants another major
+            .local_version("/forks/c", "c", "3.0.0", &[], &[])
+            .local_version("/forks/old", "old", "2.0.0", &[], &[]);
+
+        let options = SolveOptions {
+            patches: vec![
+                Fixtures::patch(PatchTarget::Registry(None), "a * path=/forks/a"),
+                Fixtures::patch(PatchTarget::Registry(None), "b * path=/forks/b"),
+                Fixtures::patch(PatchTarget::Registry(None), "c * path=/forks/c"),
+                Fixtures::patch(PatchTarget::Registry(None), "old * path=/forks/old"),
+            ],
+            ..Default::default()
+        };
+
+        assert_eq!(fixtures.solve_options(&["/app"], options.clone()).unwrap(), vec![
+            "a@1.1.0! [default] -> new@1.0.0",
+            "b@1.2.0! [default] -> ",
+            "new@1.0.0 [default] -> ",
+            "app@0.1.0 [] -> a@1.1.0 b@1.2.0",
+            "unused patch: c@3.0.0",
+            "unused patch: old@2.0.0",
+        ]);
+
+        // A lockfile holding a published version doesn't switch to an
+        // older patch by itself (that's what `yarn up -R` is for)
+        let mut locked
+            = options;
+
+        locked.locked.registry.insert("b".to_string(), BTreeSet::from([CargoSemver::parse("1.5.0").unwrap()]));
+
+        let solution
+            = fixtures.solve_options(&["/app"], locked).unwrap();
+
+        assert!(solution.contains(&"b@1.5.0 [default] -> ".to_string()), "{:#?}", solution);
+        assert!(solution.contains(&"unused patch: b@1.2.0".to_string()), "{:#?}", solution);
+    }
+
+    #[test]
+    fn test_replacements_keep_the_identity_of_what_they_replace() {
+        let mut fixtures
+            = Fixtures::default();
+
+        fixtures
+            .local("/app", "app", &["a 1 features=extra"], &[])
+            .publish("a", "1.0.0", &["old 1"], &[("extra", &[])])
+            .publish("old", "1.0.0", &[], &[])
+            .publish("new", "1.0.0", &[], &[])
+            .local_version("/forks/a", "a", "1.0.0", &["new 1"], &[("extra", &[])])
+            .local_version("/forks/other", "a", "1.0.1", &[], &[]);
+
+        let replace = |path: &str| SolveOptions {
+            replacements: vec![Replacement {
+                name: "a".to_string(),
+                version: CargoSemver::parse("1.0.0").unwrap(),
+                dependency: dependency(&format!("a * path={}", path)),
+            }],
+            ..Default::default()
+        };
+
+        // The registry crate stays in the graph, with the dependencies
+        // and features of what replaces it
+        assert_eq!(fixtures.solve_options(&["/app"], replace("/forks/a")).unwrap(), vec![
+            "a@1.0.0~ [default,extra] -> new@1.0.0",
+            "new@1.0.0 [default] -> ",
+            "app@0.1.0 [] -> a@1.0.0",
+        ]);
+
+        let error
+            = fixtures.solve_options(&["/app"], replace("/forks/other")).unwrap_err();
+
+        assert!(error.contains("same name and version"), "{}", error);
+    }
+
+    #[test]
+    fn test_versions_supporting_the_rust_version_are_preferred() {
+        let mut fixtures
+            = Fixtures::default();
+
+        fixtures
+            .local("/app", "app", &["a 1", "b 1", "c 1"], &[])
+            .publish("a", "1.0.0", &[], &[])
+            .publish("a", "1.1.0", &[], &[])
+            .publish("a", "1.2.0", &[], &[])
+            .rust_version("a", "1.0.0", (1, 60, 0))
+            .rust_version("a", "1.1.0", (1, 70, 0))
+            .rust_version("a", "1.2.0", (1, 80, 0))
+            // Nothing supports the workspace: the latest is as good as any
+            .publish("b", "1.0.0", &[], &[])
+            .publish("b", "1.1.0", &[], &[])
+            .rust_version("b", "1.0.0", (1, 90, 0))
+            .rust_version("b", "1.1.0", (1, 91, 0))
+            // Crates that don't say are assumed to be fine
+            .publish("c", "1.0.0", &[], &[])
+            .publish("c", "1.1.0", &[], &[])
+            // The preference applies across majors too
+            .publish("d", "1.0.0", &["wide >=1,<3"], &[])
+            .publish("wide", "1.4.0", &[], &[])
+            .publish("wide", "2.0.0", &[], &[])
+            .rust_version("wide", "1.4.0", (1, 70, 0))
+            .rust_version("wide", "2.0.0", (1, 85, 0));
+
+        fixtures.paths.clear();
+        fixtures.local("/app", "app", &["a 1", "b 1", "c 1", "d 1"], &[]);
+
+        let options = SolveOptions {
+            rust_versions: vec![(1, 75, 0)],
+            ..Default::default()
+        };
+
+        assert_eq!(fixtures.solve_options(&["/app"], options).unwrap(), vec![
+            "a@1.1.0 [default] -> ",
+            "b@1.1.0 [default] -> ",
+            "c@1.1.0 [default] -> ",
+            "d@1.0.0 [default] -> wide@1.4.0",
+            "wide@1.4.0 [default] -> ",
+            "app@0.1.0 [] -> a@1.1.0 b@1.1.0 c@1.1.0 d@1.0.0",
+        ]);
+
+        assert_eq!(fixtures.solve().unwrap()[0], "a@1.2.0 [default] -> ");
+    }
+
+    #[test]
+    fn test_registries_are_distinct_namespaces() {
+        let mut fixtures
+            = Fixtures::default();
+
+        fixtures
+            .local("/app", "app", &["a 1", "private 1 package=a registry=internal"], &[])
+            .publish("a", "1.0.0", &[], &[])
+            // Dependencies of a crate come from its own registry, unless
+            // they say otherwise
+            .publish("internal/a", "1.4.0", &["shared 1 registry=internal"], &[])
+            .publish("internal/shared", "1.0.0", &[], &[]);
+
+        assert_eq!(fixtures.solve().unwrap(), vec![
+            "a@1.0.0 [default] -> ",
+            "a@1.4.0+internal [default] -> shared@1.0.0",
+            "shared@1.0.0+internal [default] -> ",
+            "app@0.1.0 [] -> a@1.0.0 a@1.4.0",
         ]);
     }
 

@@ -1398,10 +1398,6 @@ impl<'a> InstallManager<'a> {
             .map(|islands| islands.iter().filter(|i| i.linker != zpm_config::IslandLinker::Cargo).flat_map(|i| i.workspace_idents.iter().cloned()).collect())
             .unwrap_or_default();
 
-        let cargo_island_ids: BTreeSet<String> = resolved_islands.as_ref()
-            .map(|islands| islands.iter().filter(|i| i.linker == zpm_config::IslandLinker::Cargo).map(|i| i.id.clone()).collect())
-            .unwrap_or_default();
-
         self.result.roots.retain(|d| !island_workspace_idents.contains(&d.ident));
         let roots = self.result.roots.clone();
 
@@ -1753,9 +1749,7 @@ impl<'a> InstallManager<'a> {
 
             // Per-island trees (isolated peer dep context per island)
             for (island_id, island_d2l) in &self.result.install_state.island_descriptor_to_locator {
-                // Crates aren't part of the tree the JavaScript linkers
-                // work from; the cargo linker reads its island directly
-                if island_d2l.is_empty() || cargo_island_ids.contains(island_id) {
+                if island_d2l.is_empty() {
                     continue;
                 }
 

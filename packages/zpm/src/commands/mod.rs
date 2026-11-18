@@ -12,6 +12,7 @@ mod rc_helpers;
 mod add;
 mod bin;
 mod cache_clear;
+mod cargo;
 mod config;
 mod config_get;
 mod config_set;
@@ -122,6 +123,7 @@ pub enum YarnCli {
     SetVersionFromSources(set_version_from_sources::SetVersionFromSources),
     Node(node::Node),
     Python(python::Python),
+    Cargo(cargo::Cargo),
     Pack(pack::Pack),
     PatchCommit(patch_commit::PatchCommit),
     Patch(patch::Patch),

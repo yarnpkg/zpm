@@ -643,6 +643,9 @@ pub enum Error {
     #[error("{0}")]
     CargoError(String),
 
+    #[error("{0}")]
+    DependencyManifestError(String),
+
     #[error("Island resolution failed for island '{}': {}", .island_id, .message)]
     IslandResolutionFailed {
         island_id: String,

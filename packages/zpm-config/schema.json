@@ -425,6 +425,47 @@
       "description": "The URL of the sparse index of the registry crates are resolved from (the `sparse+` prefix Cargo uses is accepted). Its `config.json` tells where the crates are downloaded from.",
       "default": "https://index.crates.io/"
     },
+    "cargoAuthToken": {
+      "type": ["zpm_utils::Secret<String>", "null"],
+      "description": "The token sent in the Authorization header when querying the default crate registry"
+    },
+    "cargoRegistries": {
+      "type": "object",
+      "description": "The crate registries dependencies can refer to by name (the `registry` field of the dependencies listed in a Cargo.toml), on top of those declared in the project's `.cargo/config.toml`",
+      "additionalProperties": {
+        "type": "object",
+        "title": "CargoRegistry",
+        "properties": {
+          "cargoRegistryServer": {
+            "type": ["string", "null"],
+            "description": "The URL of the sparse index of the registry"
+          },
+          "cargoAuthToken": {
+            "type": ["zpm_utils::Secret<String>", "null"],
+            "description": "The token sent in the Authorization header when querying this registry"
+          }
+        }
+      }
+    },
+    "rustToolchain": {
+      "type": ["string", "null"],
+      "description": "The Rust toolchain (`stable`, `1.93.0`, `nightly-2026-01-01`, ...) used by the workspaces of cargo islands that don't have a `rust-toolchain.toml` file. Defaults to `stable`."
+    },
+    "rustDownloads": {
+      "type": "boolean",
+      "description": "Whether Yarn may download a Rust toolchain when no matching one is found on the system",
+      "default": true
+    },
+    "rustPreference": {
+      "type": "crate::RustPreference",
+      "description": "Whether to prefer the toolchains managed by Yarn ('managed') or the one found on the PATH ('system')",
+      "default": "managed"
+    },
+    "rustDownloadMirror": {
+      "type": "string",
+      "description": "The base URL Rust toolchains are downloaded from",
+      "default": "https://static.rust-lang.org"
+    },
     "pythonVersion": {
       "type": "string",
       "description": "The Python version (`3.12` or `3.12.11`) used to resolve PyPI packages and to provision the interpreter of venv islands",

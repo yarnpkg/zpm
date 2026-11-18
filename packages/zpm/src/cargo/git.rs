@@ -18,7 +18,7 @@ use crate::{
     script::ScriptEnvironment,
 };
 
-use super::{CargoContext, CrateSource, Summary, manifest::{Manifest, PathDependencies}};
+use super::{CargoContext, CrateSource, Registries, Summary, manifest::{Manifest, ManifestContext}};
 
 const CHECKOUT_MARKER: &str
     = ".yarn-checkout";
@@ -99,6 +99,9 @@ pub async fn ensure_checkout(context: &CargoContext, source: &CargoGitSource, co
 
         git(&clone_dir, &["init", "--quiet"]).await?;
 
+        // Relative submodule URLs are resolved against the remote
+        git(&clone_dir, &["remote", "add", "origin", source.url()]).await?;
+
         // Most servers let a single commit be fetched; the others need
         // the whole history
         let shallow
@@ -115,8 +118,10 @@ pub async fn ensure_checkout(context: &CargoContext, source: &CargoGitSource, co
 
         git(&clone_dir, &["-c", "advice.detachedHead=false", "-c", "core.autocrlf=false", "checkout", "--quiet", revision]).await?;
 
+        update_submodules(context, &clone_dir, source.url()).await?;
+
         // Only the files matter from now on
-        clone_dir.with_join_str(".git").fs_rm()?;
+        remove_git_metadata(&clone_dir)?;
         clone_dir.with_join_str(CHECKOUT_MARKER).fs_write_text(commit)?;
 
         checkout_dir.fs_create_parent()?;
@@ -130,6 +135,119 @@ pub async fn ensure_checkout(context: &CargoContext, source: &CargoGitSource, co
     }).await?;
 
     Ok(checkout_dir.clone())
+}
+
+/// Resolves the URL of a submodule, which may be relative to the
+/// repository declaring it (`../sibling.git`).
+fn resolve_submodule_url(repository_url: &str, submodule_url: &str) -> String {
+    if !submodule_url.starts_with("./") && !submodule_url.starts_with("../") {
+        return submodule_url.to_string();
+    }
+
+    let mut base
+        = repository_url.trim_end_matches('/').to_string();
+
+    let mut relative
+        = submodule_url;
+
+    loop {
+        if let Some(rest) = relative.strip_prefix("./") {
+            relative = rest;
+        } else if let Some(rest) = relative.strip_prefix("../") {
+            relative = rest;
+
+            if let Some(index) = base.rfind('/') {
+                base.truncate(index);
+            }
+        } else {
+            break;
+        }
+    }
+
+    format!("{}/{}", base, relative)
+}
+
+/// Lists the submodules a repository declares, as (path, url) pairs.
+fn parse_gitmodules(text: &str) -> Vec<(String, String)> {
+    let mut submodules: Vec<(Option<String>, Option<String>)>
+        = Vec::new();
+
+    for line in text.lines().map(|line| line.trim()) {
+        if line.starts_with('[') {
+            submodules.push((None, None));
+            continue;
+        }
+
+        let (Some(current), Some((key, value))) = (submodules.last_mut(), line.split_once('=')) else {
+            continue;
+        };
+
+        match key.trim() {
+            "path" => current.0 = Some(value.trim().to_string()),
+            "url" => current.1 = Some(value.trim().to_string()),
+            _ => {},
+        }
+    }
+
+    submodules.into_iter()
+        .filter_map(|(path, url)| Some((path?, url?)))
+        .collect()
+}
+
+/// Checks out the submodules of a repository, and theirs. Cargo does the
+/// same for git dependencies; each repository goes through the same
+/// approval as the one that brought it.
+async fn update_submodules(context: &CargoContext, checkout_dir: &Path, repository_url: &str) -> Result<(), Error> {
+    let mut pending
+        = vec![(checkout_dir.clone(), repository_url.to_string())];
+
+    while let Some((dir, url)) = pending.pop() {
+        let Ok(gitmodules) = dir.with_join_str(".gitmodules").fs_read_text() else {
+            continue;
+        };
+
+        let submodules = parse_gitmodules(&gitmodules).into_iter()
+            .map(|(path, submodule_url)| (path, resolve_submodule_url(&url, &submodule_url)))
+            .collect::<Vec<_>>();
+
+        if submodules.is_empty() {
+            continue;
+        }
+
+        for (_, submodule_url) in &submodules {
+            validate_repo_url(submodule_url, &context.http_client.config, &context.approved_git_repositories)?;
+        }
+
+        // Servers refusing to serve a single commit need the history
+        if git(&dir, &["submodule", "update", "--init", "--depth", "1"]).await.is_err() {
+            git(&dir, &["submodule", "update", "--init"]).await?;
+        }
+
+        for (path, submodule_url) in submodules {
+            pending.push((dir.with_join_str(path), submodule_url));
+        }
+    }
+
+    Ok(())
+}
+
+/// Removes the `.git` folder of a checkout, and the `.git` files of its
+/// submodules.
+fn remove_git_metadata(dir: &Path) -> Result<(), Error> {
+    let git_path
+        = dir.with_join_str(".git");
+
+    if git_path.fs_symlink_metadata().is_ok() {
+        git_path.fs_rm()?;
+    }
+
+    for entry in dir.fs_read_dir()?.flatten() {
+        if entry.file_type().is_ok_and(|file_type| file_type.is_dir()) {
+            remove_git_metadata(&dir.with_join_str(entry.file_name().to_string_lossy()))?;
+        }
+    }
+
+    Ok(())
 }
 
 /// A crate found in a checkout.
@@ -167,7 +285,7 @@ fn collect_manifests(dir: &Path, manifests: &mut Vec<Manifest>) {
 
 /// Lists the crates of a checkout, by name. When a repository holds
 /// several crates with the same name, the one closest to the root wins.
-pub fn read_packages(checkout_dir: &Path, source: &CargoGitSource, commit: &str) -> Result<BTreeMap<String, GitPackage>, Error> {
+pub fn read_packages(checkout_dir: &Path, source: &CargoGitSource, commit: &str, registries: &Registries) -> Result<BTreeMap<String, GitPackage>, Error> {
     let mut manifests
         = Vec::new();
 
@@ -197,7 +315,7 @@ pub fn read_packages(checkout_dir: &Path, source: &CargoGitSource, commit: &str)
 
         // Crates that can't be read (examples, test fixtures...) only
         // matter if something depends on them, which then fails by itself
-        let Ok(summary) = manifest.summarize(workspace.as_ref(), crate_source, &PathDependencies::Git(source)) else {
+        let Ok(summary) = manifest.summarize(workspace.as_ref(), crate_source, &ManifestContext::git(source, registries)) else {
             continue;
         };
 
@@ -209,4 +327,31 @@ pub fn read_packages(checkout_dir: &Path, source: &CargoGitSource, commit: &str)
     }
 
     Ok(packages)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_submodule_urls() {
+        let repository
+            = "https://example.com/org/repo.git";
+
+        assert_eq!(resolve_submodule_url(repository, "https://other.example.com/dep.git"), "https://other.example.com/dep.git");
+        assert_eq!(resolve_submodule_url(repository, "../sibling.git"), "https://example.com/org/sibling.git");
+        assert_eq!(resolve_submodule_url(repository, "../../elsewhere/dep.git"), "https://example.com/elsewhere/dep.git");
+        assert_eq!(resolve_submodule_url(repository, "./nested.git"), "https://example.com/org/repo.git/nested.git");
+    }
+
+    #[test]
+    fn test_gitmodules() {
+        let text
+            = "[submodule \"vendor/a\"]\n\tpath = vendor/a\n\turl = ../a.git\n[submodule \"b\"]\n\turl = https://example.com/b.git\n\tpath = deps/b\n\tbranch = main\n[submodule \"incomplete\"]\n\tpath = nowhere\n";
+
+        assert_eq!(parse_gitmodules(text), vec![
+            ("vendor/a".to_string(), "../a.git".to_string()),
+            ("deps/b".to_string(), "https://example.com/b.git".to_string()),
+        ]);
+    }
 }

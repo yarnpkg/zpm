@@ -1,14 +1,12 @@
-use std::collections::HashSet;
+use std::collections::BTreeSet;
 
 use clipanion::cli;
 use wax::{Glob, Program};
-use zpm_config::Configuration;
-use zpm_parsers::{Document, JsonDocument};
 use zpm_primitives::Ident;
-use zpm_utils::ToFileString;
 
 use crate::{
     error::Error,
+    manifest::dependencies::{ManifestScope, ManifestSet},
     project::{InstallMode, Project, RunInstallOptions, Workspace},
 };
 
@@ -75,7 +73,7 @@ impl Remove {
 
         if self.all {
             for workspace in &project.workspaces {
-                self.remove_dependencies_from_manifest(&project.config, workspace, &ident_globs)?;
+                self.remove_dependencies(&project, workspace, ManifestScope::All, &ident_globs)?;
             }
         } else {
             let active_workspace_idx
@@ -84,7 +82,7 @@ impl Remove {
             let active_workspace
                 = &project.workspaces[active_workspace_idx];
 
-            self.remove_dependencies_from_manifest(&project.config, active_workspace, &ident_globs)?;
+            self.remove_dependencies(&project, active_workspace, ManifestScope::Active, &ident_globs)?;
         }
 
         let mut project
@@ -98,58 +96,31 @@ impl Remove {
         Ok(())
     }
 
-    fn remove_dependencies_from_manifest(&self, config: &Configuration, workspace: &Workspace, ident_globs: &[Glob]) -> Result<(), Error> {
-        let all_dependencies = workspace.manifest.remote.dependencies.keys()
-            .chain(workspace.manifest.remote.optional_dependencies.keys())
-            .chain(workspace.manifest.remote.peer_dependencies.keys())
-            .chain(workspace.manifest.dev_dependencies.keys())
-            .collect::<HashSet<_>>();
+    /// Removes the matching dependencies from the manifests of a workspace:
+    /// its package.json, and the ones of the other ecosystems it's part of.
+    fn remove_dependencies(&self, project: &Project, workspace: &Workspace, scope: ManifestScope, ident_globs: &[Glob]) -> Result<(), Error> {
+        let mut manifests
+            = ManifestSet::open(project, workspace, scope)?;
 
-        let mut removed_dependencies = all_dependencies.into_iter()
-            .filter(|ident| ident_globs.iter().any(|glob| glob.is_match(ident.as_str())))
-            .cloned()
-            .collect::<Vec<_>>();
-
-        if config.settings.enable_auto_types.value {
-            removed_dependencies = removed_dependencies.into_iter()
-                .flat_map(|ident| vec![ident.type_ident(), ident])
+        for manifest in manifests.iter_mut() {
+            let mut removed_dependencies = manifest.dependencies().into_iter()
+                .map(|dependency| dependency.descriptor.ident)
+                .filter(|ident| ident_globs.iter().any(|glob| glob.is_match(ident.as_str())))
+                .collect::<BTreeSet<_>>()
+                .into_iter()
                 .collect::<Vec<_>>();
+
+            if project.config.settings.enable_auto_types.value {
+                removed_dependencies = removed_dependencies.into_iter()
+                    .flat_map(|ident| vec![ident.type_ident(), ident])
+                    .collect::<Vec<_>>();
+            }
+
+            for ident in &removed_dependencies {
+                manifest.remove(ident)?;
+            }
         }
 
-        let manifest_path = workspace.path
-            .with_join_str("package.json");
-
-        let manifest_content = manifest_path
-            .fs_read_prealloc()?;
-
-        let mut document
-            = JsonDocument::new(manifest_content)?;
-
-        for ident in removed_dependencies.iter() {
-            document.set_path(
-                &zpm_parsers::Path::from_segments(vec!["dependencies".to_string(), ident.to_file_string()]),
-                zpm_parsers::Value::Undefined,
-            )?;
-
-            document.set_path(
-                &zpm_parsers::Path::from_segments(vec!["optionalDependencies".to_string(), ident.to_file_string()]),
-                zpm_parsers::Value::Undefined,
-            )?;
-
-            document.set_path(
-                &zpm_parsers::Path::from_segments(vec!["peerDependencies".to_string(), ident.to_file_string()]),
-                zpm_parsers::Value::Undefined,
-            )?;
-
-            document.set_path(
-                &zpm_parsers::Path::from_segments(vec!["devDependencies".to_string(), ident.to_file_string()]),
-                zpm_parsers::Value::Undefined,
-            )?;
-        }
-
-        manifest_path
-            .fs_change(&document.input, false)?;
-
-        Ok(())
+        manifests.save()
     }
 }

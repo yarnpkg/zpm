@@ -24,10 +24,13 @@ use zpm_utils::{Path, ToFileString};
 use crate::{
     build::BuildRequests,
     cargo::{
+        CargoContext,
         CrateSource,
-        island::island_state,
-        lockfile::{DEFAULT_LOCKFILE_VERSION, LOCKFILE_NAME, LockPackage, LockSource, parse_lockfile, render_lockfile},
-        manifest::{MANIFEST_NAME, Manifest, PathDependencies},
+        Registries,
+        island::{discover_local_crates, island_roots, island_state},
+        lockfile::{LOCKFILE_NAME, LockPackage, LockSource, lockfile_version_for, parse_lockfile, render_lockfile},
+        manifest::{MANIFEST_NAME, Manifest, ManifestContext},
+        registry_source_id,
     },
     error::Error,
     fetchers::PackageData,
@@ -37,7 +40,7 @@ use crate::{
     project::Project,
 };
 
-const CONFIG_PATH: &str
+pub const CONFIG_PATH: &str
     = ".cargo/config.toml";
 
 const VENDOR_PATH: &str
@@ -110,22 +113,22 @@ impl LinkedCrate {
 }
 
 /// The version of a crate found on the disk, read from its manifest.
-fn read_crate_version(dir: &Path, source: CrateSource, git_source: Option<&CargoGitSource>) -> Result<CargoSemver, Error> {
+fn read_crate_version(dir: &Path, source: CrateSource, git_source: Option<&CargoGitSource>, registries: &Registries) -> Result<CargoSemver, Error> {
     let manifest
         = Manifest::read(dir)?;
 
     let workspace
         = manifest.find_workspace_root(None)?;
 
-    let path_dependencies = match git_source {
-        Some(source) => PathDependencies::Git(source),
-        None => PathDependencies::Local,
+    let context = match git_source {
+        Some(source) => ManifestContext::git(source, registries),
+        None => ManifestContext::local(registries),
     };
 
-    Ok(manifest.summarize(workspace.as_ref(), source, &path_dependencies)?.version)
+    Ok(manifest.summarize(workspace.as_ref(), source, &context)?.version)
 }
 
-fn describe_crate(project: &Project, install: &Install, locator: &Locator) -> Result<LinkedCrate, Error> {
+fn describe_crate(project: &Project, install: &Install, registries: &Registries, locator: &Locator) -> Result<LinkedCrate, Error> {
     let package_data
         = install.package_data.get(locator);
 
@@ -147,7 +150,7 @@ fn describe_crate(project: &Project, install: &Install, locator: &Locator) -> Re
                 locator: locator.clone(),
                 name,
                 version: params.version.to_semver(),
-                source: LockSource::Registry,
+                source: LockSource::Registry(params.registry.clone()),
                 checksum: Some(checksum),
                 data: Some(CrateData::Archive(archive_path.clone())),
                 local_dir: None,
@@ -168,7 +171,7 @@ fn describe_crate(project: &Project, install: &Install, locator: &Locator) -> Re
             Ok(LinkedCrate {
                 locator: locator.clone(),
                 name,
-                version: read_crate_version(package_directory, source, Some(&params.source))?,
+                version: read_crate_version(package_directory, source, Some(&params.source), registries)?,
                 source: LockSource::Git {
                     source: params.source.clone(),
                     commit: params.commit.clone(),
@@ -187,7 +190,7 @@ fn describe_crate(project: &Project, install: &Install, locator: &Locator) -> Re
             Ok(LinkedCrate {
                 locator: locator.clone(),
                 name,
-                version: read_crate_version(&dir, CrateSource::Path(dir.clone()), None)?,
+                version: read_crate_version(&dir, CrateSource::Path(dir.clone()), None, registries)?,
                 source: LockSource::Path,
                 checksum: None,
                 data: None,
@@ -316,16 +319,49 @@ fn toml_string(value: &str) -> String {
     serde_json::to_string(value).unwrap()
 }
 
+/// What the managed block of a workspace's Cargo configuration is
+/// generated from.
+#[derive(Clone, Debug, Default)]
+struct ConfigSources {
+    /// The registries crates come from, besides crates.io
+    registries: BTreeSet<String>,
+    git: BTreeSet<CargoGitSource>,
+
+    /// The registries the manifests refer to by name, which Cargo has to
+    /// know about to read them
+    registry_names: BTreeMap<String, String>,
+}
+
 /// The configuration making Cargo read crates from the vendor directory
 /// rather than from where they were published.
-fn render_config_block(git_sources: &BTreeSet<CargoGitSource>) -> String {
+fn render_config_block(sources: &ConfigSources) -> String {
     let mut lines = vec![
         BLOCK_START.to_string(),
         "# Managed by Yarn, which rewrites this block on every install: Cargo builds".to_string(),
         "# from the crates Yarn installed rather than fetching them itself.".to_string(),
-        "[source.crates-io]".to_string(),
-        format!("replace-with = {}", toml_string(VENDOR_SOURCE)),
     ];
+
+    for (name, index) in &sources.registry_names {
+        lines.push(format!("[registries.{}]", name));
+        lines.push(format!("index = {}", toml_string(&format!("sparse+{}", index))));
+        lines.push(String::new());
+    }
+
+    lines.push("[source.crates-io]".to_string());
+    lines.push(format!("replace-with = {}", toml_string(VENDOR_SOURCE)));
+
+    for index in &sources.registries {
+        let source_id
+            = registry_source_id(&Some(index.clone()));
+
+        lines.push(String::new());
+        lines.push(format!("[source.{}]", toml_string(&source_id)));
+        lines.push(format!("registry = {}", toml_string(&source_id)));
+        lines.push(format!("replace-with = {}", toml_string(VENDOR_SOURCE)));
+    }
+
+    let git_sources
+        = &sources.git;
 
     for source in git_sources {
         lines.push(String::new());
@@ -392,6 +428,18 @@ fn write_if_changed(path: &Path, content: &str) -> Result<(), Error> {
     Ok(())
 }
 
+/// The registries the user's own Cargo configuration already names.
+fn user_registry_names(config: &str) -> BTreeSet<String> {
+    let user_config = match (config.find(BLOCK_START), config.find(BLOCK_END)) {
+        (Some(start), Some(end)) if start < end => format!("{}{}", &config[..start], &config[end + BLOCK_END.len()..]),
+        _ => config.to_string(),
+    };
+
+    user_config.parse::<toml_edit::DocumentMut>().ok()
+        .and_then(|document| Some(document.get("registries")?.as_table_like()?.iter().map(|(name, _)| name.to_string()).collect()))
+        .unwrap_or_default()
+}
+
 pub async fn link_island_cargo(project: &Project, install: &Install, island: &ResolvedIsland) -> Result<LinkResult, Error> {
     let mut packages_by_location
         = BTreeMap::new();
@@ -411,6 +459,9 @@ pub async fn link_island_cargo(project: &Project, install: &Install, island: &Re
         return Ok(empty_result(packages_by_location));
     };
 
+    let context
+        = CargoContext::new(project);
+
     let locators
         = resolutions.keys().collect::<Vec<_>>();
 
@@ -419,7 +470,7 @@ pub async fn link_island_cargo(project: &Project, install: &Install, island: &Re
         .collect::<BTreeMap<_, _>>();
 
     let mut crates = locators.par_iter()
-        .map(|locator| describe_crate(project, install, locator))
+        .map(|locator| describe_crate(project, install, &context.registries, locator))
         .collect::<Result<Vec<_>, Error>>()?;
 
     for (index, resolution) in resolutions.values().enumerate() {
@@ -432,25 +483,86 @@ pub async fn link_island_cargo(project: &Project, install: &Install, island: &Re
         }
     }
 
-    for workspace_ident in &island.workspace_idents {
-        let workspace
-            = project.workspace_by_ident(workspace_ident)?;
+    // The graph is what the members of the Cargo workspaces depend on;
+    // what's left are the patches that ended up unused
+    let roots
+        = island_roots(project, &island.id, &island.workspace_idents)?;
 
-        // Several Cargo workspaces may share an island; each of them
-        // gets the part of the graph its own crates depend on
+    let local
+        = discover_local_crates(&roots, &context.registries)?;
+
+    let members
+        = &local.members;
+
+    // The oldest Rust release the members claim to support
+    let rust_version = members.iter()
+        .filter_map(|member| local.summaries.get(member)?.rust_version)
+        .min();
+
+    let closure = |start: Vec<usize>| {
         let mut reachable
             = BTreeSet::new();
 
-        let mut queue = crates.iter().enumerate()
-            .filter(|(_, linked)| linked.local_dir.as_ref().is_some_and(|dir| workspace.path.contains(dir)))
-            .map(|(index, _)| index)
-            .collect::<Vec<_>>();
+        let mut queue
+            = start;
 
         while let Some(index) = queue.pop() {
             if reachable.insert(index) {
                 queue.extend(crates[index].dependencies.iter().copied());
             }
         }
+
+        reachable
+    };
+
+    let member_indices = |workspace_path: Option<&Path>| {
+        crates.iter().enumerate()
+            .filter(|(_, linked)| linked.local_dir.as_ref().is_some_and(|dir| members.contains(dir) && workspace_path.is_none_or(|path| path.contains(dir))))
+            .map(|(index, _)| index)
+            .collect::<Vec<_>>()
+    };
+
+    let used
+        = closure(member_indices(None));
+
+    for workspace_ident in &island.workspace_idents {
+        let workspace
+            = project.workspace_by_ident(workspace_ident)?;
+
+        let manifest
+            = Manifest::read(&workspace.path)?;
+
+        // Several Cargo workspaces may share an island; each of them
+        // gets the part of the graph its own crates depend on
+        let reachable
+            = closure(member_indices(Some(&workspace.path)));
+
+        let patched_names
+            = manifest.patched_names();
+
+        let unused_patches = (0..crates.len())
+            .filter(|index| !used.contains(index) && patched_names.contains(&crates[*index].name))
+            .collect::<BTreeSet<_>>();
+
+        // A replaced crate is recorded as depending on what replaces it
+        let replaced_crates
+            = manifest.replaced_crates();
+
+        let replacement_of = |index: usize| {
+            let linked
+                = &crates[index];
+
+            let is_replaced
+                = matches!(linked.source, LockSource::Registry(_)) && replaced_crates.contains(&(linked.name.clone(), linked.version.clone()));
+
+            match (is_replaced, linked.dependencies.as_slice()) {
+                (true, [replacement]) => Some(*replacement),
+                _ => None,
+            }
+        };
+
+        let listed = reachable.iter().chain(&unused_patches).copied()
+            .collect::<BTreeSet<_>>();
 
         let vendor
             = vendor_path(&workspace.path);
@@ -462,7 +574,7 @@ pub async fn link_island_cargo(project: &Project, install: &Install, island: &Re
         let mut folders: BTreeMap<String, usize>
             = BTreeMap::new();
 
-        for index in reachable.iter().copied().filter(|index| crates[*index].data.is_some()) {
+        for index in listed.iter().copied().filter(|index| crates[*index].data.is_some()) {
             let linked
                 = &crates[index];
 
@@ -503,43 +615,68 @@ pub async fn link_island_cargo(project: &Project, install: &Install, island: &Re
             .and_then(|text| parse_lockfile(&text))
             .and_then(|locked| locked.version)
             .filter(|version| *version >= 3)
-            .unwrap_or(DEFAULT_LOCKFILE_VERSION);
+            .unwrap_or_else(|| lockfile_version_for(rust_version));
 
-        let positions = reachable.iter().enumerate()
+        let positions = listed.iter().enumerate()
             .map(|(position, index)| (*index, position))
             .collect::<BTreeMap<_, _>>();
 
-        let lock_packages = reachable.iter().map(|index| {
+        let lock_packages = listed.iter().map(|index| {
             let linked
                 = &crates[*index];
+
+            let replace
+                = replacement_of(*index);
+
+            let dependencies = match replace {
+                Some(_) => vec![],
+                None => linked.dependencies.iter().map(|dependency| positions[dependency]).collect(),
+            };
 
             LockPackage {
                 name: linked.name.clone(),
                 version: linked.version.clone(),
                 source: linked.source.clone(),
                 checksum: linked.checksum.clone(),
-                dependencies: linked.dependencies.iter().map(|dependency| positions[dependency]).collect(),
+                dependencies,
+                replace: replace.map(|replacement| positions[&replacement]),
+                is_unused_patch: unused_patches.contains(index),
             }
         }).collect::<Vec<_>>();
 
         write_if_changed(&lockfile_path, &render_lockfile(&lock_packages, lockfile_version))?;
 
-        let git_sources = reachable.iter()
-            .filter_map(|index| match &crates[*index].source {
-                LockSource::Git {source, ..} => Some(source.clone()),
-                _ => None,
-            })
-            .collect::<BTreeSet<_>>();
-
         let config_path
             = workspace.path.with_join_str(CONFIG_PATH);
 
-        let config
-            = merge_config(&config_path.fs_read_text().unwrap_or_default(), &render_config_block(&git_sources))?;
+        let existing_config
+            = config_path.fs_read_text().unwrap_or_default();
 
-        write_if_changed(&config_path, &config)?;
+        let user_registries
+            = user_registry_names(&existing_config);
+
+        let mut sources = ConfigSources {
+            registry_names: context.registries.names.iter()
+                .filter(|(name, _)| !user_registries.contains(*name))
+                .map(|(name, index)| (name.clone(), index.clone()))
+                .collect(),
+            ..Default::default()
+        };
+
+        for index in &listed {
+            match &crates[*index].source {
+                LockSource::Git {source, ..} => {sources.git.insert(source.clone());},
+                LockSource::Registry(Some(registry)) => {sources.registries.insert(registry.clone());},
+                _ => {},
+            }
+        }
+
+        write_if_changed(&config_path, &merge_config(&existing_config, &render_config_block(&sources))?)?;
 
         write_if_changed(&vendor.with_join_str(STATE_MARKER), &island_state(project, &island.id, &island.workspace_idents)?)?;
+
+        // What's left to build is the toolchain itself
+        crate::cargo::toolchain::ensure_toolchain(project, &workspace.path).await?;
     }
 
     Ok(empty_result(packages_by_location))
@@ -552,10 +689,14 @@ mod tests {
     use super::*;
 
     fn block() -> String {
-        render_config_block(&BTreeSet::from([
-            CargoGitSource::from_file_string("https://github.com/arcanis/dialoguer.git?branch=mael%2Fconfirm-prompt-height").unwrap(),
-            CargoGitSource::from_file_string("https://github.com/arcanis/wax.git").unwrap(),
-        ]))
+        render_config_block(&ConfigSources {
+            registries: BTreeSet::from(["https://crates.example.org/index/".to_string()]),
+            registry_names: BTreeMap::from([("internal".to_string(), "https://crates.example.org/index/".to_string())]),
+            git: BTreeSet::from([
+                CargoGitSource::from_file_string("https://github.com/arcanis/dialoguer.git?branch=mael%2Fconfirm-prompt-height").unwrap(),
+                CargoGitSource::from_file_string("https://github.com/arcanis/wax.git").unwrap(),
+            ]),
+        })
     }
 
     #[test]
@@ -583,6 +724,22 @@ mod tests {
             = sources.get("git+https://github.com/arcanis/wax.git").unwrap();
 
         assert!(wax.get("branch").is_none());
+
+        // Other registries are replaced too, and named for Cargo
+        let internal
+            = sources.get("sparse+https://crates.example.org/index/").unwrap();
+
+        assert_eq!(internal["registry"].as_str(), Some("sparse+https://crates.example.org/index/"));
+        assert_eq!(internal["replace-with"].as_str(), Some("yarn-vendor"));
+        assert_eq!(document["registries"]["internal"]["index"].as_str(), Some("sparse+https://crates.example.org/index/"));
+    }
+
+    #[test]
+    fn test_registries_named_by_the_user_are_left_alone() {
+        let config
+            = format!("[registries.internal]\nindex = \"sparse+https://crates.example.org/index/\"\n\n{}\n[registries.other]\nindex = \"sparse+https://other.example.org/\"\n", block());
+
+        assert_eq!(user_registry_names(&config), BTreeSet::from(["internal".to_string(), "other".to_string()]));
     }
 
     #[test]
@@ -604,7 +761,7 @@ mod tests {
         assert_eq!(merge_config(&merged, &block).unwrap(), merged);
 
         let smaller
-            = render_config_block(&BTreeSet::new());
+            = render_config_block(&ConfigSources::default());
 
         assert_eq!(merge_config(&format!("{}\n[build]\njobs = 2\n", merged), &smaller).unwrap(), format!("{}\n{}\n[build]\njobs = 2\n", user, smaller));
 

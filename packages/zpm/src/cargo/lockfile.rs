@@ -10,7 +10,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use toml_edit::DocumentMut;
 use zpm_primitives::{CargoGitRef, CargoGitSource, CargoSemver};
 
-use super::CRATES_IO_SOURCE;
+use super::{RegistryIndex, RustVersion, registry_source_id};
 
 pub const LOCKFILE_NAME: &str
     = "Cargo.lock";
@@ -19,11 +19,25 @@ pub const LOCKFILE_NAME: &str
 pub const DEFAULT_LOCKFILE_VERSION: u32
     = 4;
 
+/// The format new lockfiles are written in. Like Cargo, the newest one
+/// the workspace's oldest supported Rust release can read.
+pub fn lockfile_version_for(rust_version: Option<RustVersion>) -> u32 {
+    match rust_version {
+        Some(rust_version) if rust_version < (1, 78, 0) => 3,
+        _ => DEFAULT_LOCKFILE_VERSION,
+    }
+}
+
 /// What a `Cargo.lock` pins.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct LockedPackages {
+    /// Version of the lockfile format
     pub version: Option<u32>,
-    pub registry: BTreeMap<String, BTreeSet<CargoSemver>>,
+
+    /// The versions of every package, whatever its source
+    pub versions: BTreeMap<String, BTreeSet<CargoSemver>>,
+
+    /// The commit each git source is pinned to
     pub git: BTreeMap<CargoGitSource, String>,
 }
 
@@ -59,15 +73,14 @@ pub fn parse_lockfile(text: &str) -> Option<LockedPackages> {
             continue;
         };
 
-        let Some(source) = package.get("source").and_then(|item| item.as_str()) else {
-            continue;
-        };
+        if let Some(version) = CargoSemver::parse(version) {
+            locked.versions.entry(name.to_string()).or_default().insert(version);
+        }
 
-        if source.starts_with("registry+") || source.starts_with("sparse+") {
-            if let Some(version) = CargoSemver::parse(version) {
-                locked.registry.entry(name.to_string()).or_default().insert(version);
-            }
-        } else if let Some((source, commit)) = parse_git_source(source) {
+        let git_source
+            = package.get("source").and_then(|item| item.as_str()).and_then(parse_git_source);
+
+        if let Some((source, commit)) = git_source {
             locked.git.insert(source, commit);
         }
     }
@@ -79,7 +92,7 @@ pub fn parse_lockfile(text: &str) -> Option<LockedPackages> {
 pub enum LockSource {
     /// Workspace members and path dependencies have no source
     Path,
-    Registry,
+    Registry(RegistryIndex),
     Git {
         source: CargoGitSource,
         commit: String,
@@ -90,7 +103,7 @@ impl LockSource {
     fn render(&self, lockfile_version: u32) -> Option<String> {
         match self {
             LockSource::Path => None,
-            LockSource::Registry => Some(CRATES_IO_SOURCE.to_string()),
+            LockSource::Registry(registry) => Some(registry_source_id(registry)),
 
             LockSource::Git {source, commit} => {
                 // The ref only got percent-encoded with the fourth version
@@ -119,6 +132,13 @@ pub struct LockPackage {
 
     /// Indices of the dependencies in the list of packages
     pub dependencies: Vec<usize>,
+
+    /// Index of the package a `[replace]` table swaps this one for
+    pub replace: Option<usize>,
+
+    /// Whether the package is a patch nothing uses; those are listed
+    /// apart, without their dependencies
+    pub is_unused_patch: bool,
 }
 
 /// Renders a `Cargo.lock` the way Cargo does, so that `cargo build
@@ -142,7 +162,9 @@ pub fn render_lockfile(packages: &[LockPackage], lockfile_version: u32) -> Strin
     let mut by_name_and_version: BTreeMap<(&str, &CargoSemver), usize>
         = BTreeMap::new();
 
-    for package in packages {
+    // Unused patches aren't part of the graph, so they don't make the
+    // names of the packages that are any more ambiguous
+    for package in packages.iter().filter(|package| !package.is_unused_patch) {
         *by_name.entry(package.name.as_str()).or_default() += 1;
         *by_name_and_version.entry((package.name.as_str(), &package.version)).or_default() += 1;
     }
@@ -173,7 +195,7 @@ pub fn render_lockfile(packages: &[LockPackage], lockfile_version: u32) -> Strin
     output.push_str("# It is not intended for manual editing.\n");
     output.push_str(&format!("version = {}\n", lockfile_version));
 
-    for index in order {
+    for index in order.iter().copied().filter(|index| !packages[*index].is_unused_patch) {
         let package
             = &packages[index];
 
@@ -204,6 +226,23 @@ pub fn render_lockfile(packages: &[LockPackage], lockfile_version: u32) -> Strin
             }
 
             output.push_str("]\n");
+        }
+
+        if let Some(replace) = package.replace {
+            output.push_str(&format!("replace = \"{}\"\n", dependency_entry(replace)));
+        }
+    }
+
+    for index in order.iter().copied().filter(|index| packages[*index].is_unused_patch) {
+        let package
+            = &packages[index];
+
+        output.push_str("\n[[patch.unused]]\n");
+        output.push_str(&format!("name = \"{}\"\n", package.name));
+        output.push_str(&format!("version = \"{}\"\n", package.version));
+
+        if let Some(source) = &sources[index] {
+            output.push_str(&format!("source = \"{}\"\n", source));
         }
     }
 
@@ -267,8 +306,10 @@ checksum = "ccf3ec651a847eb01de73ccad15eb7d99f80485de043efb2f370cd654f4ea44b"
             = parse_lockfile(LOCKFILE).unwrap();
 
         assert_eq!(locked.version, Some(4));
-        assert_eq!(locked.registry["thiserror"], BTreeSet::from([version("1.0.69"), version("2.0.18")]));
-        assert_eq!(locked.registry["wasi"], BTreeSet::from([version("0.11.1+wasi-snapshot-preview1")]));
+        assert_eq!(locked.versions["thiserror"], BTreeSet::from([version("1.0.69"), version("2.0.18")]));
+        assert_eq!(locked.versions["wasi"], BTreeSet::from([version("0.11.1+wasi-snapshot-preview1")]));
+        assert_eq!(locked.versions["dialoguer"], BTreeSet::from([version("0.11.0")]));
+        assert_eq!(locked.versions["app"], BTreeSet::from([version("0.1.0")]));
 
         let source
             = CargoGitSource::from_file_string("https://github.com/arcanis/dialoguer.git?branch=mael%2Fconfirm-prompt-height").unwrap();
@@ -291,11 +332,11 @@ checksum = "ccf3ec651a847eb01de73ccad15eb7d99f80485de043efb2f370cd654f4ea44b"
 
         // Listed out of order, and with duplicated edges, on purpose
         let packages = vec![
-            LockPackage {name: "wasi".to_string(), version: version("0.11.1+wasi-snapshot-preview1"), source: LockSource::Registry, checksum: Some("ccf3ec651a847eb01de73ccad15eb7d99f80485de043efb2f370cd654f4ea44b".to_string()), dependencies: vec![]},
-            LockPackage {name: "thiserror".to_string(), version: version("2.0.18"), source: LockSource::Registry, checksum: Some("4288b5bcbc7920c07a1149a35cf9590a2aa808e0bc1eafaade0b80947865fbc4".to_string()), dependencies: vec![]},
-            LockPackage {name: "app".to_string(), version: version("0.1.0"), source: LockSource::Path, checksum: None, dependencies: vec![0, 1, 3, 4, 4]},
-            LockPackage {name: "thiserror".to_string(), version: version("1.0.69"), source: LockSource::Registry, checksum: Some("b6aaf5339b578ea85b50e080feb250a3e8ae8cfcdff9a461c9ec2904bc923f52".to_string()), dependencies: vec![]},
-            LockPackage {name: "dialoguer".to_string(), version: version("0.11.0"), source: git, checksum: None, dependencies: vec![3]},
+            LockPackage {name: "wasi".to_string(), version: version("0.11.1+wasi-snapshot-preview1"), source: LockSource::Registry(None), checksum: Some("ccf3ec651a847eb01de73ccad15eb7d99f80485de043efb2f370cd654f4ea44b".to_string()), dependencies: vec![], replace: None, is_unused_patch: false},
+            LockPackage {name: "thiserror".to_string(), version: version("2.0.18"), source: LockSource::Registry(None), checksum: Some("4288b5bcbc7920c07a1149a35cf9590a2aa808e0bc1eafaade0b80947865fbc4".to_string()), dependencies: vec![], replace: None, is_unused_patch: false},
+            LockPackage {name: "app".to_string(), version: version("0.1.0"), source: LockSource::Path, checksum: None, dependencies: vec![0, 1, 3, 4, 4], replace: None, is_unused_patch: false},
+            LockPackage {name: "thiserror".to_string(), version: version("1.0.69"), source: LockSource::Registry(None), checksum: Some("b6aaf5339b578ea85b50e080feb250a3e8ae8cfcdff9a461c9ec2904bc923f52".to_string()), dependencies: vec![], replace: None, is_unused_patch: false},
+            LockPackage {name: "dialoguer".to_string(), version: version("0.11.0"), source: git, checksum: None, dependencies: vec![3], replace: None, is_unused_patch: false},
         ];
 
         assert_eq!(render_lockfile(&packages, 4), LOCKFILE);

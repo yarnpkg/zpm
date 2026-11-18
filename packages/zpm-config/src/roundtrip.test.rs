@@ -45,6 +45,7 @@ fn sample_value(type_name: &str) -> &'static str {
         "crate::NpmPublishAccess" => "restricted",
         "crate::PnpFallbackMode" => "all",
         "crate::PythonPreference" => "system",
+        "crate::RustPreference" => "system",
         "crate::WinLinkType" => "junctions",
         "crate::types::LogLevel" => "warning",
 

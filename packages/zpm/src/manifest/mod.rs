@@ -15,6 +15,7 @@ use serde::{Deserialize, Serialize};
 
 pub mod bin;
 pub mod browser;
+pub mod dependencies;
 pub mod exports;
 pub mod helpers;
 pub mod imports;

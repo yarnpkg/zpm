@@ -1,16 +1,16 @@
 use std::collections::{HashMap, HashSet};
 
 use clipanion::cli;
-use zpm_parsers::{Document, JsonDocument, Value};
-use zpm_primitives::{AnonymousSemverRange, Descriptor, Range};
+use zpm_primitives::{AnonymousSemverRange, Descriptor};
 use zpm_semver::RangeKind;
-use zpm_utils::{FromFileString, ToFileString, ToHumanString};
+use zpm_utils::{FromFileString, ToHumanString};
 
 use crate::{
     algolia::query_algolia,
     descriptor_loose::{self, DescriptorLooseDescriptor, LooseDescriptor},
     error::Error,
     install::InstallContext,
+    manifest::dependencies::{DependencyField, ManifestScope, ManifestSet},
     project::{self, InstallMode}
 };
 
@@ -182,6 +182,10 @@ async fn expand_with_types<'a>(install_context: &InstallContext<'a>, _resolve_op
 ///
 /// `yarn add local-package-name@file:../path/to/local-package-name-v0.1.2.tgz`
 ///
+/// Add a crate to the `Cargo.toml` of the current crate (in a workspace that belongs to an island using the `cargo` linker)
+///
+/// `yarn add cargo:serde`
+///
 #[cli::command]
 #[cli::path("add")]
 #[cli::category("Dependency management")]
@@ -283,6 +287,18 @@ impl Add {
         let active_workspace
             = project.active_workspace()?;
 
+        // Dependencies aren't all declared in the package.json: each range
+        // goes to the manifest of its ecosystem (a Cargo.toml for crates)
+        let mut manifests
+            = ManifestSet::open(&project, active_workspace, ManifestScope::Active)?;
+
+        let listed_fields = |manifests: &mut ManifestSet, descriptor: &Descriptor| -> Result<Vec<DependencyField>, Error> {
+            Ok(manifests.for_range(&descriptor.range)?.dependencies().into_iter()
+                .filter(|dependency| dependency.descriptor.ident == descriptor.ident)
+                .map(|dependency| dependency.field)
+                .collect())
+        };
+
         for resolution in &resolutions {
             let mut dev = self.dev;
             let mut optional = self.optional;
@@ -295,10 +311,13 @@ impl Add {
             let peer = self.peer;
 
             if !dev && !optional && !peer {
-                if active_workspace.manifest.dev_dependencies.contains_key(&resolution.descriptor.ident) {
+                let listed
+                    = listed_fields(&mut manifests, &resolution.descriptor)?;
+
+                if listed.contains(&DependencyField::Dev) {
                     dev = true;
                 }
-                if active_workspace.manifest.remote.optional_dependencies.contains_key(&resolution.descriptor.ident) {
+                if listed.contains(&DependencyField::Optional) {
                     optional = true;
                 }
                 if !dev && !optional && !peer {
@@ -314,70 +333,50 @@ impl Add {
         let requests
             = expand_with_types(&install_context, &resolve_options, requests).await?;
 
-        let manifest_path = active_workspace.path
-            .with_join_str(project::MANIFEST_NAME);
-
-        let manifest_content = manifest_path
-            .fs_read_prealloc()?;
-
-        let mut document
-            = JsonDocument::new(manifest_content)?;
-
         for (descriptor, request) in &requests {
-            if request.dev && active_workspace.manifest.remote.dependencies.contains_key(&descriptor.ident) {
+            let listed
+                = listed_fields(&mut manifests, descriptor)?;
+
+            let is_regular
+                = listed.contains(&DependencyField::Regular);
+
+            if request.dev && is_regular {
                 return Err(Error::ConflictingOptions(format!("{} is already listed as a regular dependency of this workspace", descriptor.ident.to_print_string())));
             }
 
-            if request.optional && active_workspace.manifest.remote.dependencies.contains_key(&descriptor.ident) {
+            if request.optional && is_regular {
                 return Err(Error::ConflictingOptions(format!("{} is already listed as an regular dependency of this workspace", descriptor.ident.to_print_string())));
             }
 
-            if request.peer && active_workspace.manifest.remote.dependencies.contains_key(&descriptor.ident) {
+            if request.peer && is_regular {
                 return Err(Error::ConflictingOptions(format!("{} is already listed as a regular dependency of this workspace", descriptor.ident.to_print_string())));
             }
 
-            if request.prod && active_workspace.manifest.remote.peer_dependencies.contains_key(&descriptor.ident) {
+            if request.prod && listed.contains(&DependencyField::Peer) {
                 return Err(Error::ConflictingOptions(format!("{} is already listed as a peer dependency of this workspace", descriptor.ident.to_print_string())));
             }
 
+            let manifest
+                = manifests.for_range(&descriptor.range)?;
+
             if request.dev {
-                document.set_path(
-                    &zpm_parsers::Path::from_segments(vec!["devDependencies".to_string(), descriptor.ident.to_file_string()]),
-                    Value::String(descriptor.range.to_anonymous_range().to_file_string()),
-                )?;
+                manifest.set(DependencyField::Dev, descriptor)?;
             }
 
             if request.optional {
-                document.set_path(
-                    &zpm_parsers::Path::from_segments(vec!["optionalDependencies".to_string(), descriptor.ident.to_file_string()]),
-                    Value::String(descriptor.range.to_anonymous_range().to_file_string()),
-                )?;
+                manifest.set(DependencyField::Optional, descriptor)?;
             }
 
             if request.peer {
-                // Catalog references are kept as-is, as they're resolved
-                // into the catalog's range at install time
-                let peer_range = match &descriptor.range {
-                    Range::Catalog(_) => descriptor.range.to_file_string(),
-                    _ => "*".to_string(),
-                };
-
-                document.set_path(
-                    &zpm_parsers::Path::from_segments(vec!["peerDependencies".to_string(), descriptor.ident.to_file_string()]),
-                    Value::String(peer_range),
-                )?;
+                manifest.set(DependencyField::Peer, descriptor)?;
             }
 
             if request.prod {
-                document.set_path(
-                    &zpm_parsers::Path::from_segments(vec!["dependencies".to_string(), descriptor.ident.to_file_string()]),
-                    Value::String(descriptor.range.to_anonymous_range().to_file_string()),
-                )?;
+                manifest.set(DependencyField::Regular, descriptor)?;
             }
         }
 
-        manifest_path
-            .fs_change(&document.input, false)?;
+        manifests.save()?;
 
         let mut project
             = project::Project::new(None).await?;
