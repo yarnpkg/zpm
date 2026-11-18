@@ -48,22 +48,42 @@ describe(`Features`, () => {
     }));
 
     describe(`Migration rules`, () => {
+      for (const command of [`install`, `dedupe`]) {
+        test(
+          `it should migrate old lockfiles by setting enableScripts and approvedGitRepositories when unset (${command})`,
+          makeTemporaryEnv({
+            dependencies: {
+              [`no-deps`]: `^1.0.0`,
+            },
+          }, async ({path, run}) => {
+            const rcPath = ppath.join(path, Filename.rc);
+
+            await xfs.writeFilePromise(ppath.join(path, Filename.lockfile), makeBerryLockfile(8, NO_DEPS_ENTRY));
+            await expect(xfs.existsPromise(rcPath)).resolves.toBeFalsy();
+
+            await run(command, WITH_YARN6_DEFAULTS);
+
+            await expect(xfs.readFilePromise(rcPath, `utf8`)).resolves.toContain(`enableScripts: true`);
+            await expect(xfs.readFilePromise(rcPath, `utf8`)).resolves.toMatch(/approvedGitRepositories:\r?\n\s*-\s*['"]?\*\*['"]?/);
+          }),
+        );
+      }
+
       test(
-        `it should migrate old lockfiles by setting enableScripts and approvedGitRepositories when unset`,
+        `dedupe checks should apply legacy defaults without writing project files`,
         makeTemporaryEnv({
           dependencies: {
-            [`no-deps`]: `^1.0.0`,
+            [`release-date`]: `1.1.1`,
           },
         }, async ({path, run}) => {
-          const rcPath = ppath.join(path, Filename.rc);
+          const lockfile = makeBerryLockfile(8);
+          await xfs.writeFilePromise(ppath.join(path, Filename.lockfile), lockfile);
 
-          await xfs.writeFilePromise(ppath.join(path, Filename.lockfile), makeBerryLockfile(8, NO_DEPS_ENTRY));
-          await expect(xfs.existsPromise(rcPath)).resolves.toBeFalsy();
+          await run(`dedupe`, `--check`, WITH_YARN6_DEFAULTS);
 
-          await run(`install`, WITH_YARN6_DEFAULTS);
-
-          await expect(xfs.readFilePromise(rcPath, `utf8`)).resolves.toContain(`enableScripts: true`);
-          await expect(xfs.readFilePromise(rcPath, `utf8`)).resolves.toMatch(/approvedGitRepositories:\r?\n\s*-\s*['"]?\*\*['"]?/);
+          await expect(xfs.existsPromise(ppath.join(path, Filename.rc))).resolves.toBeFalsy();
+          await expect(xfs.existsPromise(ppath.join(path, `.pnp.cjs`))).resolves.toBeFalsy();
+          await expect(xfs.readFilePromise(ppath.join(path, Filename.lockfile), `utf8`)).resolves.toEqual(lockfile);
         }),
       );
 
