@@ -720,6 +720,20 @@
       "default": "https://registry.npmjs.org",
       "examples": ["https://registry.example.org"]
     },
+    "cargoRegistryServer": {
+      "_package": "@yarnpkg/core",
+      "title": "Define the registry to use when fetching Rust crates.",
+      "description": "Used by the islands relying on the `cargo` linker (see the [`cargo:` protocol](/protocol/cargo)). Must point to the root of a [sparse index](https://doc.rust-lang.org/cargo/reference/registry-index.html#sparse-protocol); the `sparse+` prefix Cargo uses in its own configuration is accepted. The `config.json` of the index tells where crates are downloaded from.",
+      "type": "string",
+      "format": "uri",
+      "default": "https://index.crates.io/",
+      "_examples": [
+        {
+          "description": "Use a mirror of crates.io.",
+          "value": "sparse+https://crates.example.org/index/"
+        }
+      ]
+    },
     "pypiRegistryServer": {
       "_package": "@yarnpkg/core",
       "title": "Define the PyPI registry to use when fetching Python packages.",
@@ -1645,7 +1659,7 @@
     "unstableIslands": {
       "_package": "@yarnpkg/core",
       "title": "Configuration of resolution islands.",
-      "description": "Each island resolves its transitive dependencies in isolation using a constraint solver, producing at most one version of each package per island. Each entry accepts:\n\n- `workspaces`: the workspace name glob patterns belonging to the island.\n- `linker`: `node-modules`, or `venv` for Python workspaces using the [`pypi:` protocol](/protocol/pypi).\n- `pythonVersion`: the Python version of the island, overriding the global `pythonVersion` setting.\n- `pypiConstraints`: PEP 508 requirements restricting the versions the island may select, without adding the packages to the island (like uv's `constraint-dependencies`).\n- `pypiSeedLockfile`: the path (relative to the project root) of a `uv.lock` file whose versions are preferred while the island has no entry in the lockfile yet; `yarn import uv` sets it so that migrating doesn't upgrade anything.",
+      "description": "Each island resolves its transitive dependencies in isolation using a constraint solver, producing at most one version of each package per island. Each entry accepts:\n\n- `workspaces`: the workspace name glob patterns belonging to the island.\n- `linker`: `node-modules`, `venv` for Python workspaces using the [`pypi:` protocol](/protocol/pypi), or `cargo` for workspaces holding a `Cargo.toml` (see the [`cargo:` protocol](/protocol/cargo)).\n- `pythonVersion`: the Python version of the island, overriding the global `pythonVersion` setting.\n- `pypiConstraints`: PEP 508 requirements restricting the versions the island may select, without adding the packages to the island (like uv's `constraint-dependencies`).\n- `pypiSeedLockfile`: the path (relative to the project root) of a `uv.lock` file whose versions are preferred while the island has no entry in the lockfile yet; `yarn import uv` sets it so that migrating doesn't upgrade anything.",
       "type": "object",
       "patternProperties": {
         "^(.+)$": {

@@ -168,6 +168,9 @@ pub enum IslandLinker {
 
     #[literal("venv")]
     Venv,
+
+    #[literal("cargo")]
+    Cargo,
 }
 
 #[zpm_enum(error = ConfigurationError, or_else = |s| Err(ConfigurationError::EnumError(s.to_string())))]

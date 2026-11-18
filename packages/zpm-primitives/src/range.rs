@@ -6,7 +6,7 @@ use rkyv::Archive;
 use zpm_macro_enum::zpm_enum;
 use zpm_utils::{DataType, Hash64, Path, ToFileString, UrlEncoded};
 
-use crate::{PeerRange, PypiRangeParameters, PypiSpecifierSet, SemverPeerRange};
+use crate::{CargoGitSource, CargoRequirement, PeerRange, PypiRangeParameters, PypiSpecifierSet, SemverPeerRange};
 
 use super::{Descriptor, Ident, Registry};
 
@@ -51,6 +51,13 @@ fn format_pypi_tag(ident: &Option<Ident>, tag: &str, parameters: &Option<PypiRan
     };
 
     format!("{}{}", base, format_pypi_parameters(parameters))
+}
+
+fn format_cargo_range(ident: &Option<Ident>, selector: &str) -> String {
+    match ident {
+        Some(ident) => format!("cargo:{}@{}", ident.to_file_string(), selector),
+        None => format!("cargo:{}", selector),
+    }
 }
 
 fn format_jsr_semver(ident: &Option<Ident>, range: &zpm_semver::Range) -> String {
@@ -148,6 +155,35 @@ pub enum Range {
         ident: Option<Ident>,
         tag: EcoString,
         parameters: Option<PypiRangeParameters>,
+    },
+
+    // A crate taken from a git repository; the source is written the way
+    // Cargo writes its source ids (`<url>?branch=<name>`)
+    #[pattern(r"cargo:(?:(?<ident>[^#@]+)@)?git\+(?<source>[^#]+)")]
+    #[to_file_string(|params| format_cargo_range(&params.ident, &format!("git+{}", params.source.to_file_string())))]
+    #[to_print_string(|params| DataType::Range.colorize(&format_cargo_range(&params.ident, &format!("git+{}", params.source.to_file_string()))))]
+    CargoGit {
+        ident: Option<Ident>,
+        source: CargoGitSource,
+    },
+
+    // A crate living on the disk; the path is relative to the project root
+    #[pattern(r"cargo:(?:(?<ident>[^#@]+)@)?path\+(?<path>[^#]+)")]
+    #[to_file_string(|params| format_cargo_range(&params.ident, &format!("path+{}", params.path)))]
+    #[to_print_string(|params| DataType::Range.colorize(&format_cargo_range(&params.ident, &format!("path+{}", params.path))))]
+    CargoPath {
+        ident: Option<Ident>,
+        path: String,
+    },
+
+    // A crate from the registry. The ident is set when the dependency
+    // was renamed (`package = "..."` in the manifest).
+    #[pattern(r"cargo:(?:(?<ident>[^#@]+)@)?(?<requirement>[^#@]+)")]
+    #[to_file_string(|params| format_cargo_range(&params.ident, &params.requirement.to_file_string()))]
+    #[to_print_string(|params| DataType::Range.colorize(&format_cargo_range(&params.ident, &params.requirement.to_file_string())))]
+    Cargo {
+        ident: Option<Ident>,
+        requirement: CargoRequirement,
     },
 
     #[pattern(r"jsr:(?:(?<ident>.*)@)?(?<range>.*)")]
@@ -455,6 +491,12 @@ mod tests {
     #[case("./kit.tgz")]
     #[case("../kit.tgz")]
     #[case("npm:^1.0.0")]
+    #[case("cargo:^1.0.207")]
+    #[case("cargo:>=0.6,<0.10")]
+    #[case("cargo:codspeed-divan-compat@4.2.0")]
+    #[case("cargo:git+https://github.com/arcanis/dialoguer.git?branch=mael%2Fconfirm-prompt-height")]
+    #[case("cargo:git+ssh://git@example.com/user/repo.git")]
+    #[case("cargo:path+packages/zpm-utils")]
     #[case("portal:./vendor/kit")]
     #[case("link:./vendor/kit")]
     fn test_range_value_roundtrip(#[case] str: &str) {
@@ -465,6 +507,27 @@ mod tests {
             = Range::from_file_string(&range.to_file_string()).unwrap();
 
         assert_eq!(range, reparsed, "{str} became {}", range.to_file_string());
+    }
+
+    #[rstest]
+    #[case("cargo:1.0", "Cargo")]
+    #[case("cargo:serde_json@=1.0.145", "Cargo")]
+    #[case("cargo:git+https://github.com/arcanis/wax.git", "CargoGit")]
+    #[case("cargo:wax@git+https://github.com/arcanis/wax.git?rev=893e876", "CargoGit")]
+    #[case("cargo:path+../sibling", "CargoPath")]
+    fn test_cargo_range_kinds(#[case] str: &str, #[case] expected: &str) {
+        let range
+            = Range::from_file_string(str).unwrap();
+
+        let kind = match &range {
+            Range::Cargo(_) => "Cargo",
+            Range::CargoGit(_) => "CargoGit",
+            Range::CargoPath(_) => "CargoPath",
+            _ => "other",
+        };
+
+        assert_eq!(kind, expected, "{str} parsed as {range:?}");
+        assert_eq!(range.to_file_string(), str);
     }
 
     #[rstest]

@@ -240,6 +240,12 @@ impl ContentFlags {
             return Ok(Self::default());
         }
 
+        // Crates have neither binaries nor build scripts as far as Yarn is
+        // concerned; Cargo takes care of both when building
+        if locator.reference.is_cargo_reference() {
+            return Ok(Self::default());
+        }
+
         match package_data {
             PackageData::Local {package_directory, is_synthetic_package} if !is_synthetic_package => {
                 Self::extract_local(package_directory)

@@ -12,6 +12,7 @@ sidebar:
 - **[NPM Protocol](/protocol/npm)**
 - **[JSR Protocol](/protocol/jsr)**
 - **[PyPI Protocol](/protocol/pypi)**
+- **[Cargo Protocol](/protocol/cargo)**
 - **[Catalog Protocol](/protocol/catalog)**
 - **[Patch Protocol](/protocol/patch)**
 - **[Portal Protocol](/protocol/portal)**

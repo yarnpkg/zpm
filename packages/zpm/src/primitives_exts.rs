@@ -100,6 +100,9 @@ impl RangeExt for Range {
             Range::RegistryTag(_) |
             Range::PypiSpecifier(_) |
             Range::PypiTag(_) |
+            Range::Cargo(_) |
+            Range::CargoGit(_) |
+            Range::CargoPath(_) |
             Range::JsrSemver(_) |
             Range::JsrTag(_) => {
                 RangeDetails {

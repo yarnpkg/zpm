@@ -4,7 +4,7 @@ use rkyv::Archive;
 use serde::{Deserialize, Serialize};
 use serde::de::IgnoredAny;
 use zpm_primitives::{Descriptor, Ident, Locator, PeerRange, PypiRegistryReference, Range, Reference, Registry, RegistryReference, SemverPeerRange, WorkspaceIdentRange, WorkspaceIdentReference, descriptor_map_serializer, descriptor_map_deserializer};
-use zpm_utils::Requirements;
+use zpm_utils::{Requirements, ToFileString};
 
 use zpm_parsers::JsonDocument;
 
@@ -147,6 +147,10 @@ impl IntoResolutionResult for Resolution {
     }
 }
 
+fn cargo_outside_island(what: &str) -> Error {
+    Error::CargoError(format!("{} can't be resolved here; crates are installed by the islands using the cargo linker, from the Cargo.toml of their workspaces", what))
+}
+
 pub enum SyncResolutionAttempt {
     Success(ResolutionResult),
     Failure(Vec<InstallOpResult>),
@@ -267,6 +271,13 @@ pub async fn resolve_descriptor(context: InstallContext<'_>, descriptor: Descrip
         Range::WorkspacePath(params)
             => workspace::resolve_path_descriptor(&context, &descriptor, params),
 
+        // Crates can't be resolved one at a time: which version a
+        // requirement gets depends on the rest of the graph
+        Range::Cargo(_) |
+        Range::CargoGit(_) |
+        Range::CargoPath(_)
+            => Err(cargo_outside_island(&descriptor.to_file_string())),
+
         Range::Catalog(_) |
         Range::MissingPeerDependency |
         Range::WorkspaceMagic(_) |
@@ -322,6 +333,11 @@ pub async fn resolve_locator(context: InstallContext<'_>, locator: Locator, depe
 
         Reference::PypiRegistry(params)
             => pypi::resolve_locator(&context, &locator, params).await,
+
+        Reference::CargoRegistry(_) |
+        Reference::CargoGit(_) |
+        Reference::CargoPath(_)
+            => Err(cargo_outside_island(&locator.to_file_string())),
 
         Reference::Virtual(_)
             => Err(Error::Unsupported)?,

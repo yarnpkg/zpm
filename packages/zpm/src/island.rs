@@ -90,6 +90,12 @@ pub async fn resolve_island(
     ctx: &InstallContext<'_>,
     lockfile: &Lockfile,
 ) -> Result<IslandResolutionResult, Error> {
+    // Crates follow Cargo's rules (several versions per crate, features)
+    // and are described by Cargo.toml files; they get their own solver
+    if island.linker == zpm_config::IslandLinker::Cargo {
+        return crate::cargo::island::resolve_cargo_island(island, ctx, lockfile).await;
+    }
+
     // Phase 2: Build locked_versions map (preferred locators from lockfile,
     // or from the uv.lock the island was imported from)
     let mut locked_versions = build_locked_versions(island, lockfile);
@@ -425,7 +431,7 @@ async fn resolve_variants(ctx: &InstallContext<'_>, result: &mut IslandResolutio
 }
 
 /// Build an IslandResolutionResult from cached lockfile data.
-fn island_result_from_lockfile(
+pub(crate) fn island_result_from_lockfile(
     island_id: &str,
     locked_island: &BTreeMap<Descriptor, Locator>,
     lockfile: &Lockfile,

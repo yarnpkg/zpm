@@ -640,6 +640,9 @@ pub enum Error {
     #[error("Missing resolution for descriptor: {0:?}")]
     MissingResolution(Descriptor),
 
+    #[error("{0}")]
+    CargoError(String),
+
     #[error("Island resolution failed for island '{}': {}", .island_id, .message)]
     IslandResolutionFailed {
         island_id: String,

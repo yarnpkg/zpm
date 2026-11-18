@@ -420,6 +420,11 @@
       "description": "The URL of the default PyPI index. Must point to a PEP 503 / PEP 691 Simple API root (for example https://pypi.org/simple/); https://pypi.org is accepted as an alias for https://pypi.org/simple/.",
       "default": "https://pypi.org/simple/"
     },
+    "cargoRegistryServer": {
+      "type": "string",
+      "description": "The URL of the sparse index of the registry crates are resolved from (the `sparse+` prefix Cargo uses is accepted). Its `config.json` tells where the crates are downloaded from.",
+      "default": "https://index.crates.io/"
+    },
     "pythonVersion": {
       "type": "string",
       "description": "The Python version (`3.12` or `3.12.11`) used to resolve PyPI packages and to provision the interpreter of venv islands",
@@ -777,7 +782,7 @@
           },
           "linker": {
             "type": "crate::IslandLinker",
-            "description": "The linker to use for workspaces in this island. Supported values are 'node-modules' and 'venv'."
+            "description": "The linker to use for workspaces in this island. Supported values are 'node-modules', 'venv', and 'cargo'."
           },
           "pythonVersion": {
             "type": ["string", "null"],

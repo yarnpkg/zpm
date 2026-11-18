@@ -154,7 +154,7 @@ fn matches_approved_git_repository(url: &str, patterns: &[Setting<String>]) -> b
     })
 }
 
-fn validate_repo_url(url: &str, config: &HttpConfig, approved_repos: &[Setting<String>]) -> Result<(), Error> {
+pub(crate) fn validate_repo_url(url: &str, config: &HttpConfig, approved_repos: &[Setting<String>]) -> Result<(), Error> {
     let git_url
         = GitUrl::parse(url)
             .map_err(|_| Error::InvalidGitUrl(url.to_owned()))?;
@@ -286,7 +286,7 @@ fn resolve_treeish_from_refs_stricter(refs: &BTreeMap<String, String>, treeish: 
     }
 }
 
-fn make_git_env() -> BTreeMap<String, String> {
+pub(crate) fn make_git_env() -> BTreeMap<String, String> {
     let mut env = BTreeMap::new();
 
     env.insert("GIT_TERMINAL_PROMPT".to_string(), "0".to_string());

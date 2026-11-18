@@ -101,6 +101,30 @@ pub enum Reference {
         url: Option<UrlEncoded<String>>,
     },
 
+    // Crates are identified by their name, so the references of renamed
+    // dependencies don't carry an ident like the npm and PyPI ones do
+    #[pattern(r"cargo:git\+(?<source>[^#]+)#(?<commit>[0-9a-f]{40})")]
+    #[to_file_string(|params| format!("cargo:git+{}#{}", params.source.to_file_string(), params.commit))]
+    #[to_print_string(|params| DataType::Reference.colorize(&format!("cargo:git+{}#{}", params.source.to_file_string(), params.commit)))]
+    CargoGit {
+        source: crate::CargoGitSource,
+        commit: String,
+    },
+
+    #[pattern(r"cargo:path\+(?<path>.*)")]
+    #[to_file_string(|params| format!("cargo:path+{}", params.path))]
+    #[to_print_string(|params| DataType::Reference.colorize(&format!("cargo:path+{}", params.path)))]
+    CargoPath {
+        path: String,
+    },
+
+    #[pattern(r"cargo:(?<version>[^#@]+)")]
+    #[to_file_string(|params| format!("cargo:{}", params.version.to_file_string()))]
+    #[to_print_string(|params| DataType::Reference.colorize(&format!("cargo:{}", params.version.to_file_string())))]
+    CargoRegistry {
+        version: crate::CargoVersion,
+    },
+
     #[pattern(r"file:(?<path>.*\.(?:tgz|tar\.gz))(?:#(?<hash>[a-f0-9]*))?")]
     #[to_file_string(|params| format_local("file", &params.path, &params.hash))]
     #[to_print_string(|params| DataType::Reference.colorize(&format_local("file", &params.path, &params.hash)))]
@@ -224,6 +248,10 @@ impl Reference {
         matches!(&self, Reference::WorkspaceIdent(_) | Reference::WorkspacePath(_) | Reference::Portal(_) | Reference::Link(_))
     }
 
+    pub fn is_cargo_reference(&self) -> bool {
+        matches!(&self, Reference::CargoRegistry(_) | Reference::CargoGit(_) | Reference::CargoPath(_))
+    }
+
     pub fn is_virtual_reference(&self) -> bool {
         matches!(&self, Reference::Virtual(_))
     }
@@ -284,6 +312,18 @@ impl Reference {
                 format!("pypi-{}", params.version.to_file_string())
             },
 
+            Reference::CargoRegistry(params) => {
+                format!("cargo-{}", params.version.to_file_string())
+            },
+
+            Reference::CargoGit(_) => {
+                "cargo-git".to_string()
+            },
+
+            Reference::CargoPath(_) => {
+                "cargo-path".to_string()
+            },
+
             Reference::Tarball(_) => {
                 "file".to_string()
             },
@@ -324,6 +364,25 @@ impl Reference {
                 "workspace".to_string()
             },
         }
+    }
+}
+
+#[test]
+fn test_cargo_references() {
+    use zpm_utils::FromFileString;
+
+    for (str, slug) in [
+        ("cargo:1.0.228", "cargo-1.0.228"),
+        ("cargo:0.11.1+wasi-snapshot-preview1", "cargo-0.11.1+wasi-snapshot-preview1"),
+        ("cargo:git+https://github.com/arcanis/dialoguer.git?branch=mael%2Fconfirm-prompt-height#2646dce8d26caa6e7d4eee80836dffd7813afcd1", "cargo-git"),
+        ("cargo:path+packages/zpm-utils", "cargo-path"),
+    ] {
+        let reference
+            = Reference::from_file_string(str).unwrap();
+
+        assert!(reference.is_cargo_reference(), "{str} parsed as {reference:?}");
+        assert_eq!(reference.to_file_string(), str);
+        assert_eq!(reference.slug(), slug);
     }
 }
 

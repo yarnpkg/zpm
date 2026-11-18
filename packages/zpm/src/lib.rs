@@ -3,6 +3,7 @@ pub mod algos;
 pub mod build;
 pub mod builtins;
 pub mod cache;
+pub mod cargo;
 pub mod commands;
 pub mod constraints;
 pub mod content_flags;

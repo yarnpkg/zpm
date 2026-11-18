@@ -246,6 +246,27 @@ impl<'a> TarIterator<'a> {
                     continue;
                 },
 
+                // GNU extensions: the name (or the link target) of the
+                // next entry, when it doesn't fit in its header. This is
+                // what `.crate` archives use.
+                b'L' | b'K' => {
+                    let data = self.buffer
+                        .get(offset + 512..offset + 512 + size)
+                        .ok_or(Error::InvalidTarFile)?;
+
+                    let value
+                        = String::from_utf8_lossy(trim_zero(data)).to_string();
+
+                    let key = match type_flag {
+                        b'L' => "path",
+                        _ => "linkpath",
+                    };
+
+                    pax_headers.insert(key.to_string(), value);
+
+                    continue;
+                },
+
                 // PAX global extended header
                 b'g' => {
                     let header_data = self.buffer

@@ -308,6 +308,36 @@ mod tests {
     }
 
     #[test]
+    fn test_gnu_long_names() {
+        // What `.crate` archives use for the paths a header can't hold
+        let long_name
+            = format!("demo-1.0.0/{}/lib.rs", "nested/".repeat(20).trim_end_matches('/'));
+
+        let mut name_record
+            = long_name.as_bytes().to_vec();
+
+        name_record.push(0);
+
+        let mut archive
+            = vec![];
+
+        write_record(&mut archive, truncate_name(b"././@LongLink"), 0o644, b'L', &name_record);
+        write_record(&mut archive, truncate_name(long_name.as_bytes()), 0o644, b'0', b"pub fn demo() {}");
+        write_record(&mut archive, truncate_name(b"demo-1.0.0/Cargo.toml"), 0o644, b'0', b"[package]");
+
+        archive.extend_from_slice(&[0; 1024]);
+
+        let entries
+            = entries_from_tar(&archive).unwrap();
+
+        let names
+            = entries.iter().map(|entry| entry.name.as_str()).collect::<Vec<_>>();
+
+        // The long name only applies to the entry following it
+        assert_eq!(names, vec![long_name.as_str(), "demo-1.0.0/Cargo.toml"]);
+    }
+
+    #[test]
     fn test_extract_tar_to_disk_creates_links() {
         let archive = archive_with_links(&[
             ("python/bin/python3", "python3.12", b'2'),

@@ -11,6 +11,7 @@ use crate::{
     project::Project,
 };
 
+pub mod cargo;
 pub mod helpers;
 pub mod nm;
 pub mod package_map;
@@ -49,6 +50,12 @@ pub async fn link_project<'a>(project: &'a Project, install: &'a Install) -> Res
 
             IslandLinker::Venv => {
                 let island_result = venv::link_island_venv(project, install, island).await?;
+                result.packages_by_location.extend(island_result.packages_by_location);
+                result.build_requests.entries.extend(island_result.build_requests.entries);
+            },
+
+            IslandLinker::Cargo => {
+                let island_result = cargo::link_island_cargo(project, install, island).await?;
                 result.packages_by_location.extend(island_result.packages_by_location);
                 result.build_requests.entries.extend(island_result.build_requests.entries);
             },

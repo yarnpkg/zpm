@@ -8,6 +8,7 @@ use crate::{
 };
 
 pub mod builtin;
+pub mod cargo;
 pub mod exec;
 pub mod folder;
 pub mod git;
@@ -165,6 +166,15 @@ pub fn try_fetch_locator_sync(context: InstallContext, locator: &Locator, is_moc
                 None => Ok(SyncFetchAttempt::Failure(dependencies)),
             },
 
+        Reference::CargoRegistry(_)
+            => match cargo::try_fetch_registry_sync(&context, locator, is_mock_request)? {
+                Some(fetch_result) => Ok(SyncFetchAttempt::Success(fetch_result)),
+                None => Ok(SyncFetchAttempt::Failure(dependencies)),
+            },
+
+        Reference::CargoPath(params)
+            => Ok(SyncFetchAttempt::Success(cargo::fetch_path(&context, locator, params)?)),
+
         Reference::Link(params)
             => Ok(SyncFetchAttempt::Success(link::fetch_locator(&context, locator, params, dependencies)?)),
 
@@ -225,6 +235,15 @@ pub async fn fetch_locator<'a>(context: InstallContext<'a>, locator: &Locator, i
 
         Reference::PypiRegistry(params)
             => pypi::fetch_locator(&context, locator, params, is_mock_request).await,
+
+        Reference::CargoRegistry(params)
+            => cargo::fetch_registry(&context, locator, params, is_mock_request).await,
+
+        Reference::CargoGit(params)
+            => cargo::fetch_git(&context, locator, params).await,
+
+        Reference::CargoPath(params)
+            => cargo::fetch_path(&context, locator, params),
 
         Reference::WorkspaceIdent(params)
             => workspace::fetch_locator_ident(&context, locator, params),

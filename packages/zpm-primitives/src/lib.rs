@@ -1,5 +1,6 @@
 pub mod testing;
 
+mod cargo;
 mod reference_filter;
 mod version_filter;
 mod descriptor_resolution;
@@ -16,6 +17,7 @@ mod ident;
 mod locator;
 mod registry;
 
+pub use cargo::*;
 pub use reference_filter::*;
 pub use version_filter::*;
 pub use descriptor_resolution::*;

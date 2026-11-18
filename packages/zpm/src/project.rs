@@ -1488,6 +1488,29 @@ impl Project {
             return Ok(false);
         }
 
+        // Cargo islands are resolved from Cargo.toml files, which the
+        // checks above know nothing about
+        for (island_id, island) in &self.config.settings.unstable_islands {
+            if island.linker.value != IslandLinker::Cargo {
+                continue;
+            }
+
+            let workspaces = self.workspaces.iter()
+                .filter(|workspace| island.workspaces.iter().any(|glob| glob.value.check(&workspace.name)))
+                .collect::<Vec<_>>();
+
+            let workspace_idents
+                = workspaces.iter().map(|workspace| workspace.name.clone()).collect();
+
+            let Ok(state) = crate::cargo::island::island_state(self, island_id, &workspace_idents) else {
+                return Ok(false);
+            };
+
+            if workspaces.iter().any(|workspace| !crate::linker::cargo::is_workspace_linked(&workspace.path, &state)) {
+                return Ok(false);
+            }
+        }
+
         if install_state.lockfile_changed_at.is_none()
             || install_state.lockfile_changed_at != self.lockfile_changed_at()?
         {
