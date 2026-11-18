@@ -2,7 +2,7 @@
 
 This document reviews how Rust dependencies can be supported the way Python dependencies are, and describes the prototype that came out of it. The user-facing side is documented in the [`cargo:` protocol](../../website/src/docs/advanced/general-reference/protocols/cargo.md) page.
 
-In short: an island using the `cargo` linker reads the `Cargo.toml` of its workspaces, resolves the crates with Cargo's own rules, stores the result in `yarn.lock`, downloads the crates into Yarn's cache, and generates what Cargo needs to build from them offline (a vendor directory, a `Cargo.lock`, a source replacement block). Nothing in there runs Cargo.
+In short: an island using the `cargo` linker reads the `Cargo.toml` of its workspaces, resolves the crates with Cargo's own rules, stores the result in `yarn.lock`, downloads the crates into Yarn's cache, and generates what Cargo needs to build from them offline (a vendor directory, a `Cargo.lock`, a source replacement block). Nothing in there runs Cargo, and nothing has to be installed beforehand: the toolchain used to build is provisioned by Yarn too.
 
 ## What "like Python" means
 
@@ -12,14 +12,15 @@ Python support is made of the pieces below; each has a Rust counterpart.
 | --- | --- | --- | --- |
 | Protocol | `pypi:` ranges, PEP 440 | `cargo:` ranges, Cargo's semver flavor | Done |
 | Manifest | `package.json` (imported from `pyproject.toml`) | `Cargo.toml`, read in place | Done |
-| Registry client | Simple API (PEP 503 / 691 / 658) | Sparse index | Done, without authentication |
+| Registry client | Simple API (PEP 503 / 691 / 658) | Sparse index, several registries, tokens | Done |
 | Resolution | Island + PubGrub, one version per package | Island + PubGrub, one version per semver bucket, features | Done |
 | Lockfile | `yarn.lock`, seeded from `uv.lock` | `yarn.lock`, seeded from `Cargo.lock` | Done |
 | Fetching | Wheels and sdists in the cache | `.crate` files in the cache, git checkouts | Done |
 | Linking | `.venv` per workspace | Vendor directory, `Cargo.lock`, `.cargo/config.toml` per workspace | Done |
-| Toolchain | python-build-standalone download | `rust-toolchain.toml` + static.rust-lang.org | Not done |
-| Builds | sdists built through PEP 517 | Everything is source; Cargo builds | Left to Cargo |
-| Running | `yarn python`, scripts run in the venv | `yarn cargo`, scripts with the toolchain in the `PATH` | Not done |
+| Toolchain | python-build-standalone download | `rust-toolchain.toml` + static.rust-lang.org | Done |
+| Builds | sdists built through PEP 517 (with pip) | Everything is source; built by the provisioned Cargo | Done |
+| Running | `yarn python`, scripts run in the venv | `yarn cargo`, scripts with the toolchain in the `PATH` | Done |
+| Commands | `yarn add` & co edit `package.json` | `yarn add` & co edit `Cargo.toml` | Done, through a generic layer |
 | Import | `yarn import uv` | Not needed: nothing has to be converted | - |
 
 ## Where Rust differs
@@ -35,7 +36,7 @@ So a cargo island reads the `Cargo.toml` next to the `package.json` of its works
 - The island's workspaces aren't taken out of the regular resolution like those of the other islands are: their `package.json` dependencies still go through it. That's what lets the root of a repository like this one (JavaScript tooling in `package.json`, a Cargo workspace in `Cargo.toml`) be listed in a cargo island.
 - Cargo workspace members don't have to be Yarn workspaces. They're discovered from `workspace.members` and recorded as `cargo:path+<path>` packages.
 
-`cargo:` ranges in a `package.json` are rejected for now (they can't be resolved one at a time, and nothing would build them). They would become meaningful if Yarn ever built crates itself, see [further down](#going-further).
+`cargo:` ranges in a `package.json` are rejected (they can't be resolved one at a time, and nothing would build them). They would become meaningful if Yarn ever drove the compiler itself, see [further down](#building-without-cargo).
 
 ### Resolution follows other rules
 
@@ -46,12 +47,17 @@ The island machinery (PubGrub, locked versions preferred, input hash to skip the
 - **Wide requirements.** `>=0.48, <=0.61` can be satisfied from several buckets. Those go through one more proxy with one version per bucket.
 - **One resolution for every platform.** There's no equivalent of markers being evaluated per target: like `Cargo.lock`, the resolution includes the dependencies of every `cfg()`, every feature of the workspace members, and their dev-dependencies. It deliberately over-approximates what gets built (weak dependency features do pull the dependency in, as in Cargo's lockfiles).
 - **Versions.** Requirements use Cargo's syntax, pre-releases only match requirements naming one, yanked versions are only eligible when locked, and build metadata is part of a version's identity (`0.11.1+wasi-snapshot-preview1`). `zpm_semver` models npm's flavor, so those live in [`zpm-primitives/src/cargo.rs`](../../packages/zpm-primitives/src/cargo.rs).
+- **Preferences.** Candidates are ranked like Cargo ranks them: what the lockfile holds and the `[patch]` entries first, then (with resolver 3) what supports the workspace's Rust version, then the highest version. The ranking applies across buckets too, which matters for wide requirements.
+- **Patches and replacements.** A `[patch]` entry is one more candidate for its crate, hiding the published version it shares its version with; a patch nothing ends up using stays in the island as a package without dependents, which is what `Cargo.lock` calls `[[patch.unused]]`. A `[replace]` entry keeps the registry crate in the graph (dependents still point to it) with the dependencies and features of its replacement, which it's recorded as depending on.
+- **Registries.** A registry is identified by the URL of its index and is part of a crate's identity (`cargo:1.2.3#<index>`); the dependencies of a crate come from its own registry unless the index says otherwise.
 
 Version sets are built from the candidates the index lists rather than from interval arithmetic on requirements, which keeps the matching exactly Cargo's (pre-release rules included) at no cost.
 
 ### Installing isn't building
 
-Crates are only published as sources, so there's no equivalent of unpacking wheels into a venv: "installed" means "available to the compiler". Building stays Cargo's job, the same way running stays Python's. Not requiring Cargo therefore applies to everything up to that point: resolving, fetching and laying crates out.
+Crates are only published as sources, so there's no equivalent of unpacking wheels into a venv: "installed" means "available to the compiler". Resolving, fetching and laying crates out are done by Yarn; compiling is done by Cargo, the same way Python source distributions are built by pip - a Cargo that Yarn provides, though, like it provides the Python interpreter.
+
+The toolchain is read from `rust-toolchain.toml` (what rustup reads), assembled from the official distribution (the channel manifest lists an archive and its sha256 for each component and target), and kept in the global folder. `yarn cargo` runs it, and the scripts of the island's workspaces get it in their `PATH`. See [`cargo/toolchain.rs`](../../packages/zpm/src/cargo/toolchain.rs).
 
 ### The consumer is Cargo
 
@@ -69,7 +75,7 @@ Alternatives that were considered for the layout:
 | --- | --- |
 | Local registry source (`.crate` files + index files, unpacked lazily by Cargo) | Much cheaper to link and to store, as nothing is unpacked by Yarn. But git crates can't be served from it (Cargo refuses a replacement that adds checksums), so it takes two kinds of sources. The natural next step. |
 | Populating `$CARGO_HOME/registry` | No configuration needed, but the layout is internal to Cargo, and its folder names changed across versions. |
-| Passing `--config` through a `yarn cargo` wrapper instead of writing `.cargo/config.toml` | Tools calling Cargo themselves (rust-analyzer) would then use the network sources. |
+| Passing `--config` through `yarn cargo` instead of writing `.cargo/config.toml` | Tools calling Cargo themselves (rust-analyzer) would then use the network sources. Possible now that `yarn cargo` exists, as an opt-in. |
 
 ## Implementation
 
@@ -83,6 +89,8 @@ Alternatives that were considered for the layout:
 | Island | [`cargo/island.rs`](../../packages/zpm/src/cargo/island.rs) | Discovery of the local crates, input hash, seeding, conversion to `Resolution`s. |
 | Fetching | [`fetchers/cargo.rs`](../../packages/zpm/src/fetchers/cargo.rs) | Checks the sha256 the index advertises. |
 | Linking | [`linker/cargo.rs`](../../packages/zpm/src/linker/cargo.rs), [`cargo/lockfile.rs`](../../packages/zpm/src/cargo/lockfile.rs) | Vendoring is incremental and atomic per crate. |
+| Toolchain | [`cargo/toolchain.rs`](../../packages/zpm/src/cargo/toolchain.rs), [`commands/cargo.rs`](../../packages/zpm/src/commands/cargo.rs) | Managed toolchains are completed in place when a workspace asks for more components or targets. |
+| Commands | [`manifest/dependencies.rs`](../../packages/zpm/src/manifest/dependencies.rs), [`cargo/editor.rs`](../../packages/zpm/src/cargo/editor.rs) | See below. |
 
 In `yarn.lock`, crates look like any other island package:
 
@@ -101,41 +109,62 @@ Only what identifies an edge is stored: the dependencies that ended up enabled (
 
 Cargo manifests aren't tracked by the checks that let `yarn install` return early, so the linker stores a digest of the manifests next to the vendor directory, and `Project::is_install_up_to_date` compares it.
 
+Cargo islands are part of the resolution tree like the others, which is what `yarn why` reads.
+
+## Manifests of other ecosystems
+
+`yarn add`, `yarn up` and `yarn remove` used to edit `package.json` directly. They now go through [`manifest/dependencies.rs`](../../packages/zpm/src/manifest/dependencies.rs), which is where "dependencies aren't all declared in `package.json`" is dealt with, once for every command:
+
+- `DependencyManifest` is a file declaring dependencies: it says which ranges are its own (`accepts`), lists what it declares, and knows how to `set`, `update` and `remove` an entry. `PackageManifest` implements it for `package.json`, `CargoManifestEditor` for `Cargo.toml`.
+- `ManifestSet` is what a workspace's dependencies are declared in: its `package.json`, plus the manifests of the ecosystems it's part of. Commands ask it for the manifest a range belongs to, or iterate over all of them.
+- `upgrade_descriptor` is the ecosystem's notion of "latest" (`yarn up`), and `LooseDescriptor` has a form per ecosystem on the command line (`cargo:serde`, like `jsr:@std/path`).
+
+A range is routed by its protocol: `cargo:` ranges only ever go to a `Cargo.toml`, everything else to `package.json`. Names aren't unique across ecosystems (`url`, `uuid`, `colored` exist on both npm and crates.io), so `yarn up colored` upgrades each declaration within its own registry.
+
+Supporting `pyproject.toml` is a matter of implementing `DependencyManifest` for it (accepting `pypi:` ranges for the workspaces that opt in) and returning it from `companion_manifests`; the commands don't change.
+
+What's specific to Cargo stays in its editor: the crate the current directory designates rather than the Yarn workspace, `[workspace.dependencies]` for inherited entries, `optional = true` for `-O`, comments and key order preserved through `toml_edit`.
+
 ## Validation
 
-All of this was run against this repository's own Cargo workspace (14 members, 537 registry crates, 6 crates from 4 git repositories, 4 coexisting versions of `windows-sys`, renamed and target-specific dependencies, 63 crates using weak dependency features):
+Cargo is the reference for everything above, so the tests use it as a judge wherever they can: `cargo metadata --offline --locked` fails if the lockfile Yarn generated needs any change, or if anything is missing from the vendor directory.
+
+Against this repository's own Cargo workspace (14 members, 537 registry crates, 6 crates from 4 git repositories, 4 coexisting versions of `windows-sys`, renamed and target-specific dependencies, 63 crates using weak dependency features):
 
 - Resolving with the existing `Cargo.lock` as seed regenerates it **byte for byte**. The versions come from the seed, but the set of packages and every dependency list come from the solver, so this checks the feature and optional dependency logic against Cargo's on the whole graph.
-- `cargo metadata --offline --locked` and `cargo build --offline --locked` succeed with an empty `CARGO_HOME`, and the resulting binary runs. `--locked` makes Cargo fail if it would change the lockfile in any way.
-- Resolving from scratch (no `Cargo.lock`) gives 539 packages, also accepted by `cargo metadata --offline --locked`. Compared to `cargo generate-lockfile` on the same day, 537 are identical; the two others (`crypto-common` 0.1.7 + `generic-array` 0.14.7, where Cargo picked 0.1.6 + 0.14.9) are another valid answer to a conflict whose outcome depends on the order decisions are made in.
+- `cargo build --offline --locked` succeeds with an empty `CARGO_HOME`, and the resulting binary runs.
+- Resolving from scratch (no `Cargo.lock`) gives 539 packages, also accepted by Cargo. Compared to `cargo generate-lockfile` on the same day, 537 are identical; the two others (`crypto-common` 0.1.7 + `generic-array` 0.14.7, where Cargo picked 0.1.6 + 0.14.9) are another valid answer to a conflict whose outcome depends on the order decisions are made in.
 - Timings on a 4-core container: 5.5s for a cold install (69 MiB downloaded), 9s when resolving from scratch, 2.5s to rebuild a removed vendor directory, 1.7s after adding a dependency, 20ms when there's nothing to do.
 
-Automated coverage: unit tests for the requirement semantics, the manifest reader, the index parser, the solver rules and the lockfile writer; integration tests (`features/cargo.test.ts`) on registry-less projects; an e2e test (`tests/e2e/rust.sh`) against crates.io, which also builds with Cargo when it's available.
+Against `cargo generate-lockfile` on dedicated projects, the lockfiles are byte for byte identical for: a used path patch plus unused path and git patches; a `[replace]` entry; and a `resolver = "3"` project with an old `rust-version` (40 packages, several of them held back, and the lockfile written in the older format Cargo picks for that Rust version). Getting there took two corrections that reading Cargo's documentation hadn't suggested: patches are *preferred* to newer published versions, and the Rust version preference applies across compatibility buckets.
+
+Automated coverage:
+
+- Unit tests for the requirement semantics, the manifest reader and editor, the index parser, the solver rules (against an in-memory catalog), the lockfile writer, and the toolchain manifests.
+- Integration tests (`features/cargo.test.ts`) against a mock sparse registry served by the fixture server, with a token-protected second registry: resolution, features, yanked versions, checksums, seeding, other registries and authentication, patches, replacements, git dependencies with submodules, and the commands. They ask Cargo to confirm the result whenever the machine has it.
+- An e2e test (`tests/e2e/rust.sh`) against crates.io, on a machine without Rust: the toolchain is downloaded, and the project built and run through `yarn cargo`.
 
 ## Not covered yet
 
-Roughly by order of importance:
+1. **Git-based registry indexes.** Only the sparse protocol is implemented; crates.io is reached through its sparse index.
+2. **Disk usage.** The vendor directory holds every crate of every platform (541 MB here), as directory sources require. Unpacking once in the global folder and hardlinking (like the venv store), or switching to a local registry source, would both help.
+3. **Features from the command line.** `yarn add` can't set the features of a dependency; `DependencyManifest::set` would need a way to carry ecosystem-specific options.
+4. **Age gate.** The index reports publication times (`pubtime`), so a `cargoMinimalAgeGate` is a small addition. `packageRules` don't apply to crates either.
+5. **`links`.** Two crates linking the same native library are detected after the fact, as an error, instead of being a constraint the solver can work around.
+6. **Git crates in the cache.** They're used from the global folder, so an offline mirror doesn't cover them.
+7. **`yarn info`** doesn't list crates (it reads the project-level resolutions, which islands aren't part of).
+8. **Crates as workspaces.** `yarn workspaces foreach`, constraints and the release workflow don't see crates, which aren't Yarn workspaces (see the open questions).
+9. **Windows and macOS** haven't been exercised; nothing is known to be Linux-specific (no symlinks are used), but the toolchain provisioning in particular is untested there.
 
-1. **`[patch]` and `[replace]`.** Reported as unsupported rather than ignored. They map well to `resolutions`.
-2. **Other registries and authentication.** A single sparse index, no credentials. `packageRules` / `sourceRules` with an `ecosystemFilter: cargo` would follow what PyPI does; dependencies with `registry = "..."` need the registry to be part of the package identity.
-3. **A registry mock for the integration tests**, so that the registry path is tested hermetically (the PyPI tests have one).
-4. **Disk usage.** The vendor directory holds every crate of every platform (541 MB here), as directory sources require. Unpacking once in the global folder and hardlinking (like the venv store), or switching to a local registry source, would both help.
-5. **Age gate.** The index now reports publication times (`pubtime`), so a `cargoMinimalAgeGate` is a small addition.
-6. **Rust version awareness.** `resolver = "3"` prefers the versions whose `rust-version` the toolchain satisfies; the index has the field.
-7. **`links`.** Two crates linking the same native library are detected after the fact, as an error, instead of being a constraint the solver can work around.
-8. **Git submodules**, and storing git crates in the cache (they're used from the global folder, so an offline mirror doesn't cover them).
-9. **Commands.** `yarn add`, `yarn up`, `yarn why`, `yarn info` and `yarn dedupe` know nothing about `Cargo.toml`.
-10. **Lockfile checksums** are those of Yarn's cache; `Cargo.lock`'s sha256 are recomputed from the archives at link time. Storing them would make linking a little cheaper.
+## Building without Cargo
 
-## Going further
+Driving `rustc` directly (what Buck and Bazel do) would make Yarn the build tool: `package.json` could then hold the dependencies, and `cargo:` ranges would work anywhere. It's a different order of magnitude from what's above. It takes the per-target feature resolution Cargo runs at build time (the lockfile's is an over-approximation), `cfg()` evaluation, build scripts and their protocol (`cargo:rustc-cfg`, `links` metadata, `OUT_DIR`), proc-macros built for the host, profiles, and fingerprinting for incremental builds - and rust-analyzer, clippy and `cargo test` would still expect a Cargo project.
 
-**Provisioning the toolchain.** This is the direct equivalent of the managed Python interpreters. `rust-toolchain.toml` says which channel a project wants, and `https://static.rust-lang.org/dist/channel-rust-<channel>.toml` lists the archives of each component per target, with their sha256 (both `.tar.gz` and `.tar.xz`). Downloading `rustc`, `rust-std` and `cargo` into the global folder, then exposing them through a `yarn cargo` command and the scripts' `PATH`, would make `yarn install && yarn cargo build` work on a machine that has neither rustup nor Cargo. It's self-contained and doesn't depend on anything else in this document.
-
-**Building without Cargo.** Driving `rustc` directly (what Buck and Bazel do) would make Yarn the build tool: `package.json` could then hold the dependencies, and `cargo:` ranges would work anywhere. It's a different order of magnitude, though. It takes the per-target feature resolution Cargo runs at build time (the lockfile's is an over-approximation), `cfg()` evaluation, build scripts and their protocol (`cargo:rustc-cfg`, `links` metadata, `OUT_DIR`), proc-macros built for the host, profiles, and fingerprinting for incremental builds - and rust-analyzer, clippy and `cargo test` would still expect a Cargo project. The resolution data needed for it is all there, but provisioning Cargo is a much better trade.
+Provisioning Cargo gets the same result for users (nothing to install, `yarn cargo build` works) while staying compatible with the rest of the Rust tooling, which is why it's what was implemented. The one thing still taken from the system is the C linker, which rustup doesn't provide either.
 
 ## Open questions
 
-- **Where artifacts go.** The prototype writes inside `.cargo/` (a block in `config.toml`, and `vendor/`, which has to be git-ignored). Is editing `.cargo/config.toml` acceptable, or should it be opt-in?
+- **Where artifacts go.** Yarn writes inside `.cargo/` (a block in `config.toml`, and `vendor/`, which has to be git-ignored). Is editing `.cargo/config.toml` acceptable? The alternative is to have `yarn cargo` pass the configuration to Cargo (`--config`), at the cost of plain `cargo` and rust-analyzer not seeing the vendored crates.
 - **Should `Cargo.lock` be committed?** It's derived, so it could be ignored like `.pnp.cjs` often is; keeping it makes the repository usable without Yarn, and diffs readable to Rust developers.
 - **Should crates be Yarn workspaces?** They aren't required to be, which keeps adoption to three lines of configuration. Making them workspaces would bring `yarn workspaces foreach`, constraints and the release workflow to crates, at the cost of a `package.json` per crate.
 - **Edges between ecosystems.** A JavaScript workspace wrapping a crate (napi, wasm) can't express that dependency today; islands are separate graphs.

@@ -734,6 +734,84 @@
         }
       ]
     },
+    "cargoAuthToken": {
+      "_package": "@yarnpkg/core",
+      "title": "Define the authentication token to use when querying the default crate registry.",
+      "description": "Sent as the `Authorization` header, like Cargo does. Tokens for the other registries are set in `cargoRegistries`.",
+      "type": "string",
+      "_examples": [
+        {
+          "description": "Read the token from the environment.",
+          "value": "${CRATES_TOKEN}"
+        }
+      ]
+    },
+    "cargoRegistries": {
+      "_package": "@yarnpkg/core",
+      "title": "Define the crate registries dependencies can refer to by name.",
+      "description": "Dependencies listed with `registry = \"<name>\"` in a `Cargo.toml` are resolved from the matching entry. The registries declared in the `[registries]` table of the project's `.cargo/config.toml` are known too; an entry here can then just hold their token. Each entry accepts:\n\n- `cargoRegistryServer`: the URL of the [sparse index](https://doc.rust-lang.org/cargo/reference/registry-index.html#sparse-protocol) of the registry.\n- `cargoAuthToken`: the token sent as the `Authorization` header when querying it.",
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "properties": {
+          "cargoRegistryServer": {
+            "_hidden": true,
+            "type": "string",
+            "format": "uri"
+          },
+          "cargoAuthToken": {
+            "_hidden": true,
+            "type": "string"
+          }
+        }
+      },
+      "_examples": [
+        {
+          "description": "Use an internal registry for the dependencies naming it.",
+          "value": {
+            "internal": {
+              "cargoRegistryServer": "sparse+https://crates.example.org/index/",
+              "cargoAuthToken": "${CRATES_TOKEN}"
+            }
+          }
+        }
+      ]
+    },
+    "rustToolchain": {
+      "_package": "@yarnpkg/core",
+      "title": "Define the Rust toolchain of the workspaces that don't have a `rust-toolchain.toml` file.",
+      "description": "A channel (`stable`, `beta`, `nightly`), a version (`1.93.0`, `1.93`), or a dated channel (`nightly-2026-01-01`). Defaults to `stable`. Used by the workspaces of the islands relying on the `cargo` linker.",
+      "type": "string",
+      "_examples": [
+        {
+          "description": "Pin the toolchain for the whole project.",
+          "value": "1.93.0"
+        }
+      ]
+    },
+    "rustPreference": {
+      "_package": "@yarnpkg/core",
+      "title": "Define whether Yarn prefers its own Rust toolchains or the one of the system.",
+      "description": "With `managed`, Yarn uses a toolchain from its global folder, then a matching one from the `PATH`, then downloads it. With `system`, the `PATH` comes first.",
+      "type": "string",
+      "enum": ["managed", "system"],
+      "default": "managed"
+    },
+    "rustDownloads": {
+      "_package": "@yarnpkg/core",
+      "title": "Define whether Yarn may download Rust toolchains.",
+      "description": "If false, Yarn only uses the toolchains already on the machine; `yarn cargo` then fails when none matches what the workspace asks for.",
+      "type": "boolean",
+      "default": true
+    },
+    "rustDownloadMirror": {
+      "_package": "@yarnpkg/core",
+      "title": "Define where Rust toolchains are downloaded from.",
+      "description": "The base URL of a mirror of `https://static.rust-lang.org`, which must serve the channel manifests (`dist/channel-rust-<channel>.toml`).",
+      "type": "string",
+      "format": "uri",
+      "default": "https://static.rust-lang.org"
+    },
     "pypiRegistryServer": {
       "_package": "@yarnpkg/core",
       "title": "Define the PyPI registry to use when fetching Python packages.",
