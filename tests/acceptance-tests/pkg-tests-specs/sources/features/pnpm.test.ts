@@ -8,6 +8,38 @@ const {
 
 describe(`Features`, () => {
   describe(`Pnpm Mode `, () => {
+    it(`links a workspace peer back to its consumer`, makeTemporaryMonorepoEnv({
+      workspaces: [`packages/*`],
+    }, {
+      [`packages/a`]: {name: `a`, version: `1.0.0`, dependencies: {b: `workspace:*`, [`no-deps`]: `1.0.0`}},
+      [`packages/b`]: {name: `b`, version: `1.0.0`, dependencies: {[`peer-deps`]: `1.0.0`}, peerDependencies: {a: `workspace:*`}},
+    }, async ({path, run, source}) => {
+      await xfs.writeFilePromise(ppath.join(path, `.yarnrc.yml`), `nodeLinker: pnpm\n`);
+      await run(`install`);
+      await expect(source(`require('a/package.json').name`, {cwd: ppath.join(path, `packages/b`)})).resolves.toEqual(`a`);
+      // Warm installs must retain the peer link too.
+      await run(`install`);
+      await expect(source(`require('a/package.json').name`, {cwd: ppath.join(path, `packages/b`)})).resolves.toEqual(`a`);
+    }));
+
+    it.each([`same`, `different`, `missing`, `fallback`])(`preserves shared workspace peer contexts: %s`, context => makeTemporaryMonorepoEnv({
+      workspaces: [`packages/*`],
+    }, {
+      [`packages/a`]: {name: `a`, dependencies: {shared: `workspace:*`, peer: context === `fallback` ? `npm:no-deps@2.0.0` : `npm:no-deps@1.0.0`}},
+      [`packages/b`]: {name: `b`, dependencies: {shared: `workspace:*`, ...(context === `missing` ? {} : {peer: context === `same` ? `npm:no-deps@1.0.0` : `npm:no-deps@2.0.0`})}},
+      [`packages/shared`]: {name: `shared`, peerDependencies: {peer: `*`}, ...(context === `fallback` ? {dependencies: {peer: `npm:no-deps@1.0.0`}} : {})},
+    }, async ({path, run, source}) => {
+      await xfs.writeFilePromise(ppath.join(path, `.yarnrc.yml`), `nodeLinker: pnpm\n`);
+      if (context === `different` || context === `missing`) {
+        await run(`install`);
+        // A shared source directory cannot represent two different peer targets.
+        expect(await xfs.existsPromise(ppath.join(path, `packages/shared/node_modules/peer`))).toBe(false);
+      } else {
+        await run(`install`);
+        await expect(source(`require('peer/package.json').version`, {cwd: ppath.join(path, `packages/shared`)})).resolves.toEqual(`1.0.0`);
+      }
+    })());
+
     test(
       `it shouldn't crash if we recursively traverse a node_modules`,
       makeTemporaryEnv({
